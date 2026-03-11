@@ -1,0 +1,32 @@
+[project]
+name = "openclaw-screen-driver"
+version = "0.1.0"
+description = "AI-powered screen automation framework for Windows"
+requires-python = ">=3.11"
+dependencies = [
+    "mss",
+    "Pillow",
+    "numpy",
+    "opencv-python",
+    "pytesseract",
+    "ollama",
+    "transformers",
+    "faiss-cpu",
+    "torch",
+    "pywinauto",
+    "pyautogui",
+    "pynput",
+    "networkx",
+    "pyyaml",
+    "PyQt6"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock"
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,1 +1,34 @@
-# config.yaml (empty for now)
+ocsd:
+  version: "0.1.0"
+
+hardware:
+  gpu_vlm: 0
+  gpu_embeddings: 1
+
+models:
+  vlm: "qwen2-vl"
+  vlm_host: "http://localhost:11434"
+  clip: "openai/clip-vit-base-patch32"
+  whisper_model: "small"
+
+paths:
+  skills_dir: "./skills"
+  snippets_dir: "./assets/snippets"
+  faiss_index: "./assets/faiss.index"
+  replay_logs: "./logs/replays"
+
+execution:
+  mouse_duration: 0.15
+  type_interval: 0.03
+  pixel_diff_threshold: 0.08
+  hover_delay_ms: 300
+  default_confidence: 0.75
+
+api:
+  host: "0.0.0.0"
+  port: 8742
+  mcp_compatible: true
+
+hub:
+  registry_url: "https://github.com/openclaw/ocsd-hub"
+  auto_update_manifest: true
