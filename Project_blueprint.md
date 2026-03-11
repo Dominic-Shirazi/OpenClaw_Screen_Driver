@@ -266,7 +266,7 @@ HOVER LOOP (runs continuously):
 
 TAG DIALOG (recorder/dialog.py):
   Fields:
-    - Element Type: dropdown (ElementType enum), pre-filled by Qwen2-VL
+    - Element Type: dropdown (ElementType enum), pre-filled by Qwen3vl-8b
     - Label: text input, pre-filled by vision label_guess
     - Layer: dropdown (OS_UI / APP_PERSISTENT / PAGE_SPECIFIC), auto-guessed
     - Notes: free text
