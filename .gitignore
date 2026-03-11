@@ -1,0 +1,42 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# FAISS indexes (generated, potentially large)
+*.index
+*.meta.json
+
+# Model weights (never commit)
+*.bin
+*.pt
+*.onnx
+*.safetensors
+
+# Snippets and replay logs (generated at runtime)
+assets/snippets/
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.env.local
