@@ -137,11 +137,8 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
             element_type=elem.get("element_type", "unknown"),
             label=elem.get("label", ""),
             ocr_text=elem.get("label", ""),
-            relative_position={
-                "x_pct": elem["x"] / 1920,
-                "y_pct": elem["y"] / 1080,
-            },
-            notes=elem.get("notes", ""),
+            x_pct=elem["x"] / 1920,
+            y_pct=elem["y"] / 1080,
         )
 
         if elem.get("is_destination"):
