@@ -1,9 +1,12 @@
-"""Qwen2-VL local inference wrapper via Ollama.
+"""VLM inference via LiteLLM proxy (OpenAI-compatible API).
 
 Primary element type detector for OCSD. Handles all VLM-based analysis:
 - analyze_crop: identify element type, label, and visible text
 - confirm_action: verify an action produced the expected result
 - first_pass_map: scan a full screenshot for all candidate UI elements
+
+Routes through LiteLLM model groups defined in .env:
+  OCSD_VLM_MODEL → vision group (Qwen3 VL → Gemini → local)
 """
 
 from __future__ import annotations
@@ -30,22 +33,29 @@ _VALID_ELEMENT_TYPES = {e.value for e in ElementType}
 
 
 def _get_model_name() -> str:
-    """Returns the configured VLM model name."""
+    """Returns the configured VLM model group name."""
     config = get_config()
-    return config.get("models", {}).get("vlm", "qwen2-vl")
+    return config.get("models", {}).get("vlm", "vision")
 
 
-def _get_host() -> str:
-    """Returns the configured Ollama host URL."""
+def _get_client():
+    """Returns a cached OpenAI client pointing at the LiteLLM proxy."""
+    from openai import OpenAI
+
     config = get_config()
-    return config.get("models", {}).get("vlm_host", "http://localhost:11434")
+    litellm_cfg = config.get("litellm", {})
+    base_url = litellm_cfg.get("base_url", "http://localhost:4000/v1")
+    api_key = litellm_cfg.get("api_key", "no-key")
+
+    return OpenAI(base_url=base_url, api_key=api_key)
 
 
 def _encode_image_to_base64(img_path: str) -> str:
-    """Encodes an image file to base64 string for Ollama API."""
+    """Encodes an image file to a data URI for the OpenAI vision API."""
     path = Path(img_path)
     with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:image/png;base64,{b64}"
 
 
 def _ndarray_to_tempfile(img: np.ndarray) -> str:
@@ -63,8 +73,11 @@ def _ndarray_to_tempfile(img: np.ndarray) -> str:
     return tmp.name
 
 
-def _call_ollama(prompt: str, image_paths: list[str]) -> str:
-    """Makes a chat request to Ollama with images.
+def _call_vlm(prompt: str, image_paths: list[str]) -> str:
+    """Makes a chat/completions request via the LiteLLM proxy with images.
+
+    Uses the OpenAI-compatible vision API format. Images are sent as
+    base64 data URIs in the message content array.
 
     Args:
         prompt: The text prompt to send.
@@ -74,38 +87,39 @@ def _call_ollama(prompt: str, image_paths: list[str]) -> str:
         The model's response text.
 
     Raises:
-        ConnectionError: If Ollama is not reachable.
+        ConnectionError: If the LiteLLM proxy is not reachable.
         RuntimeError: If the API returns an error.
     """
-    import ollama
-
     model = _get_model_name()
-    host = _get_host()
 
-    # Build images list as base64
-    images = [_encode_image_to_base64(p) for p in image_paths]
+    # Build content array: text + images
+    content: list[dict] = [{"type": "text", "text": prompt}]
+    for img_path in image_paths:
+        data_uri = _encode_image_to_base64(img_path)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": data_uri},
+        })
 
     try:
-        client = ollama.Client(host=host)
-        response = client.chat(
+        client = _get_client()
+        response = client.chat.completions.create(
             model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": images,
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
+            max_tokens=2048,
+            temperature=0.1,
         )
-        return response["message"]["content"]
-    except ollama.ResponseError as e:
-        logger.error("Ollama API error: %s", e)
-        raise RuntimeError(f"Ollama API error: {e}") from e
+        return response.choices[0].message.content or ""
     except Exception as e:
-        logger.error("Failed to connect to Ollama at %s: %s", host, e)
-        raise ConnectionError(
-            f"Cannot reach Ollama at {host}. Is it running? Error: {e}"
-        ) from e
+        err_str = str(e)
+        # Detect connection issues vs API errors
+        if any(kw in err_str.lower() for kw in ("connection", "refused", "timeout", "unreachable")):
+            logger.error("Cannot reach LiteLLM proxy: %s", e)
+            raise ConnectionError(
+                f"Cannot reach LiteLLM proxy. Is it running? Error: {e}"
+            ) from e
+        logger.error("VLM API error: %s", e)
+        raise RuntimeError(f"VLM API error: {e}") from e
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -297,7 +311,7 @@ Rules:
 - ocr_text: extract ALL visible text, null if no readable text"""
 
     try:
-        raw_response = _call_ollama(prompt, [img_path])
+        raw_response = _call_vlm(prompt, [img_path])
         parsed = _extract_json(raw_response)
 
         return {
@@ -365,7 +379,7 @@ Rules:
 - If an error dialog or unexpected popup appeared, success is false"""
 
     try:
-        raw_response = _call_ollama(prompt, [before_img, after_img])
+        raw_response = _call_vlm(prompt, [before_img, after_img])
         parsed = _extract_json(raw_response)
 
         return {
@@ -431,7 +445,7 @@ Rules:
 - Do NOT include the same element twice"""
 
     try:
-        raw_response = _call_ollama(prompt, [screenshot_path])
+        raw_response = _call_vlm(prompt, [screenshot_path])
         parsed_items = _extract_json_array(raw_response)
 
         results: list[dict[str, Any]] = []

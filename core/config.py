@@ -2,6 +2,7 @@
 
 Reads config.yaml from the project root and provides cached access
 via get_config(). Missing keys fall back to sensible defaults.
+Environment variables from .env are loaded automatically.
 """
 
 from __future__ import annotations
@@ -11,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
+
+# Load .env from project root (before anything reads os.environ)
+_PROJECT_ROOT_FOR_ENV = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT_FOR_ENV / ".env", override=False)
 
 _config_cache: dict | None = None
 
@@ -21,9 +27,15 @@ _DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 _DEFAULTS: dict[str, Any] = {
     "ocsd": {"version": "0.1.0"},
     "hardware": {"gpu_vlm": 0, "gpu_embeddings": 1},
+    "litellm": {
+        "base_url": os.environ.get("LITELLM_BASE_URL", "http://localhost:4000/v1"),
+        "api_key": os.environ.get("LITELLM_API_KEY", ""),
+    },
     "models": {
-        "vlm": "qwen2-vl",
-        "vlm_host": "http://localhost:11434",
+        "vlm": os.environ.get("OCSD_VLM_MODEL", "vision"),
+        "quick": os.environ.get("OCSD_QUICK_MODEL", "quick"),
+        "planning": os.environ.get("OCSD_PLANNING_MODEL", "planning"),
+        "coding": os.environ.get("OCSD_CODING_MODEL", "coding"),
         "clip": "openai/clip-vit-base-patch32",
         "whisper_model": "small",
     },

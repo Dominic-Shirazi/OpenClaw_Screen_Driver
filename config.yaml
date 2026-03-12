@@ -6,8 +6,8 @@ hardware:
   gpu_embeddings: 1
 
 models:
-  vlm: "qwen2-vl"
-  vlm_host: "http://localhost:11434"
+  # Model groups routed through LiteLLM proxy (override in .env)
+  # vlm, quick, planning, coding are set via OCSD_*_MODEL env vars
   clip: "openai/clip-vit-base-patch32"
   whisper_model: "small"
 
