@@ -221,7 +221,10 @@ def execute_node(
     # Navigation actions (button_nav) always validate.
     # Only pixel-diff validate actions that should cause major screen changes.
     # Textbox clicks, same-page buttons, etc. produce minimal diff.
-    skip_validation = action_type not in ("button_nav",)
+    # Skip validation for non-navigation actions AND for the last node
+    # (terminal action has nothing to validate against).
+    is_last_node = next_node_id is None
+    skip_validation = action_type not in ("button_nav",) or is_last_node
     if skip_validation:
         logger.debug("Skipping pixel-diff validation for %s action", action_type)
         validation = ConfirmResult(
