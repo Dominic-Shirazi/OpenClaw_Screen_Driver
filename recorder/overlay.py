@@ -291,10 +291,13 @@ class OverlayController:
         """Returns whether the overlay is currently shown."""
         return self._is_active
 
-    def show(self) -> None:
-        """Shows the overlay in PASSTHROUGH mode.
+    def show(self, *, start_mode: OverlayMode = OverlayMode.PASSTHROUGH) -> None:
+        """Shows the overlay in the specified mode.
 
         Creates the overlay window and registers global hotkeys.
+
+        Args:
+            start_mode: Initial mode (PASSTHROUGH or RECORD).
         """
         if self._view is not None and self._is_active:
             logger.debug("Overlay already active")
@@ -311,7 +314,7 @@ class OverlayController:
         # Don't call activateWindow() — with WS_EX_NOACTIVATE the overlay
         # must never take focus.  Hotkeys come from pynput globally.
         self._is_active = True
-        self._set_mode(OverlayMode.PASSTHROUGH)
+        self._set_mode(start_mode)
 
         # Start global hotkeys (work even when overlay loses focus)
         self._hotkey_listener = _create_hotkey_listener(
@@ -320,7 +323,7 @@ class OverlayController:
         )
         self._hotkey_listener.start()
 
-        logger.info("Overlay shown in PASSTHROUGH mode")
+        logger.info("Overlay shown in %s mode", start_mode.name)
 
     def close(self) -> None:
         """Closes and cleans up the overlay and hotkeys."""
@@ -679,9 +682,9 @@ class _OverlayView(QGraphicsView):
         """
         mode = self._controller.mode
         if mode == OverlayMode.RECORD:
-            mode_text = "[RECORD] Click elements to tag  |  Ctrl+R = passthrough  |  Ctrl+Q = done"
+            mode_text = "[RECORD] Click elements to tag  |  Ctrl+R = passthrough  |  Ctrl+Q = save & quit"
         else:
-            mode_text = "[PASSTHROUGH] Clicks go through  |  Ctrl+R = record  |  Ctrl+Q = done"
+            mode_text = "[PASSTHROUGH] Clicks go through  |  Ctrl+R = record  |  Ctrl+Q = save & quit"
 
         font = QFont("Segoe UI", 10)
         font.setBold(True)

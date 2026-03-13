@@ -123,7 +123,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         on_mode_changed=on_mode_changed,
         on_close=on_close,
     )
-    overlay.show()
+    overlay.show(start_mode=OverlayMode.RECORD)
 
     return app.exec()
 
