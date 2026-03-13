@@ -454,13 +454,25 @@ def cmd_execute(args: argparse.Namespace) -> int:
                 return 1
             target_id = all_nodes[-1]
 
-    # Run the skill
-    replay_log = run_skill(
-        graph,
-        start_id=entry_id,
-        goal_id=target_id,
-        dry_run=args.dry_run,
-    )
+    # Run the skill — use orchestrator for full preflight + recovery
+    use_orchestrator = not args.skip_vlm  # orchestrator needs VLM for recovery
+    if use_orchestrator:
+        from mapper.orchestrator import orchestrate_skill
+
+        replay_log = orchestrate_skill(
+            graph,
+            start_id=entry_id,
+            goal_id=target_id,
+            dry_run=args.dry_run,
+            skip_vlm=args.skip_vlm,
+        )
+    else:
+        replay_log = run_skill(
+            graph,
+            start_id=entry_id,
+            goal_id=target_id,
+            dry_run=args.dry_run,
+        )
 
     # Save replay log
     cfg = get_config()
