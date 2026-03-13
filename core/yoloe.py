@@ -31,6 +31,66 @@ logger = logging.getLogger(__name__)
 _model: Any | None = None
 _model_path: str = ""
 
+# ---------------------------------------------------------------------------
+# Text-prompt class definitions (Wave 1)
+# ---------------------------------------------------------------------------
+
+# Short concrete nouns — aligned with CLIP/LVIS vocabulary for best accuracy.
+# Null classes (text_label, image) reduce false positives on similar-looking elements.
+ELEMENT_CLASSES: list[str] = [
+    "button", "icon", "text field", "checkbox", "dropdown",
+    "scrollbar", "tab", "link", "toggle", "slider", "menu item",
+    # Null / disambiguation classes
+    "text label", "image",
+]
+
+# Per-class minimum confidence thresholds.
+# Open-vocabulary YOLOE produces valid detections at very low confidence.
+# UI-novel classes need lower thresholds than COCO-adjacent ones.
+CLASS_CONF_THRESHOLDS: dict[str, float] = {
+    "button": 0.03,
+    "icon": 0.05,
+    "text field": 0.02,
+    "checkbox": 0.03,
+    "dropdown": 0.02,
+    "scrollbar": 0.05,
+    "tab": 0.03,
+    "link": 0.02,
+    "toggle": 0.03,
+    "slider": 0.05,
+    "menu item": 0.02,
+    "text label": 0.03,
+    "image": 0.05,
+}
+
+# YOLOE class name → ElementType enum value string.
+# Null classes map to non-interactive types.
+YOLOE_TO_ELEMENT_TYPE: dict[str, str] = {
+    "button": "button",
+    "icon": "icon",
+    "text field": "textbox",
+    "checkbox": "toggle",
+    "dropdown": "dropdown",
+    "scrollbar": "scrollbar",
+    "tab": "tab",
+    "link": "link",
+    "toggle": "toggle",
+    "slider": "scrollbar",
+    "menu item": "button",
+    "text label": "read_here",
+    "image": "image",
+}
+
+# Maximum bbox area as fraction of image — filter out "group" detections
+MAX_BBOX_AREA_FRACTION = 0.40
+
+# Minimum bbox dimensions in pixels — filter noise
+MIN_BBOX_W = 5
+MIN_BBOX_H = 5
+
+# Cached text embeddings (computed once, reused for all predictions)
+_element_embeddings: Any | None = None
+
 
 @dataclass
 class YOLOEMatch:
@@ -62,6 +122,135 @@ def _load_model() -> Any:
 
     _model = YOLOE(_model_path)
     return _model
+
+
+# ---------------------------------------------------------------------------
+# Text-prompt embedding cache
+# ---------------------------------------------------------------------------
+
+def init_text_embeddings() -> None:
+    """Pre-compute and cache CLIP text embeddings for element classes.
+
+    Call this once at app startup. After this, YOLOE can run
+    text-prompt detection without loading CLIP on every predict() call.
+
+    Safe to call multiple times — embeddings are computed only once.
+    """
+    global _element_embeddings
+
+    if _element_embeddings is not None:
+        return
+
+    model = _load_model()
+
+    try:
+        logger.info("Computing YOLOE text embeddings for %d element classes...", len(ELEMENT_CLASSES))
+        _element_embeddings = model.model.get_text_pe(ELEMENT_CLASSES)
+        model.model.set_classes(ELEMENT_CLASSES, _element_embeddings)
+        logger.info("YOLOE text embeddings cached successfully")
+    except Exception as e:
+        logger.warning("Failed to cache text embeddings: %s", e)
+        _element_embeddings = None
+
+
+def _ensure_text_embeddings() -> bool:
+    """Ensures text embeddings are loaded. Returns True if ready."""
+    if _element_embeddings is None:
+        init_text_embeddings()
+    return _element_embeddings is not None
+
+
+# ---------------------------------------------------------------------------
+# Text-prompt detection (Wave 1 core feature)
+# ---------------------------------------------------------------------------
+
+def detect_all_elements(
+    screen: np.ndarray,
+    *,
+    conf: float = 0.01,
+    iou: float = 0.4,
+) -> list[dict[str, Any]]:
+    """Detect all UI elements on screen using YOLOE text-prompt mode.
+
+    Uses pre-cached CLIP text embeddings to find buttons, icons,
+    textboxes, checkboxes, dropdowns, and other interactive UI elements
+    in a single inference pass.
+
+    Args:
+        screen: BGR full-screen capture as numpy array.
+        conf: Raw confidence threshold for YOLOE predict(). Use low
+              values (0.01) — per-class filtering happens in post-processing.
+        iou: IoU threshold for NMS.
+
+    Returns:
+        List of candidate dicts compatible with OverlayController.set_candidates():
+        - rect: {x, y, w, h} in pixels
+        - type_guess: ElementType string value
+        - label_guess: YOLOE class name (VLM provides real labels later)
+        - confidence: 0.0-1.0
+        - ocr_text: None (OCR not run here)
+    """
+    if not _ensure_text_embeddings():
+        logger.warning("Text embeddings not available, cannot run text-prompt detection")
+        return []
+
+    model = _load_model()
+    sh, sw = screen.shape[:2]
+    image_area = sh * sw
+
+    try:
+        results = model.predict(screen, conf=conf, iou=iou, verbose=False)
+    except Exception as e:
+        logger.warning("YOLOE text-prompt detection failed: %s", e)
+        return []
+
+    candidates: list[dict[str, Any]] = []
+
+    for result in results:
+        boxes = result.boxes
+        if boxes is None or len(boxes) == 0:
+            continue
+
+        for i in range(len(boxes)):
+            cls_id = int(boxes.cls[i])
+            if cls_id >= len(ELEMENT_CLASSES):
+                continue
+
+            cls_name = ELEMENT_CLASSES[cls_id]
+            conf_val = float(boxes.conf[i])
+
+            # Per-class confidence filtering
+            min_conf = CLASS_CONF_THRESHOLDS.get(cls_name, 0.03)
+            if conf_val < min_conf:
+                continue
+
+            xyxy = boxes.xyxy[i].cpu().numpy().astype(int)
+            bx1, by1, bx2, by2 = xyxy
+            bw = bx2 - bx1
+            bh = by2 - by1
+
+            # Filter oversized detections (YOLOE sometimes detects "groups")
+            if image_area > 0 and (bw * bh) / image_area > MAX_BBOX_AREA_FRACTION:
+                continue
+
+            # Filter tiny detections (noise)
+            if bw < MIN_BBOX_W or bh < MIN_BBOX_H:
+                continue
+
+            element_type = YOLOE_TO_ELEMENT_TYPE.get(cls_name, "unknown")
+
+            candidates.append({
+                "rect": {"x": int(bx1), "y": int(by1), "w": int(bw), "h": int(bh)},
+                "type_guess": element_type,
+                "label_guess": cls_name,
+                "confidence": round(conf_val, 4),
+                "ocr_text": None,
+            })
+
+    # Sort by confidence descending
+    candidates.sort(key=lambda c: c["confidence"], reverse=True)
+    logger.info("YOLOE text-prompt detected %d UI elements", len(candidates))
+    return candidates
 
 
 # ---------------------------------------------------------------------------
