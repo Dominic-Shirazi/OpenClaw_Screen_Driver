@@ -81,6 +81,29 @@ def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
     # Stage 4: VLM full scan (stub)
     logger.debug("VLM full scan locate not yet implemented, skipping")
 
+    # Stage 5 (fallback): Use stored position coordinates
+    pos = node_data.get("relative_position", {})
+    x_pct = pos.get("x_pct")
+    y_pct = pos.get("y_pct")
+    if x_pct is not None and y_pct is not None:
+        import pyautogui
+        from core.types import Point
+
+        sw, sh = pyautogui.size()
+        px = int(x_pct * sw)
+        py = int(y_pct * sh)
+        logger.warning(
+            "Located [%s] via position fallback at (%d, %d) — "
+            "no visual confirmation",
+            node_id[:8], px, py,
+        )
+        return LocateResult(
+            point=Point(px, py),
+            confidence=0.3,  # low confidence — blind replay
+            method="direct",
+            snippet=None,
+        )
+
     raise ElementNotFoundError(node_id, f"All locate stages failed for node {node_id[:8]}")
 
 
@@ -138,7 +161,7 @@ def execute_action(
         point.y,
     )
 
-    if action_type in ("button", "button_nav", "toggle", "dropdown", "tab"):
+    if action_type in ("button", "button_nav", "toggle", "dropdown", "tab", "click"):
         click(point.x, point.y, dry_run=dry_run)
     elif action_type == "textbox":
         click(point.x, point.y, dry_run=dry_run)

@@ -130,9 +130,12 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
     """Builds a graph from recorded elements and saves as a skill file."""
+    import pyautogui
+
     from mapper.export import export_skill, save_skill_to_file
     from mapper.graph import OCSDGraph
 
+    screen_w, screen_h = pyautogui.size()
     graph = OCSDGraph()
 
     prev_node_id: str | None = None
@@ -141,17 +144,29 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
             element_type=elem.get("element_type", "unknown"),
             label=elem.get("label", ""),
             ocr_text=elem.get("label", ""),
-            x_pct=elem["x"] / 1920,
-            y_pct=elem["y"] / 1080,
+            x_pct=elem["x"] / screen_w,
+            y_pct=elem["y"] / screen_h,
+            resolution=(screen_w, screen_h),
         )
 
         if elem.get("is_destination"):
             graph.update_node(node_id, element_type="read_here")
 
         if prev_node_id is not None:
-            action_type = "click"
-            if elem.get("element_type") == "textbox":
-                action_type = "type"
+            # Map element_type to graph action_type
+            etype = elem.get("element_type", "unknown")
+            if etype == "textbox":
+                action_type = "textbox"
+            elif etype in ("button", "icon", "link", "unknown"):
+                action_type = "button"
+            elif etype == "tab":
+                action_type = "tab"
+            elif etype == "dropdown":
+                action_type = "dropdown"
+            elif etype == "toggle":
+                action_type = "toggle"
+            else:
+                action_type = "button"
             graph.add_edge(prev_node_id, node_id, action_type=action_type)
 
         prev_node_id = node_id
