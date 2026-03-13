@@ -16,6 +16,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 from core.config import get_config, load_config
 
@@ -74,6 +75,34 @@ def _ensure_dirs() -> None:
         d = paths.get(key)
         if d:
             Path(d).mkdir(parents=True, exist_ok=True)
+
+
+def _trigger_smart_detect(overlay: Any) -> None:
+    """Captures the screen and runs smart detection in the background.
+
+    Results are marshaled back to the Qt main thread and rendered
+    as candidate bounding boxes on the overlay.
+
+    Args:
+        overlay: The OverlayController to populate with candidates.
+    """
+    from PyQt6.QtCore import QTimer as _QTimer
+
+    try:
+        from core.capture import screenshot_full
+        from recorder.smart_detect import detect_ui_elements_async
+
+        screenshot = screenshot_full()
+    except Exception as e:
+        logger.warning("Smart detect: could not capture screen: %s", e)
+        return
+
+    def _on_results(candidates: list[dict]) -> None:
+        # Marshal to Qt main thread
+        _QTimer.singleShot(0, lambda: overlay.set_candidates(candidates))
+
+    detect_ui_elements_async(screenshot, _on_results)
+    logger.info("Smart detection triggered (%d x %d)", screenshot.shape[1], screenshot.shape[0])
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -144,6 +173,8 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     def on_mode_changed(mode: OverlayMode) -> None:
         logger.info("Overlay mode: %s", mode.name)
+        if mode == OverlayMode.RECORD:
+            _trigger_smart_detect(overlay)
 
     def on_close() -> None:
         logger.info("Recording ended. Captured %d elements.", len(recorded_elements))
