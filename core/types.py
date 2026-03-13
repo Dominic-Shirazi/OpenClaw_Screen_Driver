@@ -47,7 +47,7 @@ class Rect:
 class LocateResult:
     """Result of attempting to locate an element on screen."""
     point: Point
-    method: str          # "ocr" | "embedding" | "vlm" | "direct"
+    method: str          # "ocr" | "yoloe" | "yoloe_vlm" | "vlm" | "direct"
     confidence: float
     rect: Rect | None = None
 
@@ -101,7 +101,7 @@ class ReplayStep:
     """A single step in a replay log."""
     node_id: str
     located_at: Point | None
-    locate_method: str   # "ocr" | "embedding" | "vlm" | "failed"
+    locate_method: str   # "ocr" | "yoloe" | "yoloe_vlm" | "vlm" | "failed"
     vlm_confidence: float
     pixel_diff_pct: float
     success: bool

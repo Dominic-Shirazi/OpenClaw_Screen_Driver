@@ -20,4 +20,7 @@ class ElementType(Enum):
     IMAGE          = "image"           # non-interactive image (may contain text)
     MODAL          = "modal"           # popup/overlay container
     NOTIFICATION   = "notification"    # toast, alert, status message
+    DESTINATION    = "destination"     # success state node (page loaded, result shown)
+    BRANCH_POINT   = "branch_point"   # conditional fork (if/else in the flow)
+    FINGERPRINT    = "fingerprint"    # app identity checkpoint (YOLO-E verifies app state)
     UNKNOWN        = "unknown"         # fallback, requires human tag

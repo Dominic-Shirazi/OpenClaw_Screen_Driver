@@ -477,6 +477,37 @@ class OCSDGraph:
         """Returns all READ_HERE nodes (data extraction points)."""
         return self.get_nodes_by_type("read_here")
 
+    def get_fingerprint_nodes(self) -> list[str]:
+        """Returns all FINGERPRINT nodes (app identity checkpoints)."""
+        return self.get_nodes_by_type("fingerprint")
+
+    def get_destination_nodes(self) -> list[str]:
+        """Returns all DESTINATION nodes (success state markers)."""
+        return self.get_nodes_by_type("destination")
+
+    def get_branch_points(self) -> list[str]:
+        """Returns all BRANCH_POINT nodes (conditional forks)."""
+        return self.get_nodes_by_type("branch_point")
+
+    def get_branch_edges(self, node_id: str) -> list[dict[str, Any]]:
+        """Returns all outgoing edges from a branch point with their conditions.
+
+        Args:
+            node_id: The UUID of a branch_point node.
+
+        Returns:
+            List of edge data dicts, each with branch_condition and target info.
+        """
+        if node_id not in self._graph.nodes:
+            return []
+        result = []
+        for _, target, data in self._graph.out_edges(node_id, data=True):
+            if data.get("is_branch", False):
+                edge_info = dict(data)
+                edge_info["target_label"] = self._graph.nodes[target].get("label", "")
+                result.append(edge_info)
+        return result
+
     @property
     def nx_graph(self) -> nx.DiGraph:
         """Exposes the underlying NetworkX DiGraph for pathfinding etc."""
