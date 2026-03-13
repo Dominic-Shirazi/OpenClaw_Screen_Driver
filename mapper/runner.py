@@ -23,6 +23,7 @@ from core.config import get_config
 from core.executor import click, type_text, scroll
 from core.ocr import find_text_on_screen
 from core.types import (
+    ConfirmResult,
     ElementNotFoundError,
     LocateResult,
     ReplayLog,
@@ -181,9 +182,20 @@ def execute_action(
     # After screenshot
     after_img = screenshot_full()
 
-    # Validate
-    intended = f"{action_type} on {graph.get_node(source_id).get('label', source_id[:8])}"
-    validation = validate_action(before_img, after_img, intended)
+    # Validate — skip pixel-diff for same-page actions (textbox focus,
+    # intermediate clicks) where minimal visual change is expected.
+    # Navigation actions (button_nav) always validate.
+    skip_validation = action_type in ("textbox",)
+    if skip_validation:
+        logger.debug("Skipping pixel-diff validation for %s action", action_type)
+        validation = ConfirmResult(
+            success=True,
+            confidence=0.6,
+            notes=f"Validation skipped for {action_type} (locate succeeded)",
+        )
+    else:
+        intended = f"{action_type} on {graph.get_node(source_id).get('label', source_id[:8])}"
+        validation = validate_action(before_img, after_img, intended)
 
     # Record stats on the graph
     graph.record_execution(source_id, target_id, validation.success)

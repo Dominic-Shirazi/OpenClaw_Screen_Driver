@@ -140,8 +140,11 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
 
     prev_node_id: str | None = None
     for elem in elements:
+        # Normalize ElementType enum to string value
+        raw_et = elem.get("element_type", "unknown")
+        et_str = raw_et.value if hasattr(raw_et, "value") else str(raw_et)
         node_id = graph.add_node(
-            element_type=elem.get("element_type", "unknown"),
+            element_type=et_str,
             label=elem.get("label", ""),
             ocr_text=elem.get("label", ""),
             x_pct=elem["x"] / screen_w,
@@ -154,11 +157,15 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
 
         if prev_node_id is not None:
             # Map element_type to graph action_type
-            etype = elem.get("element_type", "unknown")
+            # TagDialog returns ElementType enum — normalize to string
+            raw_etype = elem.get("element_type", "unknown")
+            etype = raw_etype.value if hasattr(raw_etype, "value") else str(raw_etype)
             if etype == "textbox":
                 action_type = "textbox"
             elif etype in ("button", "icon", "link", "unknown"):
                 action_type = "button"
+            elif etype == "button_nav":
+                action_type = "button_nav"
             elif etype == "tab":
                 action_type = "tab"
             elif etype == "dropdown":
