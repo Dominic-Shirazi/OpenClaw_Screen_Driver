@@ -406,8 +406,8 @@ class TagDialog(QDialog):
         # Dialog size — taller to fit explainer
         self.setFixedSize(520, 420)
 
-        # Position near the clicked element (offset so we don't cover it)
-        self.move(x + 20, y + 20)
+        # Position near the clicked element, clamped to screen bounds
+        self._clamp_to_screen(x + 20, y + 20)
 
         # Focus the label input so user can start typing immediately
         self.label_input.setFocus()
@@ -419,6 +419,34 @@ class TagDialog(QDialog):
             y + 20,
             element_type_guess,
         )
+
+    def _clamp_to_screen(self, target_x: int, target_y: int) -> None:
+        """Moves the dialog to (target_x, target_y), clamped to screen bounds.
+
+        Ensures the dialog is fully visible — even if the element is near
+        the taskbar, screen edges, or on a secondary monitor.
+
+        Args:
+            target_x: Desired X position.
+            target_y: Desired Y position.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        screen = QApplication.screenAt(self.pos())
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            self.move(target_x, target_y)
+            return
+
+        geom = screen.availableGeometry()  # excludes taskbar
+        dw, dh = self.width(), self.height()
+
+        # Clamp so the full dialog fits within available screen area
+        final_x = max(geom.x(), min(target_x, geom.x() + geom.width() - dw))
+        final_y = max(geom.y(), min(target_y, geom.y() + geom.height() - dh))
+
+        self.move(final_x, final_y)
 
     def _populate_type_combo(self) -> None:
         """Fills the type dropdown with grouped items and separator headers."""

@@ -109,8 +109,8 @@ def _try_refine_bbox(
         from core.capture import screenshot_full
         from core.types import Rect
         from core.yoloe import infer_bbox_at_point, refine_bbox
-    except ImportError:
-        logger.debug("YOLOE not available, skipping bbox refinement")
+    except (ImportError, OSError) as e:
+        logger.debug("YOLOE not available, skipping bbox refinement: %s", e)
         return None
 
     try:
