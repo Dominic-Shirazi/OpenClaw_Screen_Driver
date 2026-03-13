@@ -1,7 +1,7 @@
 # OCSD Detection Pipeline Redesign
 
 **Date:** 2026-03-13
-**Status:** Draft
+**Status:** Draft (rev 2 — post spec review)
 **Scope:** Recording detection, VLM integration, replay locate cascade, annotation reuse
 
 ## Problem Statement
@@ -20,6 +20,28 @@ Smart detection is architecturally present but functionally broken.
 2. **VLM never gives bounding boxes.** It answers questions about cropped images and diagnoses failures.
 3. **Local-first, progressively wider.** Search near the expected position first, expand scope only on failure.
 4. **Don't re-boil the ocean.** If a page is already annotated, reuse those annotations.
+5. **Graceful degradation.** Every AI-dependent step has a fallback. If YOLOE returns 0 elements, fall back to OCR detection. If VLM is unavailable, TagDialog still works (just without pre-population). If CLIP is unavailable, skip embedding stages.
+6. **Backward compatibility.** Existing skill JSON files recorded without `action_type` or `parent_area_id` continue to work. Missing fields get sensible defaults (action_type derived from element_type, no area scoping).
+
+## Risk: YOLOE Text-Prompt on UI Elements
+
+YOLOE's text-prompt mode uses CLIP embeddings trained on natural images (COCO-like).
+UI-specific classes ("textbox", "dropdown", "browser_chrome") are not in COCO.
+
+**Mandatory go/no-go gate:** Wave 1 begins with a benchmark of YOLOE text-prompt
+detection on 3-5 real UI screenshots (Windows desktop, browser, form page). If YOLOE
+cannot reliably detect UI elements (< 50% recall on obvious elements), the fallback
+plan is:
+
+- **Fallback A:** Use YOLOE in standard detection mode (COCO classes) to find
+  generic objects, then use VLM on crops to classify as UI elements. Slower but
+  does not depend on text-prompt quality for UI classes.
+- **Fallback B:** Use a UI-specific YOLO model (e.g., fine-tuned on UI datasets
+  like RICO or WebUI) instead of YOLOE text-prompt.
+- **Fallback C:** Use Windows accessibility tree (UIA) as primary detection source,
+  with YOLOE visual-prompt for non-accessible elements.
+
+The benchmark script is the first deliverable of Wave 1, before any pipeline changes.
 
 ## Architecture: 3-Layer Detection Model
 
@@ -87,6 +109,34 @@ Two embedding sets are maintained:
 - `_element_embeddings`: for element detection classes
 
 These are swapped in/out via `set_classes()` before each detection pass.
+
+**API note:** Verified working with ultralytics 8.4.21 and yoloe-26s-seg.pt on the
+project machine. Text-prompt mode uses the standard `model.predict()` after
+`set_classes()` — no special predictor class needed (unlike visual-prompt mode which
+requires `YOLOEVPSegPredictor`). The ultralytics internal methods `get_text_pe()` and
+`set_classes()` should be wrapped in a version-checked helper in case the API changes
+in future ultralytics releases.
+
+### Fallback When YOLOE Detects 0 Elements
+
+If YOLOE returns zero detections after both passes:
+
+- **Annotate mode:** Show overlay message "No elements detected. Draw boxes manually
+  or try OCR detection." Fall back to OCR-only detection (current `smart_detect.py`
+  fallback path). User can still draw boxes manually.
+- **Workflow mode:** Show overlay message "No elements detected — click or draw to
+  tag manually." YOLOE refinement still works on user-drawn boxes/clicks.
+- Log the zero-detection event with screenshot metadata for debugging.
+
+### Fallback When VLM Is Unavailable
+
+If LiteLLM proxy is unreachable or returns errors:
+
+- **Annotate mode:** YOLOE detections still appear on overlay. TagDialogs open with
+  YOLOE class name as `element_type` guess and no label. User fills in manually.
+  OCR text (from Tesseract) is used for label hints where available.
+- **Workflow mode:** Same — click-to-tag works, VLM label is simply empty.
+- Log the VLM failure once, not per-element.
 
 ## Recording UX
 
@@ -232,25 +282,61 @@ Elements keep the current bright color scheme.
 }
 ```
 
+### Backward Compatibility
+
+Existing skill JSON files lack `action_type` and `parent_area_id`. The system handles this:
+
+- **Missing `action_type` on node:** Derive from `element_type` using the existing
+  `_action_type_for_node()` mapping in runner.py. This is the current behavior.
+- **Missing `parent_area_id`:** Skip area-scoped search (Stage 2) in replay cascade.
+  Fall through to Stage 3 (full-screen search).
+- **Missing `action_type` on edge:** Use the derived value from the source node's
+  element_type, same as current behavior.
+- New `action_type` field, when present, takes precedence over the derived mapping.
+
+### ElementType Enum Alignment
+
+The spec's area classes must map to existing `ElementType` values:
+
+| Spec area class | ElementType enum value |
+|----------------|----------------------|
+| taskbar | region_toolbar (reuse) |
+| browser_chrome | region_chrome |
+| sidebar | region_sidebar |
+| dialog | region_modal |
+| content_area | region_content |
+| menu_bar | region_menu |
+| toolbar | region_toolbar |
+| system_tray | region_custom (with label "system_tray") |
+| status_bar | region_footer (reuse) |
+| navigation_panel | region_sidebar (reuse) |
+
+No new enum values needed. YOLOE class names are distinct from ElementType values —
+the mapping happens in `smart_detect.py` when building candidate dicts.
+
 ### Global Areas File
 
-`assets/global_areas.json`:
+`assets/global_areas.json` — uses percentage-based coordinates for resolution independence:
 ```json
 {
   "os": "windows",
-  "resolution": [1920, 1080],
   "areas": [
-    {"type": "taskbar", "rect": {"x": 0, "y": 1040, "w": 1920, "h": 40}},
-    {"type": "system_tray", "rect": {"x": 1700, "y": 1040, "w": 220, "h": 40}}
+    {"type": "taskbar", "rect_pct": {"x": 0.0, "y": 0.963, "w": 1.0, "h": 0.037}},
+    {"type": "system_tray", "rect_pct": {"x": 0.885, "y": 0.963, "w": 0.115, "h": 0.037}}
   ]
 }
 ```
+
+Percentages are resolved to pixels using the current screen resolution at runtime.
 
 ## Implementation Waves
 
 ### Wave 1: YOLOE Detection Foundation
 
 **Goal:** Fix "nothing highlighted" — users see detected elements on screen.
+
+**Gate:** Begins with YOLOE text-prompt benchmark. If benchmark fails (< 50% recall),
+execute fallback plan before proceeding.
 
 Files touched:
 - `core/yoloe.py` — add `detect_all_elements()` using text-prompt mode
@@ -259,11 +345,14 @@ Files touched:
 - `main.py` — update `_trigger_smart_detect` to use new pipeline
 
 Scope:
-- Single-pass YOLOE text-prompt detection (benchmark single vs two-pass)
+- **First:** Benchmark script — test YOLOE text-prompt on 3-5 real screenshots
+- Single-pass YOLOE text-prompt detection (benchmark single vs two-pass timing)
 - Text embedding caching at startup
 - VLM labeling on-click only (workflow mode)
 - No area hierarchy yet — flat element detection on full screen
 - Existing TagDialog unchanged (no action type dropdown yet)
+- Fallback to OCR detection if YOLOE returns 0 elements
+- Performance target: detection complete in < 2 seconds on GPU
 
 ### Wave 2: Full Recording Pipeline
 
@@ -300,6 +389,20 @@ to find optimal phrasing before hardcoding.
 
 Wave 3 specific: replay a previously-recorded skill end-to-end with the new cascade.
 
+## Performance Budget
+
+| Context | Stage | Target |
+|---------|-------|--------|
+| Recording | YOLOE full-screen detection | < 500ms (GPU) |
+| Recording | YOLOE per-area element detection | < 200ms per area |
+| Recording | VLM single-crop labeling | < 3s (network dependent) |
+| Recording | Total detection + render | < 2s (excluding VLM) |
+| Replay | Stage 1 (YOLOE local) | < 100ms |
+| Replay | Stage 2 (area-scoped) | < 500ms |
+| Replay | Stage 3 (full-screen) | < 1s |
+| Replay | Stage 4 (OCR) | < 500ms |
+| Replay | Stage 5 (VLM diagnostic) | < 5s |
+
 ## Open Questions
 
 1. **Single-pass vs two-pass:** Should be resolved empirically in Wave 1.
@@ -309,3 +412,6 @@ Wave 3 specific: replay a previously-recorded skill end-to-end with the new casc
    needs empirical testing with CLIP embeddings against real UI screenshots.
 3. **drag_to action:** Needs a second point. Defer to future wave or implement
    as "click element A, drag to element B" using two sequential nodes?
+4. **Input spec visibility:** TagDialog currently shows input spec fields only for
+   textbox element_type. With the new action_type dropdown, input spec should also
+   appear when action_type is "type_text" regardless of element_type.
