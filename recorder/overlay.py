@@ -44,20 +44,37 @@ WS_EX_NOACTIVATE = 0x08000000
 
 # Color map for element types (RGBA)
 _TYPE_COLORS: dict[str, tuple[int, int, int, int]] = {
-    "textbox": (0, 150, 255, 140),       # Blue
-    "button": (0, 200, 0, 140),          # Green
-    "button_nav": (0, 255, 100, 140),    # Bright green
-    "toggle": (255, 165, 0, 140),        # Orange
-    "tab": (128, 0, 128, 140),           # Purple
-    "dropdown": (255, 200, 0, 140),      # Gold
-    "scrollbar": (128, 128, 128, 100),   # Gray
-    "read_here": (255, 0, 0, 140),       # Red
-    "drag_source": (0, 255, 255, 140),   # Cyan
-    "drag_target": (0, 200, 200, 140),   # Dark cyan
-    "image": (200, 200, 200, 80),        # Light gray
-    "modal": (255, 100, 100, 100),       # Light red
-    "notification": (255, 255, 0, 140),  # Yellow
-    "unknown": (100, 100, 100, 100),     # Dark gray
+    # Interactive
+    "textbox": (0, 150, 255, 140),         # Blue
+    "button": (0, 200, 0, 140),            # Green
+    "button_nav": (0, 255, 100, 140),      # Bright green
+    "toggle": (255, 165, 0, 140),          # Orange
+    "tab": (128, 0, 128, 140),             # Purple
+    "dropdown": (255, 200, 0, 140),        # Gold
+    "scrollbar": (128, 128, 128, 100),     # Gray
+    "link": (0, 180, 230, 140),            # Light blue
+    "icon": (180, 180, 0, 140),            # Olive
+    "drag_source": (0, 255, 255, 140),     # Cyan
+    "drag_target": (0, 200, 200, 140),     # Dark cyan
+    # Structural regions (distinct muted tones)
+    "region_chrome": (180, 120, 60, 80),   # Brown
+    "region_menu": (160, 80, 160, 80),     # Mauve
+    "region_sidebar": (60, 140, 130, 80),  # Teal
+    "region_content": (100, 140, 200, 60), # Soft blue
+    "region_form": (200, 160, 80, 80),     # Warm tan
+    "region_header": (140, 100, 180, 80),  # Lavender
+    "region_footer": (100, 120, 100, 80),  # Sage
+    "region_toolbar": (160, 140, 100, 80), # Khaki
+    "region_modal": (200, 80, 80, 80),     # Muted red
+    "region_custom": (120, 120, 180, 80),  # Slate blue
+    "landmark": (255, 200, 0, 120),        # Bright gold
+    # Static / read-only
+    "read_here": (255, 0, 0, 140),         # Red
+    "image": (200, 200, 200, 80),          # Light gray
+    "modal": (255, 100, 100, 100),         # Light red
+    "notification": (255, 255, 0, 140),    # Yellow
+    # Meta
+    "unknown": (100, 100, 100, 100),       # Dark gray
 }
 
 _DEFAULT_COLOR = (100, 100, 100, 100)
@@ -434,7 +451,7 @@ class OverlayController:
 
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
 
-    def _handle_selection(self, x: int, y: int, w: int, h: int) -> None:
+    def _handle_selection(self, x: int, y: int, w: int, h: int) -> bool:
         """Handles a completed selection (point click or bounding box drag).
 
         For point clicks (w=0, h=0), finds the candidate at the click point.
@@ -445,6 +462,9 @@ class OverlayController:
             y: Top-left Y (or click Y for point clicks).
             w: Width of bounding box (0 for point click).
             h: Height of bounding box (0 for point click).
+
+        Returns:
+            True if the element was accepted (recorded), False if skipped.
         """
         if w > 0 and h > 0:
             # Bounding box — find candidate at center
@@ -455,11 +475,16 @@ class OverlayController:
             matched = self._find_candidate_at(x, y)
             logger.info("Point click: (%d, %d)", x, y)
 
+        accepted = False
         if self._on_element_clicked:
             try:
-                self._on_element_clicked(x, y, w, h, matched)
+                # Callback returns True if element was recorded, False if skipped
+                result = self._on_element_clicked(x, y, w, h, matched)
+                accepted = bool(result)
             except Exception as e:
                 logger.error("on_element_clicked callback error: %s", e)
+
+        return accepted
 
     def _find_candidate_at(self, x: int, y: int) -> dict[str, Any] | None:
         """Finds the candidate element closest to a screen coordinate.
@@ -822,14 +847,17 @@ class _OverlayView(QGraphicsView):
 
             min_drag = self._controller._MIN_DRAG_PX
             if w >= min_drag and h >= min_drag:
-                # Bounding box selection — draw a persistent rect
-                pen = QPen(QColor(0, 255, 255, 200))
-                pen.setWidth(2)
-                brush = QBrush(QColor(0, 255, 255, 40))
-                self.scene().addRect(QRectF(x1, y1, w, h), pen, brush)
-                self._controller._handle_selection(
+                # Bounding box — show pending rect, finalize after dialog
+                accepted = self._controller._handle_selection(
                     int(x1), int(y1), int(w), int(h),
                 )
+                if accepted:
+                    # Draw persistent confirmed rect (cyan solid)
+                    pen = QPen(QColor(0, 255, 255, 200))
+                    pen.setWidth(2)
+                    brush = QBrush(QColor(0, 255, 255, 40))
+                    self.scene().addRect(QRectF(x1, y1, w, h), pen, brush)
+                # If skipped, no persistent rect — clean exit
             else:
                 # Point click — use the original press position
                 sx = int(self._drag_start.x())

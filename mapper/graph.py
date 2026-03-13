@@ -102,6 +102,7 @@ class OCSDGraph:
         h_pct: float = 0.0,
         resolution: tuple[int, int] = (1920, 1080),
         confidence_threshold: float = 0.75,
+        context_links: list[dict[str, str]] | None = None,
     ) -> str:
         """Adds a new element node to the graph.
 
@@ -120,6 +121,10 @@ class OCSDGraph:
             h_pct: Bounding box height as fraction of screen height (0.0-1.0). 0 = point click.
             resolution: Screen resolution when this node was recorded [w, h].
             confidence_threshold: Minimum match confidence for locating this element.
+            context_links: Navigational context — list of dicts describing where
+                this element leads or what page/state it belongs to. Each dict
+                has keys like "url", "page_title", "app_state", "parent_region".
+                Used for building the site/app GPS map.
 
         Returns:
             The node_id of the newly added node.
@@ -165,6 +170,7 @@ class OCSDGraph:
             },
             last_seen_resolution=list(resolution),
             confidence_threshold=confidence_threshold,
+            context_links=context_links or [],
             verified_count=0,
             fail_count=0,
             created_at=now,

@@ -88,8 +88,12 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     recorded_elements: list[dict] = []
 
-    def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> None:
-        """Handle an element selection (click or bbox) during recording."""
+    def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> bool:
+        """Handle an element selection (click or bbox) during recording.
+
+        Returns:
+            True if element was recorded, False if skipped/cancelled.
+        """
         if w > 0 and h > 0:
             logger.info("Bbox at (%d, %d) %dx%d, candidate=%s", x, y, w, h, candidate is not None)
         else:
@@ -126,6 +130,8 @@ def cmd_record(args: argparse.Namespace) -> int:
                     result["bbox_h"] = 0
                 recorded_elements.append(result)
                 logger.info("Recorded: %s (%s) bbox=%dx%d", result.get("label"), result.get("element_type"), w, h)
+                return True
+        return False
 
     def on_mode_changed(mode: OverlayMode) -> None:
         logger.info("Overlay mode: %s", mode.name)
