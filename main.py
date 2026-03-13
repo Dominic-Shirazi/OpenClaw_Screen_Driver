@@ -88,9 +88,16 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     recorded_elements: list[dict] = []
 
-    def on_element_clicked(x: int, y: int, candidate: dict | None) -> None:
-        """Handle an element click during recording."""
-        logger.info("Click at (%d, %d), candidate=%s", x, y, candidate is not None)
+    def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> None:
+        """Handle an element selection (click or bbox) during recording."""
+        if w > 0 and h > 0:
+            logger.info("Bbox at (%d, %d) %dx%d, candidate=%s", x, y, w, h, candidate is not None)
+        else:
+            logger.info("Click at (%d, %d), candidate=%s", x, y, candidate is not None)
+
+        # For bounding boxes, position the dialog at the center of the box
+        dialog_x = x + w // 2 if w > 0 else x
+        dialog_y = y + h // 2 if h > 0 else y
 
         dialog = TagDialog(
             element_type_guess=candidate.get("type_guess", "unknown") if candidate else "unknown",
@@ -98,16 +105,27 @@ def cmd_record(args: argparse.Namespace) -> int:
             ocr_text=candidate.get("ocr_text") if candidate else None,
             layer_guess=candidate.get("layer_guess", "page_specific") if candidate else "page_specific",
             uia_hint=candidate.get("uia_hint") if candidate else None,
-            x=x,
-            y=y,
+            x=dialog_x,
+            y=dialog_y,
         )
         if dialog.exec():
             result = dialog.get_result()
             if result:
-                result["x"] = x
-                result["y"] = y
+                # For bounding boxes, store center as x/y for backward compat
+                if w > 0 and h > 0:
+                    result["x"] = x + w // 2
+                    result["y"] = y + h // 2
+                    result["bbox_x"] = x
+                    result["bbox_y"] = y
+                    result["bbox_w"] = w
+                    result["bbox_h"] = h
+                else:
+                    result["x"] = x
+                    result["y"] = y
+                    result["bbox_w"] = 0
+                    result["bbox_h"] = 0
                 recorded_elements.append(result)
-                logger.info("Recorded: %s (%s)", result.get("label"), result.get("element_type"))
+                logger.info("Recorded: %s (%s) bbox=%dx%d", result.get("label"), result.get("element_type"), w, h)
 
     def on_mode_changed(mode: OverlayMode) -> None:
         logger.info("Overlay mode: %s", mode.name)
@@ -143,12 +161,20 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
         # Normalize ElementType enum to string value
         raw_et = elem.get("element_type", "unknown")
         et_str = raw_et.value if hasattr(raw_et, "value") else str(raw_et)
+        # Compute bounding box percentages (0 for point clicks)
+        bbox_w = elem.get("bbox_w", 0)
+        bbox_h = elem.get("bbox_h", 0)
+        w_pct = bbox_w / screen_w if bbox_w > 0 else 0.0
+        h_pct = bbox_h / screen_h if bbox_h > 0 else 0.0
+
         node_id = graph.add_node(
             element_type=et_str,
             label=elem.get("label", ""),
             ocr_text=elem.get("label", ""),
             x_pct=elem["x"] / screen_w,
             y_pct=elem["y"] / screen_h,
+            w_pct=w_pct,
+            h_pct=h_pct,
             resolution=(screen_w, screen_h),
         )
 

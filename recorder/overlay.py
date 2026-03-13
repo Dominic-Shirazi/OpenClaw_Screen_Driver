@@ -20,7 +20,7 @@ import sys
 from enum import Enum, auto
 from typing import Any, Callable
 
-from PyQt6.QtCore import QRectF, Qt, QTimer
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -257,17 +257,22 @@ class OverlayController:
     integration with the recording session pipeline.
     """
 
+    # Minimum drag distance (pixels) to count as a bounding box vs a click
+    _MIN_DRAG_PX = 8
+
     def __init__(
         self,
-        on_element_clicked: Callable[[int, int, dict[str, Any] | None], None] | None = None,
+        on_element_clicked: Callable[[int, int, int, int, dict[str, Any] | None], None] | None = None,
         on_mode_changed: Callable[[OverlayMode], None] | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         """Initializes the overlay controller.
 
         Args:
-            on_element_clicked: Callback when user clicks in RECORD mode.
-                               Args: (x, y, matched_candidate_dict_or_None).
+            on_element_clicked: Callback when user selects in RECORD mode.
+                               Args: (x, y, w, h, matched_candidate_dict_or_None).
+                               For point clicks, w=0, h=0.
+                               For bounding boxes, (x, y) is the top-left corner.
             on_mode_changed: Callback when overlay mode changes.
             on_close: Callback when overlay is closed via Ctrl+Q / ESC.
         """
@@ -429,20 +434,30 @@ class OverlayController:
 
         user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
 
-    def _handle_click(self, x: int, y: int) -> None:
-        """Handles a mouse click in RECORD mode.
+    def _handle_selection(self, x: int, y: int, w: int, h: int) -> None:
+        """Handles a completed selection (point click or bounding box drag).
 
-        Finds the candidate element at (x, y) and invokes the callback.
+        For point clicks (w=0, h=0), finds the candidate at the click point.
+        For bounding boxes, (x, y) is the top-left and (w, h) are dimensions.
 
         Args:
-            x: Screen X coordinate of the click.
-            y: Screen Y coordinate of the click.
+            x: Top-left X (or click X for point clicks).
+            y: Top-left Y (or click Y for point clicks).
+            w: Width of bounding box (0 for point click).
+            h: Height of bounding box (0 for point click).
         """
-        matched = self._find_candidate_at(x, y)
+        if w > 0 and h > 0:
+            # Bounding box — find candidate at center
+            cx, cy = x + w // 2, y + h // 2
+            matched = self._find_candidate_at(cx, cy)
+            logger.info("Bbox selection: (%d, %d) %dx%d", x, y, w, h)
+        else:
+            matched = self._find_candidate_at(x, y)
+            logger.info("Point click: (%d, %d)", x, y)
 
         if self._on_element_clicked:
             try:
-                self._on_element_clicked(x, y, matched)
+                self._on_element_clicked(x, y, w, h, matched)
             except Exception as e:
                 logger.error("on_element_clicked callback error: %s", e)
 
@@ -529,6 +544,10 @@ class _OverlayView(QGraphicsView):
         self._mode_bg: QGraphicsRectItem | None = None
         self._border_items: list[QGraphicsRectItem] = []
         self._click_catcher: QGraphicsRectItem | None = None
+
+        # Drag-to-draw bounding box state
+        self._drag_start: QPointF | None = None
+        self._rubber_band: QGraphicsRectItem | None = None
 
         # Draw initial overlay indicators after event loop starts
         QTimer.singleShot(50, self.refresh_overlay)
@@ -682,7 +701,7 @@ class _OverlayView(QGraphicsView):
         """
         mode = self._controller.mode
         if mode == OverlayMode.RECORD:
-            mode_text = "[RECORD] Click elements to tag  |  Ctrl+R = passthrough  |  Ctrl+Q = save & quit"
+            mode_text = "[RECORD] Click or drag-to-box elements  |  Ctrl+R = passthrough  |  Ctrl+Q = save & quit"
         else:
             mode_text = "[PASSTHROUGH] Clicks go through  |  Ctrl+R = record  |  Ctrl+Q = save & quit"
 
@@ -740,22 +759,82 @@ class _OverlayView(QGraphicsView):
             event.accept()
 
     def mousePressEvent(self, event: Any) -> None:
-        """Captures mouse clicks in RECORD mode.
+        """Starts a drag-to-draw bounding box or point click in RECORD mode.
 
-        In RECORD mode, maps the click position to screen coordinates
-        and forwards to the controller. In PASSTHROUGH mode, eat the
-        event — never pass to QGraphicsView which starts internal
-        drag/selection machinery that can hang the event loop.
+        Records the start point and creates a rubber-band rectangle.
+        In PASSTHROUGH mode, events are eaten silently.
         """
         if self._controller.mode == OverlayMode.RECORD:
-            scene_pos = self.mapToScene(event.pos())
-            self._controller._handle_click(int(scene_pos.x()), int(scene_pos.y()))
+            self._drag_start = self.mapToScene(event.pos())
+            # Create the rubber-band rectangle (initially zero-size)
+            pen = QPen(QColor(255, 255, 0, 220))
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            brush = QBrush(QColor(255, 255, 0, 30))
+            self._rubber_band = self.scene().addRect(
+                QRectF(self._drag_start, self._drag_start), pen, brush,
+            )
+            self._rubber_band.setZValue(200)  # On top of everything
         event.accept()
 
     def mouseMoveEvent(self, event: Any) -> None:
-        """Eat mouse move events to prevent QGraphicsView drag handling."""
+        """Updates the rubber-band rectangle as the user drags.
+
+        Only active in RECORD mode while a drag is in progress.
+        """
+        if (
+            self._controller.mode == OverlayMode.RECORD
+            and self._drag_start is not None
+            and self._rubber_band is not None
+        ):
+            current = self.mapToScene(event.pos())
+            # Build a normalized rect (handles dragging in any direction)
+            x1 = min(self._drag_start.x(), current.x())
+            y1 = min(self._drag_start.y(), current.y())
+            x2 = max(self._drag_start.x(), current.x())
+            y2 = max(self._drag_start.y(), current.y())
+            self._rubber_band.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
         event.accept()
 
     def mouseReleaseEvent(self, event: Any) -> None:
-        """Eat mouse release events to prevent QGraphicsView selection."""
+        """Completes the bounding box or point click on mouse release.
+
+        If the drag distance is below the threshold, treats it as a
+        point click (w=0, h=0). Otherwise sends the bounding box.
+        """
+        if (
+            self._controller.mode == OverlayMode.RECORD
+            and self._drag_start is not None
+        ):
+            end = self.mapToScene(event.pos())
+            # Compute normalized rectangle
+            x1 = min(self._drag_start.x(), end.x())
+            y1 = min(self._drag_start.y(), end.y())
+            x2 = max(self._drag_start.x(), end.x())
+            y2 = max(self._drag_start.y(), end.y())
+            w = x2 - x1
+            h = y2 - y1
+
+            # Clean up rubber band
+            if self._rubber_band is not None:
+                self.scene().removeItem(self._rubber_band)
+                self._rubber_band = None
+
+            min_drag = self._controller._MIN_DRAG_PX
+            if w >= min_drag and h >= min_drag:
+                # Bounding box selection — draw a persistent rect
+                pen = QPen(QColor(0, 255, 255, 200))
+                pen.setWidth(2)
+                brush = QBrush(QColor(0, 255, 255, 40))
+                self.scene().addRect(QRectF(x1, y1, w, h), pen, brush)
+                self._controller._handle_selection(
+                    int(x1), int(y1), int(w), int(h),
+                )
+            else:
+                # Point click — use the original press position
+                sx = int(self._drag_start.x())
+                sy = int(self._drag_start.y())
+                self._controller._handle_selection(sx, sy, 0, 0)
+
+            self._drag_start = None
         event.accept()

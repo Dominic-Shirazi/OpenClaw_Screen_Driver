@@ -98,6 +98,8 @@ class OCSDGraph:
         snippet_path: str = "",
         x_pct: float = 0.5,
         y_pct: float = 0.5,
+        w_pct: float = 0.0,
+        h_pct: float = 0.0,
         resolution: tuple[int, int] = (1920, 1080),
         confidence_threshold: float = 0.75,
     ) -> str:
@@ -112,8 +114,10 @@ class OCSDGraph:
             ocr_text: Visible text extracted by OCR/VLM.
             embedding_id: FAISS index key for this element's visual embedding.
             snippet_path: Path to the reference image crop.
-            x_pct: Horizontal position as fraction of screen width (0.0-1.0).
-            y_pct: Vertical position as fraction of screen height (0.0-1.0).
+            x_pct: Horizontal center position as fraction of screen width (0.0-1.0).
+            y_pct: Vertical center position as fraction of screen height (0.0-1.0).
+            w_pct: Bounding box width as fraction of screen width (0.0-1.0). 0 = point click.
+            h_pct: Bounding box height as fraction of screen height (0.0-1.0). 0 = point click.
             resolution: Screen resolution when this node was recorded [w, h].
             confidence_threshold: Minimum match confidence for locating this element.
 
@@ -155,6 +159,8 @@ class OCSDGraph:
             relative_position={
                 "x_pct": x_pct,
                 "y_pct": y_pct,
+                "w_pct": w_pct,
+                "h_pct": h_pct,
                 "region_hint": _region_hint(x_pct, y_pct),
             },
             last_seen_resolution=list(resolution),

@@ -93,11 +93,20 @@ def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
         sw, sh = pyautogui.size()
         px = int(x_pct * sw)
         py = int(y_pct * sh)
-        logger.warning(
-            "Located [%s] via position fallback at (%d, %d) — "
-            "no visual confirmation",
-            node_id[:8], px, py,
-        )
+        w_pct = pos.get("w_pct", 0.0)
+        h_pct = pos.get("h_pct", 0.0)
+        if w_pct > 0 and h_pct > 0:
+            logger.warning(
+                "Located [%s] via bbox center fallback at (%d, %d) "
+                "bbox=%dx%d — no visual confirmation",
+                node_id[:8], px, py, int(w_pct * sw), int(h_pct * sh),
+            )
+        else:
+            logger.warning(
+                "Located [%s] via position fallback at (%d, %d) — "
+                "no visual confirmation",
+                node_id[:8], px, py,
+            )
         return LocateResult(
             point=Point(px, py),
             confidence=0.3,  # low confidence — blind replay
