@@ -27,10 +27,6 @@ _DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
 _DEFAULTS: dict[str, Any] = {
     "ocsd": {"version": "0.1.0"},
     "hardware": {"gpu_vlm": 0, "gpu_embeddings": 1},
-    "litellm": {
-        "base_url": os.environ.get("LITELLM_BASE_URL", "http://localhost:4000/v1"),
-        "api_key": os.environ.get("LITELLM_API_KEY", ""),
-    },
     "models": {
         "vlm": os.environ.get("OCSD_VLM_MODEL", "vision"),
         "quick": os.environ.get("OCSD_QUICK_MODEL", "quick"),
@@ -38,6 +34,25 @@ _DEFAULTS: dict[str, Any] = {
         "coding": os.environ.get("OCSD_CODING_MODEL", "coding"),
         "clip": "openai/clip-vit-base-patch32",
         "whisper_model": "small",
+    },
+    "detection": {
+        "model": "yolo-e",
+        "confidence_threshold": 0.4,
+        "crop_buffer_pct": 0.30,
+    },
+    "recovery": {
+        "enabled": os.environ.get("OCSD_RECOVERY_ENABLED", "false").lower() == "true",
+        "model": os.environ.get("OCSD_RECOVERY_MODEL", "claude-opus"),
+        "max_retries": 2,
+    },
+    "fingerprinting": {
+        "enabled": True,
+        "wait_timeout_s": 5,
+        "retry_count": 2,
+    },
+    "litellm": {
+        "base_url": os.environ.get("LITELLM_BASE_URL", "http://localhost:4000/v1"),
+        "api_key": os.environ.get("LITELLM_API_KEY", ""),
     },
     "paths": {
         "skills_dir": "./skills",
@@ -51,6 +66,10 @@ _DEFAULTS: dict[str, Any] = {
         "pixel_diff_threshold": 0.08,
         "hover_delay_ms": 300,
         "default_confidence": 0.75,
+        "vlm_confirm": True,
+        "abort_on_failure": True,
+        "human_delay": float(os.environ.get("OCSD_HUMAN_DELAY", "1.0")),
+        "typo_chance": float(os.environ.get("OCSD_TYPO_CHANCE", "0.04")),
     },
     "api": {
         "host": "0.0.0.0",
