@@ -495,6 +495,141 @@ def cmd_execute(args: argparse.Namespace) -> int:
     return 0 if replay_log.overall_success else 1
 
 
+def cmd_compose(args: argparse.Namespace) -> int:
+    """Interactively draw edges on a diagram skill.
+
+    Loads a skill JSON (typically a diagram with no edges), renders its
+    nodes on the overlay, and lets the user click pairs of nodes to
+    create edges. Saves the updated skill when done.
+
+    Workflow:
+    1. Load skill JSON and render nodes as candidates on the overlay
+    2. User clicks a "source" node, then a "target" node → edge created
+    3. Ctrl+Q / ESC saves and exits
+    """
+    from PyQt6.QtWidgets import QApplication
+
+    from mapper.export import export_skill, import_skill, load_skill_from_file, save_skill_to_file
+    from recorder.overlay import OverlayController, OverlayMode
+
+    skill_path = Path(args.compose_file)
+    if not skill_path.exists():
+        logger.error("Skill file not found: %s", skill_path)
+        return 1
+
+    logger.info("Loading skill for compose: %s", skill_path)
+    skill_data = load_skill_from_file(skill_path)
+    graph, metadata = import_skill(skill_data)
+
+    logger.info(
+        "Compose: '%s' — %d nodes, %d edges",
+        metadata.get("name", "?"), graph.node_count, graph.edge_count,
+    )
+
+    # Build candidates from graph nodes for overlay rendering
+    import pyautogui
+    screen_w, screen_h = pyautogui.size()
+
+    candidates: list[dict] = []
+    node_id_list = graph.nodes
+    for nid in node_id_list:
+        nd = graph.get_node(nid)
+        pos = nd.get("relative_position", {})
+        x_pct = pos.get("x_pct", 0.5)
+        y_pct = pos.get("y_pct", 0.5)
+        w_pct = pos.get("w_pct", 0.0)
+        h_pct = pos.get("h_pct", 0.0)
+
+        x = int(x_pct * screen_w)
+        y = int(y_pct * screen_h)
+        w = int(w_pct * screen_w) if w_pct > 0 else 60
+        h = int(h_pct * screen_h) if h_pct > 0 else 30
+
+        candidates.append({
+            "rect": {"x": x - w // 2, "y": y - h // 2, "w": w, "h": h},
+            "type_guess": nd.get("element_type", "unknown"),
+            "label_guess": nd.get("label", nid[:8]),
+            "confidence": 1.0,
+            "node_id": nid,
+        })
+
+    # Edge-drawing state
+    edge_source: list[str | None] = [None]  # mutable container for closure
+    edges_added: list[tuple[str, str]] = []
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    def on_element_clicked(
+        x: int, y: int, w: int, h: int, candidate: dict | None
+    ) -> bool:
+        if candidate is None or "node_id" not in candidate:
+            logger.info("Compose: click at (%d, %d) — no node matched", x, y)
+            return False
+
+        nid = candidate["node_id"]
+        label = candidate.get("label_guess", nid[:8])
+
+        if edge_source[0] is None:
+            # First click — select source
+            edge_source[0] = nid
+            logger.info("Compose: source selected — %s", label)
+            return False  # Don't "record" it, just note it
+        else:
+            # Second click — create edge
+            src = edge_source[0]
+            if src == nid:
+                logger.info("Compose: same node clicked, ignoring")
+                edge_source[0] = None
+                return False
+
+            src_label = graph.get_node(src).get("label", src[:8])
+            logger.info("Compose: edge %s → %s", src_label, label)
+
+            try:
+                graph.add_edge(src, nid, action_type="button")
+                edges_added.append((src, nid))
+            except Exception as e:
+                logger.error("Compose: could not add edge: %s", e)
+
+            edge_source[0] = None
+            return True
+
+    def on_mode_changed(mode: OverlayMode) -> None:
+        logger.info("Compose overlay mode: %s", mode.name)
+
+    def on_close() -> None:
+        logger.info(
+            "Compose ended. %d edges added (total: %d edges).",
+            len(edges_added), graph.edge_count,
+        )
+        if edges_added:
+            # Save updated skill
+            skill_name = metadata.get("name", "composed")
+            updated = export_skill(
+                graph,
+                name=skill_name,
+                description=metadata.get("description", f"Composed: {skill_name}"),
+                author=metadata.get("author", "ocsd-compose"),
+                version=metadata.get("version", "0.1.0"),
+                target_app=metadata.get("target_app", "unknown"),
+            )
+            updated["recording_type"] = "workflow"
+            save_skill_to_file(updated, skill_path)
+            logger.info("Composed skill saved to %s", skill_path)
+        app.quit()
+
+    overlay = OverlayController(
+        on_element_clicked=on_element_clicked,
+        on_mode_changed=on_mode_changed,
+        on_close=on_close,
+    )
+    overlay.show(start_mode=OverlayMode.RECORD)
+    overlay.set_candidates(candidates)
+
+    return app.exec()
+
+
 def _setup_signal_handler() -> None:
     """Registers Ctrl+C handler for graceful shutdown."""
 
@@ -524,6 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--record", action="store_true", help="Launch recording overlay (workflow mode — sequential edges)")
     group.add_argument("--diagram", action="store_true", help="Launch recording overlay (diagram mode — annotate page, no edges)")
     group.add_argument("--execute", metavar="SKILL_FILE", dest="skill_file", help="Execute a skill JSON")
+    group.add_argument("--compose", metavar="SKILL_FILE", dest="compose_file", help="Interactively draw edges on a diagram skill")
 
     parser.add_argument("--to", metavar="LABEL", dest="target_label", default=None, help="Execute to a specific label")
     parser.add_argument("--name", metavar="NAME", dest="skill_name", default=None, help="Name for recorded skill")
@@ -549,6 +685,8 @@ def main() -> int:
         return cmd_record(args)
     elif args.skill_file:
         return cmd_execute(args)
+    elif args.compose_file:
+        return cmd_compose(args)
     else:
         parser.print_help()
         return 1
