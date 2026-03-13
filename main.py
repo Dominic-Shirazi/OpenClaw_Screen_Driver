@@ -83,6 +83,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     from recorder.overlay import OverlayController, OverlayMode
 
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)  # Don't quit when TagDialog closes
     logger.info("Starting recording session")
 
     recorded_elements: list[dict] = []
@@ -92,10 +93,13 @@ def cmd_record(args: argparse.Namespace) -> int:
         logger.info("Click at (%d, %d), candidate=%s", x, y, candidate is not None)
 
         dialog = TagDialog(
+            element_type_guess=candidate.get("type_guess", "unknown") if candidate else "unknown",
+            label_guess=candidate.get("label_guess", "") if candidate else "",
+            ocr_text=candidate.get("ocr_text") if candidate else None,
+            layer_guess=candidate.get("layer_guess", "page_specific") if candidate else "page_specific",
+            uia_hint=candidate.get("uia_hint") if candidate else None,
             x=x,
             y=y,
-            type_guess=candidate.get("type_guess", "unknown") if candidate else "unknown",
-            label_guess=candidate.get("label_guess", "") if candidate else "",
         )
         if dialog.exec():
             result = dialog.get_result()
@@ -171,9 +175,8 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
 
 def cmd_execute(args: argparse.Namespace) -> int:
     """Executes a saved skill file."""
-    from executor.pathfinder import find_by_label, find_path
-    from executor.runner import RunnerEventType, run_path
     from mapper.export import import_skill, load_skill_from_file
+    from mapper.runner import run_skill
 
     skill_path = Path(args.skill_file)
     if not skill_path.exists():
@@ -202,43 +205,34 @@ def cmd_execute(args: argparse.Namespace) -> int:
 
     # Determine target node
     if args.target_label:
-        matches = find_by_label(graph, args.target_label)
-        if not matches:
+        # Search nodes by label
+        target_id = None
+        for nid in graph.nodes:
+            node_data = graph.get_node(nid)
+            if node_data.get("label", "").lower() == args.target_label.lower():
+                target_id = nid
+                break
+        if not target_id:
             logger.error("No node matching label '%s'", args.target_label)
             return 1
-        target_id = matches[0][0]
         logger.info("Target: '%s' (node %s)", args.target_label, target_id[:8])
     else:
         exit_nodes = graph.get_exit_nodes()
         if exit_nodes:
             target_id = exit_nodes[0]
         else:
-            all_nodes = list(graph._graph.nodes)
+            all_nodes = graph.nodes
             if not all_nodes:
                 logger.error("Graph has no nodes")
                 return 1
             target_id = all_nodes[-1]
 
-    path = find_path(graph, entry_id, target_id)
-    logger.info("Path: %d steps (%s → %s)", len(path), entry_id[:8], target_id[:8])
-
-    def on_event(event_type: RunnerEventType, data: dict) -> None:
-        if event_type == RunnerEventType.STEP_START:
-            step = data.get("step", 0) + 1
-            logger.info("Step %d: locating %s...", step, data.get("node_id", "?")[:8])
-        elif event_type == RunnerEventType.VALIDATION_FAILED:
-            logger.warning("Validation failed: %s", data.get("notes", ""))
-        elif event_type == RunnerEventType.PATH_COMPLETE:
-            logger.info("Complete in %dms", data.get("duration_ms", 0))
-        elif event_type == RunnerEventType.PATH_FAILED:
-            logger.warning("Failed after %dms", data.get("duration_ms", 0))
-
-    replay_log = run_path(
-        path,
+    # Run the skill
+    replay_log = run_skill(
         graph,
+        start_id=entry_id,
+        goal_id=target_id,
         dry_run=args.dry_run,
-        event_callback=on_event,
-        skip_vlm_validation=args.skip_vlm,
     )
 
     # Save replay log
@@ -254,7 +248,10 @@ def cmd_execute(args: argparse.Namespace) -> int:
     success_count = sum(1 for s in replay_log.steps if s.success)
     total = len(replay_log.steps)
     status = "SUCCESS" if replay_log.overall_success else "FAILED"
-    logger.info("Result: %s (%d/%d steps, %dms)", status, success_count, total, replay_log.duration_ms)
+    logger.info(
+        "Result: %s (%d/%d steps, %dms)",
+        status, success_count, total, replay_log.duration_ms,
+    )
 
     return 0 if replay_log.overall_success else 1
 
