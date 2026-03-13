@@ -48,6 +48,7 @@ class ExecuteRequest(BaseModel):
     start_node: str | None = None
     goal_node: str | None = None
     dry_run: bool = False
+    params: dict[str, str] | None = None
 
 
 class ExecuteResponse(BaseModel):
@@ -183,7 +184,11 @@ async def execute_skill(skill_id: str, req: ExecuteRequest) -> ExecuteResponse:
     try:
         from mapper.runner import run_skill
 
-        replay_log = run_skill(graph, start_id, goal_id, dry_run=req.dry_run)
+        replay_log = run_skill(
+            graph, start_id, goal_id,
+            dry_run=req.dry_run,
+            execution_params=req.params,
+        )
 
         errors = [
             step.error

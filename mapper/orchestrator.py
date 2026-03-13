@@ -398,7 +398,18 @@ def orchestrate_skill(
     # ------------------------------------------------------------------
     for i, node_id in enumerate(path):
         next_id = path[i + 1] if i < len(path) - 1 else None
-        node_label = graph.get_node(node_id).get("label", node_id[:8])
+        node_data = graph.get_node(node_id)
+        node_label = node_data.get("label", node_id[:8])
+        element_type = node_data.get("element_type", "unknown")
+
+        # Emit preview BEFORE step start — consumed by --step mode
+        emit(RunnerEventType.STEP_PREVIEW, {
+            "node_id": node_id,
+            "step": i,
+            "label": node_label,
+            "element_type": element_type,
+            "total_steps": len(path),
+        })
 
         emit(RunnerEventType.STEP_START, {
             "node_id": node_id, "step": i, "label": node_label,

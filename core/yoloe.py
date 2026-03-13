@@ -180,6 +180,155 @@ def find_element(
     return matches
 
 
+def refine_bbox(
+    screen: np.ndarray,
+    user_rect: Rect,
+    conf_threshold: float = 0.25,
+) -> YOLOEMatch | None:
+    """Refine a user-drawn bounding box using YOLOE visual prompts.
+
+    Crops the screen around *user_rect* with a 30 % margin buffer, uses
+    the user's crop as the visual prompt, and returns the best YOLOE
+    detection translated back to screen-absolute coordinates.
+
+    Args:
+        screen: BGR full-screen capture.
+        user_rect: The bounding box drawn by the user during recording.
+        conf_threshold: Minimum detection confidence to accept.
+
+    Returns:
+        A :class:`YOLOEMatch` with screen-absolute coordinates, or
+        *None* if nothing above *conf_threshold* was found.
+    """
+    sh, sw = screen.shape[:2]
+
+    # Build a 30 % buffer around the user rect
+    buf_x = int(user_rect.w * 0.30)
+    buf_y = int(user_rect.h * 0.30)
+
+    crop_x1 = max(0, user_rect.x - buf_x)
+    crop_y1 = max(0, user_rect.y - buf_y)
+    crop_x2 = min(sw, user_rect.x + user_rect.w + buf_x)
+    crop_y2 = min(sh, user_rect.y + user_rect.h + buf_y)
+
+    search_region = screen[crop_y1:crop_y2, crop_x1:crop_x2]
+
+    # The user's original crop is the visual prompt (snippet)
+    snippet = screen[
+        user_rect.y : user_rect.y + user_rect.h,
+        user_rect.x : user_rect.x + user_rect.w,
+    ]
+
+    if snippet.size == 0 or search_region.size == 0:
+        logger.warning("refine_bbox: empty snippet or search region")
+        return None
+
+    # find_element returns screen-absolute coords when given a full
+    # screen, but here we pass a crop — so results are crop-relative.
+    # We use hint_x/hint_y=None so find_element uses the whole target.
+    matches = find_element(
+        snippet,
+        search_region,
+        conf_threshold=conf_threshold,
+    )
+
+    if not matches:
+        return None
+
+    best = matches[0]
+    # Translate crop-relative bbox back to screen-absolute
+    abs_rect = Rect(
+        x=best.bbox.x + crop_x1,
+        y=best.bbox.y + crop_y1,
+        w=best.bbox.w,
+        h=best.bbox.h,
+    )
+    abs_center = Point(
+        x=abs_rect.x + abs_rect.w // 2,
+        y=abs_rect.y + abs_rect.h // 2,
+    )
+    return YOLOEMatch(
+        bbox=abs_rect,
+        confidence=best.confidence,
+        center=abs_center,
+    )
+
+
+def infer_bbox_at_point(
+    screen: np.ndarray,
+    x: int,
+    y: int,
+    radius: int = 200,
+    conf_threshold: float = 0.25,
+) -> YOLOEMatch | None:
+    """Infer a tight bounding box around a point click.
+
+    Crops a region of *radius* pixels around (*x*, *y*), uses a small
+    50x50 crop centred on the click as the visual prompt, and searches
+    the larger region for the full element containing that centre.
+
+    Args:
+        screen: BGR full-screen capture.
+        x: Click X coordinate on the screen.
+        y: Click Y coordinate on the screen.
+        radius: Pixel radius of the search region around the point.
+        conf_threshold: Minimum detection confidence to accept.
+
+    Returns:
+        The tightest :class:`YOLOEMatch` YOLOE finds (screen-absolute),
+        or *None* if nothing above *conf_threshold* was found.
+    """
+    sh, sw = screen.shape[:2]
+
+    # Build search region around the click point
+    region_x1 = max(0, x - radius)
+    region_y1 = max(0, y - radius)
+    region_x2 = min(sw, x + radius)
+    region_y2 = min(sh, y + radius)
+
+    search_region = screen[region_y1:region_y2, region_x1:region_x2]
+
+    # Build a ~50x50 snippet centred on the click
+    half = 25
+    snip_x1 = max(0, x - half)
+    snip_y1 = max(0, y - half)
+    snip_x2 = min(sw, x + half)
+    snip_y2 = min(sh, y + half)
+
+    snippet = screen[snip_y1:snip_y2, snip_x1:snip_x2]
+
+    if snippet.size == 0 or search_region.size == 0:
+        logger.warning("infer_bbox_at_point: empty snippet or search region")
+        return None
+
+    matches = find_element(
+        snippet,
+        search_region,
+        conf_threshold=conf_threshold,
+    )
+
+    if not matches:
+        return None
+
+    best = matches[0]
+    # Translate crop-relative bbox back to screen-absolute
+    abs_rect = Rect(
+        x=best.bbox.x + region_x1,
+        y=best.bbox.y + region_y1,
+        w=best.bbox.w,
+        h=best.bbox.h,
+    )
+    abs_center = Point(
+        x=abs_rect.x + abs_rect.w // 2,
+        y=abs_rect.y + abs_rect.h // 2,
+    )
+    return YOLOEMatch(
+        bbox=abs_rect,
+        confidence=best.confidence,
+        center=abs_center,
+    )
+
+
 def find_element_locate(
     snippet: np.ndarray,
     screen: np.ndarray,

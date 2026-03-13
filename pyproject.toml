@@ -41,9 +41,13 @@ api = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
 ]
+# TUI launcher (rich-based interactive menu)
+tui = [
+    "rich>=13.0",
+]
 # Everything (install all optional features)
 all = [
-    "openclaw-screen-driver[embeddings,yoloe,vlm,windows,api]",
+    "openclaw-screen-driver[embeddings,yoloe,vlm,windows,api,tui]",
 ]
 # Development tools
 dev = [

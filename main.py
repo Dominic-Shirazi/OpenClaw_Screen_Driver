@@ -77,6 +77,113 @@ def _ensure_dirs() -> None:
             Path(d).mkdir(parents=True, exist_ok=True)
 
 
+def _try_refine_bbox(
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    review_mode: str,
+    matched_candidate: dict | None,
+) -> tuple[int, int, int, int] | None:
+    """Attempts YOLOE bbox refinement for a recorded element.
+
+    For drawn bboxes: calls refine_bbox() to tighten the user's selection.
+    For point clicks: infers a bbox from the click point via YOLOE.
+
+    Args:
+        x: Element X coordinate.
+        y: Element Y coordinate.
+        w: Bbox width (0 for point clicks).
+        h: Bbox height (0 for point clicks).
+        review_mode: One of "auto", "review", "skip".
+        matched_candidate: Smart-detect candidate dict (may have 'rect').
+
+    Returns:
+        Tuple of (new_x, new_y, new_w, new_h) if refinement accepted,
+        or None if rejected/skipped.
+    """
+    if review_mode == "skip":
+        return None
+
+    try:
+        from core.capture import screenshot_full
+        from core.types import Rect
+        from core.yoloe import infer_bbox_at_point, refine_bbox
+    except ImportError:
+        logger.debug("YOLOE not available, skipping bbox refinement")
+        return None
+
+    try:
+        screen = screenshot_full()
+    except Exception as e:
+        logger.warning("Could not capture screen for refinement: %s", e)
+        return None
+
+    yoloe_match = None
+
+    if w > 0 and h > 0:
+        # Drawn bbox — refine it
+        user_rect = Rect(x=x, y=y, w=w, h=h)
+        yoloe_match = refine_bbox(screen, user_rect)
+    else:
+        # Point click — check if smart_detect already has a bbox
+        if matched_candidate and "rect" in matched_candidate:
+            r = matched_candidate["rect"]
+            if r.get("w", 0) > 0 and r.get("h", 0) > 0:
+                logger.info("Using smart_detect bbox for point click")
+                return (r["x"], r["y"], r["w"], r["h"])
+        # Otherwise ask YOLOE to infer a bbox from the click point
+        yoloe_match = infer_bbox_at_point(screen, x, y)
+
+    if yoloe_match is None:
+        logger.debug("YOLOE refinement returned no match")
+        return None
+
+    refined = yoloe_match.bbox
+
+    if review_mode == "auto":
+        logger.info(
+            "Auto-refined bbox: (%d,%d) %dx%d → (%d,%d) %dx%d conf=%.2f",
+            x, y, w, h, refined.x, refined.y, refined.w, refined.h,
+            yoloe_match.confidence,
+        )
+        return (refined.x, refined.y, refined.w, refined.h)
+
+    # review_mode == "review" — show the RefineDialog
+    try:
+        from recorder.refine_dialog import RefineDialog
+
+        # Crop original and refined regions for the dialog
+        user_crop = screen[y:y + h, x:x + w] if w > 0 and h > 0 else screen[
+            max(0, y - 30):y + 30, max(0, x - 30):x + 30
+        ]
+        yoloe_crop = screen[
+            refined.y:refined.y + refined.h,
+            refined.x:refined.x + refined.w,
+        ]
+
+        if user_crop.size == 0 or yoloe_crop.size == 0:
+            return (refined.x, refined.y, refined.w, refined.h)
+
+        dialog = RefineDialog(user_crop, yoloe_crop, refined)
+        dialog.exec()
+        action, result_rect = dialog.get_result()
+
+        if action == "accepted" and result_rect is not None:
+            logger.info("User accepted refined bbox: (%d,%d) %dx%d",
+                        result_rect.x, result_rect.y, result_rect.w, result_rect.h)
+            return (result_rect.x, result_rect.y, result_rect.w, result_rect.h)
+        else:
+            logger.info("User rejected refinement, keeping original")
+            return None
+    except ImportError:
+        logger.debug("RefineDialog not available, auto-accepting")
+        return (refined.x, refined.y, refined.w, refined.h)
+    except Exception as e:
+        logger.warning("RefineDialog error: %s, auto-accepting", e)
+        return (refined.x, refined.y, refined.w, refined.h)
+
+
 def _trigger_smart_detect(overlay: Any) -> None:
     """Captures the screen and runs smart detection in the background.
 
@@ -119,10 +226,11 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     is_diagram = getattr(args, "diagram", False)
     mode_label = "diagram" if is_diagram else "workflow"
+    refine_mode = getattr(args, "refine_mode", "auto")
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Don't quit when TagDialog closes
-    logger.info("Starting %s recording session", mode_label)
+    logger.info("Starting %s recording session (refine=%s)", mode_label, refine_mode)
 
     recorded_elements: list[dict] = []
 
@@ -141,6 +249,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         dialog_x = x + w // 2 if w > 0 else x
         dialog_y = y + h // 2 if h > 0 else y
 
+        is_bbox = w > 0 and h > 0
         dialog = TagDialog(
             element_type_guess=candidate.get("type_guess", "unknown") if candidate else "unknown",
             label_guess=candidate.get("label_guess", "") if candidate else "",
@@ -149,25 +258,49 @@ def cmd_record(args: argparse.Namespace) -> int:
             uia_hint=candidate.get("uia_hint") if candidate else None,
             x=dialog_x,
             y=dialog_y,
+            is_bbox=is_bbox,
         )
         if dialog.exec():
             result = dialog.get_result()
             if result:
-                # For bounding boxes, store center as x/y for backward compat
-                if w > 0 and h > 0:
-                    result["x"] = x + w // 2
-                    result["y"] = y + h // 2
-                    result["bbox_x"] = x
-                    result["bbox_y"] = y
-                    result["bbox_w"] = w
-                    result["bbox_h"] = h
+                # Store original coordinates
+                cur_x, cur_y, cur_w, cur_h = x, y, w, h
+                result["_refinement_status"] = "original"
+
+                # Attempt YOLOE bbox refinement (for all selections)
+                refined = _try_refine_bbox(
+                    cur_x, cur_y, cur_w, cur_h,
+                    refine_mode, candidate,
+                )
+                if refined is not None:
+                    cur_x, cur_y, cur_w, cur_h = refined
+                    if w == 0 and h == 0:
+                        result["_refinement_status"] = "inferred"
+                    elif refine_mode == "auto":
+                        result["_refinement_status"] = "auto_refined"
+                    else:
+                        result["_refinement_status"] = "reviewed"
+
+                # Store final coordinates
+                if cur_w > 0 and cur_h > 0:
+                    result["x"] = cur_x + cur_w // 2
+                    result["y"] = cur_y + cur_h // 2
+                    result["bbox_x"] = cur_x
+                    result["bbox_y"] = cur_y
+                    result["bbox_w"] = cur_w
+                    result["bbox_h"] = cur_h
                 else:
-                    result["x"] = x
-                    result["y"] = y
+                    result["x"] = cur_x
+                    result["y"] = cur_y
                     result["bbox_w"] = 0
                     result["bbox_h"] = 0
+
                 recorded_elements.append(result)
-                logger.info("Recorded: %s (%s) bbox=%dx%d", result.get("label"), result.get("element_type"), w, h)
+                logger.info(
+                    "Recorded: %s (%s) bbox=%dx%d refine=%s",
+                    result.get("label"), result.get("element_type"),
+                    cur_w, cur_h, result["_refinement_status"],
+                )
                 return True
         return False
 
@@ -454,6 +587,49 @@ def cmd_execute(args: argparse.Namespace) -> int:
                 return 1
             target_id = all_nodes[-1]
 
+    # Build step-through callback if --step or --debug-ai
+    step_mode = getattr(args, "step_mode", False)
+    debug_ai = getattr(args, "debug_ai", False)
+    step_callback = None
+
+    if step_mode or debug_ai:
+        from mapper.runner import RunnerEventType
+
+        def _step_event_handler(
+            event_type: RunnerEventType, data: dict,
+        ) -> None:
+            """Event callback for --step and --debug-ai modes."""
+            if debug_ai and event_type == RunnerEventType.ELEMENT_LOCATED:
+                logger.info(
+                    "  [debug-ai] Located via %s at (%s) conf=%.2f",
+                    data.get("method", "?"),
+                    data.get("point", "?"),
+                    data.get("confidence", 0),
+                )
+            if step_mode and event_type == RunnerEventType.STEP_PREVIEW:
+                node_id = data.get("node_id", "?")
+                label = data.get("label", node_id[:8] if isinstance(node_id, str) else "?")
+                try:
+                    from recorder.step_ui import step_through_prompt
+                    action = step_through_prompt(
+                        label=label,
+                        node_id=node_id,
+                        step_num=data.get("step", 0) + 1,
+                        action_type=data.get("element_type", ""),
+                    )
+                    if action == "abort":
+                        raise KeyboardInterrupt("User aborted via step-through")
+                except ImportError:
+                    # Fallback to console prompt
+                    resp = input(
+                        f"\n  Step {data.get('step', 0) + 1}: "
+                        f"{label} — [Enter]=execute, s=skip, q=abort: "
+                    ).strip().lower()
+                    if resp == "q":
+                        raise KeyboardInterrupt("User aborted via step-through")
+
+        step_callback = _step_event_handler
+
     # Run the skill — use orchestrator for full preflight + recovery
     use_orchestrator = not args.skip_vlm  # orchestrator needs VLM for recovery
     if use_orchestrator:
@@ -465,6 +641,7 @@ def cmd_execute(args: argparse.Namespace) -> int:
             goal_id=target_id,
             dry_run=args.dry_run,
             skip_vlm=args.skip_vlm,
+            event_callback=step_callback,
         )
     else:
         replay_log = run_skill(
@@ -655,7 +832,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", dest="dry_run", help="Simulate without acting")
     parser.add_argument("--skip-vlm", action="store_true", dest="skip_vlm", help="Skip VLM validation")
 
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--record", action="store_true", help="Launch recording overlay (workflow mode — sequential edges)")
     group.add_argument("--diagram", action="store_true", help="Launch recording overlay (diagram mode — annotate page, no edges)")
     group.add_argument("--execute", metavar="SKILL_FILE", dest="skill_file", help="Execute a skill JSON")
@@ -664,7 +841,93 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--to", metavar="LABEL", dest="target_label", default=None, help="Execute to a specific label")
     parser.add_argument("--name", metavar="NAME", dest="skill_name", default=None, help="Name for recorded skill")
 
+    # Bbox refinement mode (for --record / --diagram)
+    refine_group = parser.add_mutually_exclusive_group()
+    refine_group.add_argument(
+        "--auto-refine", action="store_const", const="auto",
+        dest="refine_mode", help="Silently tighten bboxes via YOLOE (default)",
+    )
+    refine_group.add_argument(
+        "--review-refine", action="store_const", const="review",
+        dest="refine_mode", help="Show side-by-side comparison for each bbox",
+    )
+    refine_group.add_argument(
+        "--no-refine", action="store_const", const="skip",
+        dest="refine_mode", help="Skip bbox refinement entirely",
+    )
+    parser.set_defaults(refine_mode="auto")
+
+    # Step-through execution mode
+    parser.add_argument(
+        "--step", action="store_true", dest="step_mode",
+        help="Pause before each step during replay (confirm/adjust/skip)",
+    )
+    parser.add_argument(
+        "--debug-ai", action="store_true", dest="debug_ai",
+        help="Show locate method, confidence, and reasoning for each step",
+    )
+
     return parser
+
+
+def _has_mode_arg(args: argparse.Namespace) -> bool:
+    """Returns True if any mode flag was explicitly provided.
+
+    Args:
+        args: Parsed CLI arguments.
+    """
+    return bool(
+        getattr(args, "record", False)
+        or getattr(args, "diagram", False)
+        or getattr(args, "skill_file", None)
+        or getattr(args, "compose_file", None)
+    )
+
+
+def _run_tui(args: argparse.Namespace) -> int:
+    """Launches the TUI menu and dispatches the chosen command.
+
+    Falls back to ``parser.print_help()`` when ``rich`` is not installed.
+
+    Args:
+        args: Parsed CLI arguments (used for flags like --dry-run).
+
+    Returns:
+        Process exit code.
+    """
+    try:
+        from recorder.tui import launch_menu
+    except ImportError:
+        logger.debug("rich not installed — falling back to --help")
+        build_parser().print_help()
+        return 1
+
+    command, kwargs = launch_menu()
+
+    if command == "record":
+        args.record = True
+        args.diagram = False
+        args.skill_name = kwargs.get("skill_name")
+        return cmd_record(args)
+    elif command == "diagram":
+        args.record = False
+        args.diagram = True
+        args.skill_name = kwargs.get("skill_name")
+        return cmd_record(args)
+    elif command == "execute":
+        args.skill_file = kwargs.get("skill_file", "")
+        args.target_label = getattr(args, "target_label", None)
+        args.skip_vlm = getattr(args, "skip_vlm", False)
+        return cmd_execute(args)
+    elif command == "compose":
+        args.compose_file = kwargs.get("skill_file", "")
+        return cmd_compose(args)
+    elif command == "help":
+        build_parser().print_help()
+        return 0
+    else:
+        logger.error("Unknown TUI command: %s", command)
+        return 1
 
 
 def main() -> int:
@@ -687,6 +950,8 @@ def main() -> int:
         return cmd_execute(args)
     elif args.compose_file:
         return cmd_compose(args)
+    elif not _has_mode_arg(args):
+        return _run_tui(args)
     else:
         parser.print_help()
         return 1

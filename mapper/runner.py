@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 class RunnerEventType(Enum):
     """Events emitted during skill execution."""
     STEP_START = auto()
+    STEP_PREVIEW = auto()
     ELEMENT_LOCATED = auto()
     LOW_CONFIDENCE = auto()
     ACTION_EXECUTED = auto()
@@ -376,8 +377,12 @@ def execute_node(
         click(point.x, point.y, dry_run=dry_run)
     elif action_type == "textbox":
         click(point.x, point.y, dry_run=dry_run)
-        if action_payload:
-            type_text(action_payload, dry_run=dry_run)
+        # Resolve text from input_spec (variable/literal), fall back to edge payload
+        text_to_type = _resolve_input_text(node_data)
+        if not text_to_type and action_payload:
+            text_to_type = action_payload
+        if text_to_type:
+            type_text(text_to_type, dry_run=dry_run)
     elif action_type == "scrollbar":
         scroll(point.x, point.y, direction="down", amount=3, dry_run=dry_run)
     elif action_type == "drag_source":
@@ -427,11 +432,69 @@ def execute_node(
     )
 
 
+def _resolve_input_text(
+    node_data: dict[str, Any],
+    execution_params: dict[str, str] | None = None,
+) -> str:
+    """Resolves the text to type for a textbox node.
+
+    Resolution chain:
+    1. input_spec.type == "literal" → use the stored string directly
+    2. input_spec.type == "variable" → look up in execution_params dict
+    3. Fallback to env var OCSD_{VARIABLE_NAME}
+    4. If nothing found, log warning and return empty string
+
+    Args:
+        node_data: The node's data dict from the graph.
+        execution_params: Optional dict of variable→value mappings
+            passed by the agent at runtime.
+
+    Returns:
+        The resolved text string to type, or empty string if unresolved.
+    """
+    spec = node_data.get("input_spec")
+    if not spec:
+        return ""
+
+    spec_type = spec.get("type", "")
+    spec_value = spec.get("value", "")
+
+    if spec_type == "literal":
+        return spec_value
+
+    if spec_type == "variable":
+        # Extract variable name from {{var_name}} format
+        var_name = spec_value.strip("{}")
+        if not var_name:
+            return ""
+
+        # Check execution_params first
+        if execution_params and var_name in execution_params:
+            return execution_params[var_name]
+
+        # Fallback to environment variable
+        import os
+        env_key = f"OCSD_{var_name.upper()}"
+        env_val = os.environ.get(env_key)
+        if env_val is not None:
+            return env_val
+
+        logger.warning(
+            "Variable '%s' not provided in params or env (%s) — skipping",
+            var_name, env_key,
+        )
+        return ""
+
+    logger.warning("Unknown input_spec type: %s", spec_type)
+    return ""
+
+
 def run_skill(
     graph: OCSDGraph,
     start_id: str,
     goal_id: str,
     dry_run: bool = False,
+    execution_params: dict[str, str] | None = None,
 ) -> ReplayLog:
     """Executes a full skill from start node to goal node.
 
