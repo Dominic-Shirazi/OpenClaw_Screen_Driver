@@ -326,10 +326,28 @@ ground-truth annotations. This benchmark uses avg elements/image as a simpler pr
 If YOLOE finds 5+ elements on a typical screenshot, it is detecting obvious UI elements.
 Review the visualization PNGs to confirm the detections are real UI elements, not false positives.
 
-**STOP GATE: Do NOT proceed to Task 2 if the benchmark fails.** If YOLOE text-prompt cannot
-reliably detect UI elements after class name tuning, the entire Wave 1 approach must be
-reconsidered. Execute the spec's Fallback A (YOLOE standard + VLM classification),
-Fallback B (fine-tuned UI YOLO model), or Fallback C (Windows accessibility tree).
+**The real bar is higher for replay:** YOLOE visual-prompt + CLIP vector search combined
+must achieve 80%+ locate accuracy (especially with area cropping). The benchmark here
+tests *detection* (can it find UI elements at all), not *re-location* (can it find THIS
+specific element). Detection is the prerequisite — if it can't even see buttons exist,
+re-location won't work either.
+
+**STOP GATE: Do NOT proceed to Task 2 if the benchmark fails after tuning.**
+
+If YOLOE text-prompt cannot reliably detect UI elements with the default weights:
+
+1. **Fine-tune YOLOE on UI datasets** — this is the primary fallback, not an alternative
+   approach. The project hinges on YOLOE being able to identify UI elements.
+   - Datasets: RICO (66K Android screens), WebUI-2M, VINS, ScreenSpot
+   - Training: `yolo train model=yoloe-26s-seg.pt data=rico_ui.yaml epochs=100`
+   - Cost: ~$20 on GCP (T4 instance, 4-8 hours). User has $300 GCP credits expiring
+     in ~3 months — use them now or lose them.
+   - Convert RICO annotations to YOLO format (JSON bboxes → YOLO txt)
+   - **IMPORTANT:** Fine-tuning can break text-prompt mode (ultralytics issue #19977).
+     Use the special training recipe that preserves text-prompt ability, or accept
+     that the fine-tuned model uses fixed classes only.
+2. Only if fine-tuning also fails: consider Fallback C (Windows accessibility tree as
+   primary detection source, with YOLOE visual-prompt for non-accessible elements).
 
 - [ ] **Step 5: Commit benchmark**
 
