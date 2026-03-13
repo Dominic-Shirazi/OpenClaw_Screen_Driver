@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.claude/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+snippets/
+replay_logs/
+*.index
+.env
