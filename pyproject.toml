@@ -55,6 +55,10 @@ dev = [
 [project.scripts]
 ocsd = "main:main"
 
+[tool.setuptools.packages.find]
+include = ["api*", "core*", "executor*", "hub*", "mapper*", "recorder*", "skills*"]
+exclude = ["tests*"]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
