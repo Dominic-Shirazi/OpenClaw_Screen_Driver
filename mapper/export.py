@@ -137,8 +137,14 @@ def save_skill_to_file(skill_data: Dict[str, Any], file_path: Path | str) -> Non
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _default_serializer(obj: object) -> Any:
+        """Handle non-serializable types (enums, etc.)."""
+        if hasattr(obj, "value"):
+            return obj.value
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(skill_data, f, indent=2, ensure_ascii=False)
+        json.dump(skill_data, f, indent=2, ensure_ascii=False, default=_default_serializer)
 
     logger.info("Saved skill '%s' (%s) to %s", skill_data["name"], skill_data["skill_id"][:8], path)
 

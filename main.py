@@ -123,7 +123,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         on_mode_changed=on_mode_changed,
         on_close=on_close,
     )
-    overlay.show(start_mode=OverlayMode.RECORD)
+    overlay.show()  # starts in PASSTHROUGH — Ctrl+R when ready to record
 
     return app.exec()
 
