@@ -87,10 +87,18 @@ def validate_action(
             confidence=float(res.get("confidence", 0.0)),
             notes=str(res.get("notes", "No notes")),
         )
-    except (RuntimeError, ConnectionError, ValueError) as e:
-        logger.error("VLM validation failed: %s", e)
+    except (RuntimeError, ConnectionError, ValueError, Exception) as e:
+        logger.error("VLM confirm_action failed: %s", e)
+        # VLM unavailable — fall back to pixel diff result
+        if diff >= threshold:
+            logger.warning("VLM unavailable but pixel diff %.1f%% suggests success", diff * 100)
+            return ConfirmResult(
+                success=True,
+                confidence=0.5,
+                notes=f"VLM unavailable, pixel diff {diff:.1%} suggests change",
+            )
         return ConfirmResult(
-            success=False, confidence=0.0, notes=f"VLM error: {e}"
+            success=False, confidence=0.0, notes=f"VLM unavailable: {e}"
         )
     finally:
         if before_path and before_path.exists():

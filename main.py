@@ -193,6 +193,12 @@ def cmd_execute(args: argparse.Namespace) -> int:
     from mapper.export import import_skill, load_skill_from_file
     from mapper.runner import run_skill
 
+    # --skip-vlm overrides vlm_confirm in config at runtime
+    if args.skip_vlm:
+        cfg = get_config()
+        cfg.setdefault("execution", {})["vlm_confirm"] = False
+        logger.info("VLM validation disabled (--skip-vlm)")
+
     skill_path = Path(args.skill_file)
     if not skill_path.exists():
         logger.error("Skill file not found: %s", skill_path)
