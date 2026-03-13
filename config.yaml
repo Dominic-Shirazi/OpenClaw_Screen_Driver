@@ -6,10 +6,47 @@ hardware:
   gpu_embeddings: 1
 
 models:
-  # Model groups routed through LiteLLM proxy (override in .env)
-  # vlm, quick, planning, coding are set via OCSD_*_MODEL env vars
+  # Vision LLM — routed through LiteLLM proxy
+  # Model name maps to LiteLLM route (qwen3-vl cascade: 235b-cloud → 30b-cloud → 8b-local)
+  vlm: "vision"
+  # Quick tasks (text-only, fast responses)
+  quick: "quick"
+  # Planning / complex reasoning
+  planning: "planning"
+  # Code generation
+  coding: "coding"
+  # CLIP for visual embeddings (CPU-only, ~400MB)
   clip: "openai/clip-vit-base-patch32"
+  # Whisper for voice input (Stage 2)
   whisper_model: "small"
+
+detection:
+  # Fast element detector — scans full screen for interactive elements
+  model: "yolo-e"
+  confidence_threshold: 0.4
+  # Extra padding around detected elements when cropping for VLM
+  crop_buffer_pct: 0.30
+
+recovery:
+  # Optional: strong LLM for self-healing when replay breaks
+  # Set enabled=true and configure OCSD_RECOVERY_MODEL in .env
+  enabled: false
+  model: "claude-opus"
+  max_retries: 2
+
+fingerprinting:
+  # App/page identity detection (YOLO-E based)
+  enabled: true
+  # Seconds to wait for app to load before retrying
+  wait_timeout_s: 5
+  # Number of retries before escalating to recovery LLM or human
+  retry_count: 2
+
+litellm:
+  # LiteLLM proxy endpoint (override with LITELLM_BASE_URL in .env)
+  base_url: "http://localhost:4000/v1"
+  # API key for LiteLLM (override with LITELLM_API_KEY in .env)
+  api_key: ""
 
 paths:
   skills_dir: "./skills"
@@ -23,6 +60,16 @@ execution:
   pixel_diff_threshold: 0.08
   hover_delay_ms: 300
   default_confidence: 0.75
+  vlm_confirm: true
+  abort_on_failure: true
+  # Human-like delay multiplier (override with OCSD_HUMAN_DELAY in .env)
+  # 0 = instant (no sleeps at all — speed mode)
+  # 1.0 = normal human speed
+  # 5.0 = very slow (watch/debug mode, easy to cancel mid-action)
+  human_delay: 1.0
+  # Chance per character of a typo + immediate backspace correction
+  # 0.0 = no typos, 0.04 = ~1 in 25 chars, 0.10 = frequent typos
+  typo_chance: 0.04
 
 api:
   host: "0.0.0.0"
