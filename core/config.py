@@ -34,11 +34,13 @@ _DEFAULTS: dict[str, Any] = {
         "coding": os.environ.get("OCSD_CODING_MODEL", "coding"),
         "clip": "openai/clip-vit-base-patch32",
         "whisper_model": "small",
+        "yoloe": "yoloe-26s-seg.pt",
     },
     "detection": {
         "model": "yolo-e",
         "confidence_threshold": 0.4,
         "crop_buffer_pct": 0.30,
+        "search_radius": 400,
     },
     "recovery": {
         "enabled": os.environ.get("OCSD_RECOVERY_ENABLED", "false").lower() == "true",

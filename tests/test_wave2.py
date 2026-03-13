@@ -67,7 +67,7 @@ class TestSanitizeElementType:
 
     def test_fuzzy_mapping(self):
         assert _sanitize_element_type("text_box") == "textbox"
-        assert _sanitize_element_type("link") == "button_nav"
+        assert _sanitize_element_type("link") == "link"
         assert _sanitize_element_type("checkbox") == "toggle"
         assert _sanitize_element_type("select") == "dropdown"
         assert _sanitize_element_type("toast") == "notification"

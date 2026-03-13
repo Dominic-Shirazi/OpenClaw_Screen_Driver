@@ -19,6 +19,9 @@ models:
   clip: "openai/clip-vit-base-patch32"
   # Whisper for voice input (Stage 2)
   whisper_model: "small"
+  # YOLOE model for one-shot visual grounding (downloads on first use)
+  # Options: yoloe-26s-seg.pt (~50MB), yoloe-26l-seg.pt (~140MB)
+  yoloe: "yoloe-26s-seg.pt"
 
 detection:
   # Fast element detector — scans full screen for interactive elements
@@ -26,6 +29,9 @@ detection:
   confidence_threshold: 0.4
   # Extra padding around detected elements when cropping for VLM
   crop_buffer_pct: 0.30
+  # YOLOE search radius (pixels) around expected position
+  search_radius: 400
+
 
 recovery:
   # Optional: strong LLM for self-healing when replay breaks

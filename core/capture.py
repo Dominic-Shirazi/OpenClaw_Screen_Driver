@@ -93,6 +93,34 @@ def save_snippet(img: np.ndarray, skill_id: str, element_id: str) -> str:
     return str(file_path)
 
 
+def load_snippet(skill_id: str, element_id: str) -> np.ndarray | None:
+    """Loads a saved element snippet from disk.
+
+    Path: assets/snippets/{skill_id}/{element_id}.png
+
+    Args:
+        skill_id: The skill name used during recording.
+        element_id: The element/node ID (first 12 chars).
+
+    Returns:
+        BGR numpy array, or None if file not found.
+    """
+    config = get_config()
+    snippets_dir = config.get("paths", {}).get("snippets_dir", "./assets/snippets")
+    file_path = Path(snippets_dir) / skill_id / f"{element_id}.png"
+
+    if not file_path.exists():
+        logger.debug("Snippet not found: %s", file_path)
+        return None
+
+    img = cv2.imread(str(file_path), cv2.IMREAD_COLOR)
+    if img is None:
+        logger.warning("Failed to read snippet: %s", file_path)
+        return None
+
+    return img
+
+
 def get_window_title() -> str:
     """Retrieves the active window title.
 

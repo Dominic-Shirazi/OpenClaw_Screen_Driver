@@ -4,11 +4,12 @@ Takes a recorded UI automation graph (OCSDGraph), finds the optimal
 path from start to goal, and replays each step using the locate
 cascade, action executor, and post-action validator.
 
-Locate cascade (Stage 1):
-1. OCR — find element by visible text
-2. YOLO-E + position — STUB (Stage 2)
-3. YOLO-E + VLM — STUB (Stage 2)
-4. VLM full scan — STUB (Stage 2)
+Locate cascade (ordered by speed, cheapest first):
+1. YOLO-E targeted finder — saved snippet → "find this on screen" (~20ms)
+2. CLIP embedding — compare SAVED embedding against YOLO-E candidates
+3. OCR text match — SCOPED to region around expected position (~200ms)
+4. VLM full scan — screenshot → LiteLLM → match by label (expensive)
+5. Position fallback — blind click at recorded coordinates (no confirmation)
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import random
 import time
 from typing import Any
 
+import pyautogui
+
 from core.capture import screenshot_full
 from core.config import get_config
 from core.executor import click, type_text, scroll
@@ -26,6 +29,7 @@ from core.types import (
     ConfirmResult,
     ElementNotFoundError,
     LocateResult,
+    Point,
     ReplayLog,
     ReplayStep,
 )
@@ -36,18 +40,46 @@ from mapper.validator import validate_action
 logger = logging.getLogger(__name__)
 
 
-def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
+def _resolve_position_hint(
+    node_data: dict,
+) -> tuple[int | None, int | None, int, int]:
+    """Extracts expected pixel position from node's relative_position.
+
+    Returns:
+        (hint_x, hint_y, screen_w, screen_h) — hint values are None
+        if the node has no stored position.
+    """
+    sw, sh = pyautogui.size()
+    pos = node_data.get("relative_position", {})
+    x_pct = pos.get("x_pct")
+    y_pct = pos.get("y_pct")
+    if x_pct is not None and y_pct is not None:
+        return int(x_pct * sw), int(y_pct * sh), sw, sh
+    return None, None, sw, sh
+
+
+def locate_element(
+    graph: OCSDGraph,
+    node_id: str,
+    skill_id: str = "",
+) -> LocateResult:
     """Locates an element on screen using the cascading strategy.
 
-    Cascade order:
-    1. OCR text match
-    2. YOLO-E + position (stub)
-    3. YOLO-E + VLM (stub)
-    4. VLM full scan (stub)
+    Cascade order (fastest / cheapest first):
+    1. **YOLO-E targeted finder** — give it the saved snippet from recording
+       and approximate position → one-shot visual grounding, ~20 ms.
+    2. **CLIP embedding** — retrieve the SAVED embedding (from recording),
+       compare against crops of the current screen near the expected
+       position.  Confirms YOLO-E hits or finds the element independently.
+    3. **OCR text match** — search ONLY within a region around the expected
+       position (not full screen!) to avoid false positives from ads etc.
+    4. **VLM full-screen scan** — expensive LiteLLM call, most reliable.
+    5. **Position fallback** — blind click at recorded coordinates.
 
     Args:
         graph: The OCSDGraph containing the node data.
         node_id: The ID of the node to locate.
+        skill_id: Skill name (for loading snippet PNGs).
 
     Returns:
         LocateResult with the screen location and match info.
@@ -57,12 +89,107 @@ def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
         KeyError: If node_id does not exist in the graph.
     """
     node_data = graph.get_node(node_id)
+    hint_x, hint_y, sw, sh = _resolve_position_hint(node_data)
 
-    # Stage 1: OCR
+    # ------------------------------------------------------------------
+    # Stage 1: YOLO-E targeted finder
+    # "here's the snippet from recording → find it on this screen"
+    # ------------------------------------------------------------------
+    try:
+        from core.capture import load_snippet
+        from core.yoloe import find_element_locate
+
+        snippet = load_snippet(skill_id, node_id[:12])
+        if snippet is not None:
+            screen = screenshot_full()
+            result = find_element_locate(
+                snippet,
+                screen,
+                hint_x=hint_x,
+                hint_y=hint_y,
+                search_radius=400,
+                conf_threshold=0.35,
+            )
+            if result is not None:
+                logger.info(
+                    "Located [%s] via YOLOE at (%d, %d) conf=%.2f",
+                    node_id[:8],
+                    result.point.x,
+                    result.point.y,
+                    result.confidence,
+                )
+                return result
+            logger.debug("YOLOE found no match for [%s]", node_id[:8])
+        else:
+            logger.debug("No snippet on disk for [%s], skipping YOLOE", node_id[:8])
+    except ImportError:
+        logger.debug("YOLOE (ultralytics) not installed, skipping Stage 1")
+    except Exception as e:
+        logger.debug("YOLOE locate error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 2: CLIP embedding — CORRECT direction
+    # Retrieve the SAVED embedding from FAISS (recorded at capture time),
+    # then screenshot a region of the current screen around the expected
+    # position, embed that crop, and compare via cosine similarity.
+    # ------------------------------------------------------------------
+    try:
+        from core.capture import screenshot_region
+        from core.embeddings import generate_embedding, get_embedding_by_id
+
+        saved_emb = get_embedding_by_id(node_id)
+        if saved_emb is not None and hint_x is not None and hint_y is not None:
+            import cv2
+            import numpy as np
+
+            # Crop a region around the expected position
+            search_r = 300
+            rx = max(0, hint_x - search_r)
+            ry = max(0, hint_y - search_r)
+            rw = min(search_r * 2, sw - rx)
+            rh = min(search_r * 2, sh - ry)
+
+            crop = screenshot_region(rx, ry, rw, rh)
+            if crop.size > 0:
+                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                current_emb = generate_embedding(rgb_crop)
+
+                # Cosine similarity (both are L2-normalized → dot product)
+                score = float(np.dot(saved_emb, current_emb.T).item())
+
+                if score > 0.75:
+                    # High similarity — element is still roughly where it was
+                    logger.info(
+                        "Located [%s] via CLIP at (%d, %d) score=%.3f",
+                        node_id[:8], hint_x, hint_y, score,
+                    )
+                    return LocateResult(
+                        point=Point(hint_x, hint_y),
+                        confidence=min(score, 0.85),
+                        method="clip",
+                    )
+                else:
+                    logger.debug(
+                        "CLIP score %.3f too low for [%s]", score, node_id[:8],
+                    )
+    except ImportError:
+        logger.debug("CLIP/FAISS not available, skipping Stage 2")
+    except Exception as e:
+        logger.debug("CLIP search error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 3: OCR text match — SCOPED to region around expected position
+    # Avoids false positives from ads / unrelated UI text.
+    # ------------------------------------------------------------------
     ocr_text = node_data.get("ocr_text")
     if ocr_text:
         logger.debug("Locate [%s] via OCR: %r", node_id[:8], ocr_text)
-        result = find_text_on_screen(ocr_text)
+        result = find_text_on_screen(
+            ocr_text,
+            hint_x=hint_x,
+            hint_y=hint_y,
+            search_radius=400,
+        )
         if result is not None:
             logger.info(
                 "Located [%s] via OCR at (%d, %d) conf=%.2f",
@@ -73,48 +200,67 @@ def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
             )
             return result
 
-    # Stage 2: YOLO-E + position (stub)
-    logger.debug("YOLO-E + position locate not yet implemented, skipping")
+    # ------------------------------------------------------------------
+    # Stage 4: VLM full-screen analysis (expensive, high reliability)
+    # ------------------------------------------------------------------
+    try:
+        from core.vision import first_pass_map_array
 
-    # Stage 3: YOLO-E + VLM (stub)
-    logger.debug("YOLO-E + VLM locate not yet implemented, skipping")
+        full_img = screenshot_full()
+        candidates = first_pass_map_array(full_img)
 
-    # Stage 4: VLM full scan (stub)
-    logger.debug("VLM full scan locate not yet implemented, skipping")
+        target_label = node_data.get("label", "").lower()
 
-    # Stage 5 (fallback): Use stored position coordinates
-    pos = node_data.get("relative_position", {})
-    x_pct = pos.get("x_pct")
-    y_pct = pos.get("y_pct")
-    if x_pct is not None and y_pct is not None:
-        import pyautogui
-        from core.types import Point
+        if target_label and candidates:
+            for c in candidates:
+                c_label = c.get("label_guess", "").lower()
+                if target_label in c_label or c_label in target_label:
+                    rect = c.get("rect", {})
+                    cx = rect.get("x", 0) + rect.get("w", 0) // 2
+                    cy = rect.get("y", 0) + rect.get("h", 0) // 2
+                    conf = c.get("confidence", 0.5)
+                    logger.info(
+                        "Located [%s] via VLM at (%d, %d) conf=%.2f",
+                        node_id[:8], cx, cy, conf,
+                    )
+                    return LocateResult(
+                        point=Point(cx, cy),
+                        confidence=conf,
+                        method="vlm",
+                    )
+    except ImportError:
+        logger.debug("VLM module not available, skipping Stage 4")
+    except Exception as e:
+        logger.debug("VLM scan error: %s", e)
 
-        sw, sh = pyautogui.size()
-        px = int(x_pct * sw)
-        py = int(y_pct * sh)
+    # ------------------------------------------------------------------
+    # Stage 5: Position fallback — blind click at recorded coordinates
+    # ------------------------------------------------------------------
+    if hint_x is not None and hint_y is not None:
+        pos = node_data.get("relative_position", {})
         w_pct = pos.get("w_pct", 0.0)
         h_pct = pos.get("h_pct", 0.0)
         if w_pct > 0 and h_pct > 0:
             logger.warning(
                 "Located [%s] via bbox center fallback at (%d, %d) "
                 "bbox=%dx%d — no visual confirmation",
-                node_id[:8], px, py, int(w_pct * sw), int(h_pct * sh),
+                node_id[:8], hint_x, hint_y, int(w_pct * sw), int(h_pct * sh),
             )
         else:
             logger.warning(
                 "Located [%s] via position fallback at (%d, %d) — "
                 "no visual confirmation",
-                node_id[:8], px, py,
+                node_id[:8], hint_x, hint_y,
             )
         return LocateResult(
-            point=Point(px, py),
-            confidence=0.3,  # low confidence — blind replay
+            point=Point(hint_x, hint_y),
+            confidence=0.3,
             method="direct",
-            snippet=None,
         )
 
-    raise ElementNotFoundError(node_id, f"All locate stages failed for node {node_id[:8]}")
+    raise ElementNotFoundError(
+        node_id, f"All locate stages failed for node {node_id[:8]}",
+    )
 
 
 def _action_type_for_node(graph: OCSDGraph, node_id: str) -> str:
@@ -148,6 +294,7 @@ def execute_node(
     node_id: str,
     next_node_id: str | None = None,
     dry_run: bool = False,
+    skill_id: str = "",
 ) -> ReplayStep:
     """Executes an action on a single node.
 
@@ -159,6 +306,7 @@ def execute_node(
         node_id: The node to interact with.
         next_node_id: The next node in the path (for edge stats tracking).
         dry_run: If True, logs actions without executing them.
+        skill_id: Skill name for loading snippet PNGs during locate.
 
     Returns:
         ReplayStep with execution details and success status.
@@ -176,7 +324,7 @@ def execute_node(
 
     # Locate the element
     try:
-        location = locate_element(graph, node_id)
+        location = locate_element(graph, node_id, skill_id=skill_id)
     except ElementNotFoundError:
         logger.error("Cannot locate element for node %s", node_id[:8])
         if next_node_id:
@@ -316,7 +464,10 @@ def run_skill(
             node_label,
         )
 
-        step = execute_node(graph, node_id, next_node_id=next_id, dry_run=dry_run)
+        step = execute_node(
+            graph, node_id, next_node_id=next_id,
+            dry_run=dry_run, skill_id=graph.skill_id,
+        )
         replay_log.append_step(step)
 
         if not step.success:

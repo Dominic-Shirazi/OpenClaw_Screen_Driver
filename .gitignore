@@ -40,3 +40,12 @@ desktop.ini
 # Environment
 .env
 .env.local
+
+# Skills output (generated at recording time)
+skills/
+
+# Docker
+docker-compose.override.yml
+
+# Claude Code
+.claude/

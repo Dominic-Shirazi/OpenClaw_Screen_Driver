@@ -132,6 +132,31 @@ def save_to_index(element_id: str, embedding: np.ndarray, x_pct: float = 0.0, y_
     
     save_index()
 
+def get_embedding_by_id(element_id: str) -> np.ndarray | None:
+    """Retrieves the saved CLIP embedding for a specific element.
+
+    This is used during replay to get the ORIGINAL embedding from recording
+    time, so we can compare it against current screen crops (correct CLIP
+    direction: saved → current, not current → saved).
+
+    Args:
+        element_id: The node ID stored during recording.
+
+    Returns:
+        np.ndarray of shape (1, 512) or None if not found.
+    """
+    global _faiss_index, _metadata_map
+    load_index()
+
+    for idx, meta in _metadata_map.items():
+        if meta["element_id"] == element_id:
+            if _faiss_index is not None and idx < _faiss_index.ntotal:
+                vec = np.zeros((1, 512), dtype="float32")
+                _faiss_index.reconstruct(idx, vec[0])
+                return vec
+    return None
+
+
 def search_index(
     query_embedding: np.ndarray,
     top_k: int = 5,

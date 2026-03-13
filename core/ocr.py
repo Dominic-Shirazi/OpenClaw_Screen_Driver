@@ -147,34 +147,115 @@ def ocr_with_boxes(img: np.ndarray) -> list[dict]:
             
     return results
 
-def find_text_on_screen(text: str) -> LocateResult | None:
+def find_text_in_region(
+    text: str,
+    region_x: int,
+    region_y: int,
+    region_w: int,
+    region_h: int,
+) -> LocateResult | None:
+    """Search for *text* within a specific screen region only.
+
+    This avoids false positives from ads / unrelated UI that happen to
+    contain the same words (e.g. an ad saying "Log in today!" when we
+    want the actual Log-in button).
+
+    Coordinates in the returned :class:`LocateResult` are in full-screen
+    space (offset back from the crop).
+
+    Args:
+        text: Substring to search for (case-insensitive).
+        region_x: Left edge of the search region (pixels).
+        region_y: Top edge of the search region (pixels).
+        region_w: Width of the search region (pixels).
+        region_h: Height of the search region (pixels).
+
+    Returns:
+        LocateResult if found inside the region, otherwise None.
     """
-    Capture the screen and find the given text on it.
-    
+    _ensure_tesseract_installed()
+
+    img = capture.screenshot_region(region_x, region_y, region_w, region_h)
+    blocks = ocr_with_boxes(img)
+
+    best_match = None
+    target_text = text.lower()
+
+    for block in blocks:
+        block_text = block["text"].lower()
+        if target_text in block_text:
+            if best_match is None or block["confidence"] > best_match["confidence"]:
+                best_match = block
+
+    if best_match:
+        # Offset rect back to full-screen coordinates
+        r = best_match["rect"]
+        abs_rect = Rect(
+            x=r.x + region_x,
+            y=r.y + region_y,
+            w=r.w,
+            h=r.h,
+        )
+        return LocateResult(
+            point=abs_rect.center,
+            method="ocr",
+            confidence=best_match["confidence"],
+            rect=abs_rect,
+        )
+
+    return None
+
+
+def find_text_on_screen(
+    text: str,
+    *,
+    hint_x: int | None = None,
+    hint_y: int | None = None,
+    search_radius: int = 400,
+) -> LocateResult | None:
+    """Capture the screen and find the given text on it.
+
+    If *hint_x*/*hint_y* are provided the search is scoped to a region
+    of *search_radius* pixels around that point.  Otherwise the full
+    screen is scanned (slower, higher false-positive risk).
+
     Args:
         text: The text substring to search for.
-        
+        hint_x: Optional expected X position (pixels).
+        hint_y: Optional expected Y position (pixels).
+        search_radius: Pixel radius around the hint.
+
     Returns:
         LocateResult if found, otherwise None.
     """
     _ensure_tesseract_installed()
-    
-    # Capture full screen
+
+    # --- Scoped search when we have a position hint ---
+    if hint_x is not None and hint_y is not None:
+        import pyautogui
+        sw, sh = pyautogui.size()
+        rx = max(0, hint_x - search_radius)
+        ry = max(0, hint_y - search_radius)
+        rw = min(search_radius * 2, sw - rx)
+        rh = min(search_radius * 2, sh - ry)
+        result = find_text_in_region(text, rx, ry, rw, rh)
+        if result is not None:
+            return result
+        # Fall through to full-screen only if scoped search missed
+
+    # --- Full-screen fallback ---
     img = capture.screenshot_full()
-    
-    # Get all text blocks
     blocks = ocr_with_boxes(img)
-    
-    # Search for substring match
+
     best_match = None
     target_text = text.lower()
-    
+
     for block in blocks:
         block_text = block['text'].lower()
         if target_text in block_text:
             if best_match is None or block['confidence'] > best_match['confidence']:
                 best_match = block
-                
+
     if best_match:
         rect = best_match['rect']
         return LocateResult(
@@ -183,5 +264,5 @@ def find_text_on_screen(text: str) -> LocateResult | None:
             confidence=best_match['confidence'],
             rect=rect
         )
-        
+
     return None

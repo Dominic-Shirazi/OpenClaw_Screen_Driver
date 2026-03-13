@@ -1,7 +1,8 @@
 """OCSD — OpenClaw Screen Driver entry point.
 
 Usage:
-    python main.py --record                         Launch overlay for recording
+    python main.py --record                         Record a workflow (sequential edges)
+    python main.py --diagram --name chrome_login     Annotate page layout (no edges, for YOLO-E)
     python main.py --execute skills/login.json       Execute a saved skill
     python main.py --execute skills/login.json --to "Submit"  Execute to a label
     python main.py --dry-run --execute skills/login.json      Simulate without acting
@@ -76,15 +77,23 @@ def _ensure_dirs() -> None:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    """Launches the overlay for recording a new skill."""
+    """Launches the overlay for recording a new skill.
+
+    Handles both workflow (--record) and diagram (--diagram) modes.
+    The overlay is identical — the difference is in how the recording
+    is saved (with or without sequential edges).
+    """
     from PyQt6.QtWidgets import QApplication
 
     from recorder.dialog import TagDialog
     from recorder.overlay import OverlayController, OverlayMode
 
+    is_diagram = getattr(args, "diagram", False)
+    mode_label = "diagram" if is_diagram else "workflow"
+
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Don't quit when TagDialog closes
-    logger.info("Starting recording session")
+    logger.info("Starting %s recording session", mode_label)
 
     recorded_elements: list[dict] = []
 
@@ -152,17 +161,132 @@ def cmd_record(args: argparse.Namespace) -> int:
     return app.exec()
 
 
+def _save_snippets_and_embeddings(
+    elements: list[dict],
+    node_ids: list[str],
+    skill_name: str,
+    screen_w: int,
+    screen_h: int,
+) -> None:
+    """Saves element crops and CLIP embeddings for replay matching.
+
+    For each element with a bounding box, crops the screen region (with
+    30% buffer padding), saves the PNG snippet, and generates a CLIP
+    embedding for FAISS similarity search during replay.
+
+    Args:
+        elements: List of recorded element dicts with bbox data.
+        node_ids: Corresponding graph node IDs (same order as elements).
+        skill_name: Skill name for snippet directory.
+        screen_w: Screen width in pixels.
+        screen_h: Screen height in pixels.
+    """
+    from core.capture import save_snippet, screenshot_full
+    from core.config import get_config
+
+    cfg = get_config()
+    crop_buffer = cfg.get("detection", {}).get("crop_buffer_pct", 0.30)
+
+    # Take a single screenshot to crop from (elements were just recorded)
+    try:
+        full_screen = screenshot_full()
+    except Exception as e:
+        logger.warning("Could not capture screen for snippets: %s", e)
+        return
+
+    embed_count = 0
+    for elem, node_id in zip(elements, node_ids):
+        bbox_w = elem.get("bbox_w", 0)
+        bbox_h = elem.get("bbox_h", 0)
+
+        if bbox_w <= 0 or bbox_h <= 0:
+            # Point click — use a small region around the click point
+            cx, cy = elem["x"], elem["y"]
+            bbox_x = max(0, cx - 30)
+            bbox_y = max(0, cy - 30)
+            bbox_w = 60
+            bbox_h = 60
+        else:
+            bbox_x = elem.get("bbox_x", elem["x"])
+            bbox_y = elem.get("bbox_y", elem["y"])
+
+        # Add buffer padding
+        buf_w = int(bbox_w * crop_buffer)
+        buf_h = int(bbox_h * crop_buffer)
+        x1 = max(0, bbox_x - buf_w)
+        y1 = max(0, bbox_y - buf_h)
+        x2 = min(screen_w, bbox_x + bbox_w + buf_w)
+        y2 = min(screen_h, bbox_y + bbox_h + buf_h)
+
+        # Crop from the full screenshot
+        crop = full_screen[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+
+        # Save snippet PNG
+        try:
+            save_snippet(crop, skill_name, node_id[:12])
+        except Exception as e:
+            logger.debug("Could not save snippet for %s: %s", node_id[:8], e)
+
+        # Generate CLIP embedding and add to FAISS index
+        try:
+            import cv2
+            from core.embeddings import generate_embedding, save_to_index
+
+            # CLIP expects RGB, our crop is BGR
+            rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            embedding = generate_embedding(rgb_crop)
+            save_to_index(
+                element_id=node_id,
+                embedding=embedding,
+                x_pct=elem["x"] / screen_w,
+                y_pct=elem["y"] / screen_h,
+            )
+            embed_count += 1
+        except ImportError:
+            logger.debug("CLIP/FAISS not available, skipping embeddings")
+            break  # No point trying for remaining elements
+        except Exception as e:
+            logger.debug("Could not generate embedding for %s: %s", node_id[:8], e)
+
+    if embed_count > 0:
+        logger.info("Saved %d CLIP embeddings to FAISS index", embed_count)
+
+
 def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
-    """Builds a graph from recorded elements and saves as a skill file."""
+    """Builds a graph from recorded elements and saves as a skill file.
+
+    In workflow mode (--record), nodes are connected with sequential edges.
+    In diagram mode (--diagram), nodes are unordered annotations with no edges
+    — used for page layout training (YOLO-E) rather than replay.
+    """
     import pyautogui
 
     from mapper.export import export_skill, save_skill_to_file
     from mapper.graph import OCSDGraph
 
+    is_diagram = getattr(args, "diagram", False)
     screen_w, screen_h = pyautogui.size()
     graph = OCSDGraph()
 
+    # In diagram mode, save a reference screenshot of the page being annotated
+    if is_diagram:
+        try:
+            from core.capture import screenshot_full
+
+            cfg = get_config()
+            snippets_dir = Path(cfg["paths"]["snippets_dir"])
+            snippets_dir.mkdir(parents=True, exist_ok=True)
+            skill_name = getattr(args, "skill_name", None) or "diagram"
+            ref_path = snippets_dir / f"{skill_name}_ref.png"
+            screenshot_full(str(ref_path))
+            logger.info("Diagram reference screenshot: %s", ref_path)
+        except Exception as e:
+            logger.warning("Could not save reference screenshot: %s", e)
+
     prev_node_id: str | None = None
+    node_ids: list[str] = []
     for elem in elements:
         # Normalize ElementType enum to string value
         raw_et = elem.get("element_type", "unknown")
@@ -183,11 +307,14 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
             h_pct=h_pct,
             resolution=(screen_w, screen_h),
         )
+        node_ids.append(node_id)
 
         if elem.get("is_destination"):
             graph.update_node(node_id, element_type="read_here")
 
-        if prev_node_id is not None:
+        # Workflow mode: connect nodes with sequential edges
+        # Diagram mode: no edges — nodes are unordered annotations
+        if not is_diagram and prev_node_id is not None:
             # Map element_type to graph action_type
             # TagDialog returns ElementType enum — normalize to string
             raw_etype = elem.get("element_type", "unknown")
@@ -210,21 +337,30 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
 
         prev_node_id = node_id
 
+    # Save element snippets and CLIP embeddings for replay matching
     cfg = get_config()
+    default_name = "diagram" if is_diagram else "recording"
+    skill_name = getattr(args, "skill_name", None) or default_name
+    _save_snippets_and_embeddings(elements, node_ids, skill_name, screen_w, screen_h)
+
     skills_dir = Path(cfg["paths"]["skills_dir"])
-    skill_name = getattr(args, "skill_name", None) or "recording"
     out_path = skills_dir / f"{skill_name}.json"
 
+    recording_type = "diagram" if is_diagram else "workflow"
     skill_data = export_skill(
         graph,
         name=skill_name,
-        description=f"Recorded skill: {skill_name}",
+        description=f"Recorded {recording_type}: {skill_name}",
         author="ocsd-recorder",
         version="0.1.0",
         target_app="unknown",
     )
+    # Tag the skill data so downstream tools know the recording type
+    skill_data["recording_type"] = recording_type
     save_skill_to_file(skill_data, out_path)
-    logger.info("Skill saved to %s", out_path)
+    logger.info("%s saved to %s (%d nodes, %d edges)",
+                recording_type.capitalize(), out_path,
+                graph.node_count, graph.edge_count)
 
 
 def cmd_execute(args: argparse.Namespace) -> int:
@@ -342,7 +478,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-vlm", action="store_true", dest="skip_vlm", help="Skip VLM validation")
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--record", action="store_true", help="Launch recording overlay")
+    group.add_argument("--record", action="store_true", help="Launch recording overlay (workflow mode — sequential edges)")
+    group.add_argument("--diagram", action="store_true", help="Launch recording overlay (diagram mode — annotate page, no edges)")
     group.add_argument("--execute", metavar="SKILL_FILE", dest="skill_file", help="Execute a skill JSON")
 
     parser.add_argument("--to", metavar="LABEL", dest="target_label", default=None, help="Execute to a specific label")
@@ -365,7 +502,7 @@ def main() -> int:
 
     logger.info("OCSD v%s", get_config()["ocsd"]["version"])
 
-    if args.record:
+    if args.record or args.diagram:
         return cmd_record(args)
     elif args.skill_file:
         return cmd_execute(args)

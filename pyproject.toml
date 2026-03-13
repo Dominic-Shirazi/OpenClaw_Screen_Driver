@@ -1,33 +1,68 @@
 [project]
 name = "openclaw-screen-driver"
 version = "0.1.0"
-description = "AI-powered screen automation framework for Windows"
+description = "AI-powered screen automation framework"
 requires-python = ">=3.11"
 dependencies = [
-    "mss",
-    "Pillow",
-    "numpy",
-    "opencv-python",
-    "pytesseract",
-    "openai>=1.0.0",
+    "mss>=9.0",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "pytesseract>=0.3.10",
     "python-dotenv>=1.0.0",
-    "transformers",
-    "faiss-cpu",
-    "torch",
-    "pywinauto",
-    "pyautogui",
-    "pynput",
-    "networkx",
-    "pyyaml",
-    "PyQt6",
+    "pyautogui>=0.9.54",
+    "pynput>=1.7",
+    "networkx>=3.0",
+    "pyyaml>=6.0",
+    "PyQt6>=6.5",
 ]
 
 [project.optional-dependencies]
+# Core AI features (CLIP embeddings + FAISS similarity search)
+embeddings = [
+    "transformers>=4.36",
+    "faiss-cpu>=1.7",
+    "torch>=2.1",
+]
+# YOLO-E visual grounding (targeted element finder)
+yoloe = [
+    "ultralytics>=8.3",
+]
+# VLM vision analysis via LiteLLM proxy
+vlm = [
+    "openai>=1.0.0",
+]
+# Windows-only accessibility bridge
+windows = [
+    "pywinauto>=0.6.8",
+]
+# REST API server
+api = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+]
+# Everything (install all optional features)
+all = [
+    "openclaw-screen-driver[embeddings,yoloe,vlm,windows,api]",
+]
+# Development tools
 dev = [
-    "pytest",
-    "pytest-mock"
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.1",
 ]
 
+[project.scripts]
+ocsd = "main:main"
+
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
