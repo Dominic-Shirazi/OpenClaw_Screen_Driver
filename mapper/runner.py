@@ -108,44 +108,78 @@ def locate_element(graph: OCSDGraph, node_id: str) -> LocateResult:
     raise ElementNotFoundError(node_id, f"All locate stages failed for node {node_id[:8]}")
 
 
-def execute_action(
+def _action_type_for_node(graph: OCSDGraph, node_id: str) -> str:
+    """Determines the action type for a node based on its element type.
+
+    Args:
+        graph: The graph containing the node.
+        node_id: The node to get the action type for.
+
+    Returns:
+        Action type string (e.g., "textbox", "button", "button_nav").
+    """
+    node_data = graph.get_node(node_id)
+    etype = node_data.get("element_type", "unknown")
+    mapping = {
+        "textbox": "textbox",
+        "button": "button",
+        "button_nav": "button_nav",
+        "icon": "button",
+        "link": "button_nav",
+        "tab": "tab",
+        "dropdown": "dropdown",
+        "toggle": "toggle",
+        "scrollbar": "scrollbar",
+    }
+    return mapping.get(etype, "button")
+
+
+def execute_node(
     graph: OCSDGraph,
-    source_id: str,
-    target_id: str,
+    node_id: str,
+    next_node_id: str | None = None,
     dry_run: bool = False,
 ) -> ReplayStep:
-    """Executes a single action edge from the graph.
+    """Executes an action on a single node.
 
-    Locates the source element, takes before/after screenshots,
+    Locates the element on screen, takes before/after screenshots,
     executes the action, validates the result, and records stats.
 
     Args:
-        graph: The OCSDGraph containing the execution paths.
-        source_id: The node where the action is performed.
-        target_id: The node representing the expected result state.
+        graph: The OCSDGraph containing the node data.
+        node_id: The node to interact with.
+        next_node_id: The next node in the path (for edge stats tracking).
         dry_run: If True, logs actions without executing them.
 
     Returns:
         ReplayStep with execution details and success status.
     """
-    edge_data = graph.get_edge(source_id, target_id)
-    action_type = edge_data.get("action_type", "button")
-    action_payload = edge_data.get("action_payload", "")
+    action_type = _action_type_for_node(graph, node_id)
 
-    # Locate the source element
+    # Get action payload from incoming edge if it exists
+    action_payload = ""
+    if next_node_id:
+        try:
+            edge_data = graph.get_edge(node_id, next_node_id)
+            action_payload = edge_data.get("action_payload", "")
+        except (KeyError, Exception):
+            pass
+
+    # Locate the element
     try:
-        location = locate_element(graph, source_id)
+        location = locate_element(graph, node_id)
     except ElementNotFoundError:
-        logger.error("Cannot locate element for node %s", source_id[:8])
-        graph.record_execution(source_id, target_id, False)
+        logger.error("Cannot locate element for node %s", node_id[:8])
+        if next_node_id:
+            graph.record_execution(node_id, next_node_id, False)
         return ReplayStep(
-            node_id=source_id,
+            node_id=node_id,
             located_at=None,
             locate_method="failed",
             vlm_confidence=0.0,
             pixel_diff_pct=0.0,
             success=False,
-            error=f"Element not found: {source_id[:8]}",
+            error=f"Element not found: {node_id[:8]}",
         )
 
     point = location.point
@@ -157,7 +191,7 @@ def execute_action(
     logger.info(
         "Executing %s on [%s] at (%d, %d)",
         action_type,
-        source_id[:8],
+        node_id[:8],
         point.x,
         point.y,
     )
@@ -185,7 +219,9 @@ def execute_action(
     # Validate — skip pixel-diff for same-page actions (textbox focus,
     # intermediate clicks) where minimal visual change is expected.
     # Navigation actions (button_nav) always validate.
-    skip_validation = action_type in ("textbox",)
+    # Only pixel-diff validate actions that should cause major screen changes.
+    # Textbox clicks, same-page buttons, etc. produce minimal diff.
+    skip_validation = action_type not in ("button_nav",)
     if skip_validation:
         logger.debug("Skipping pixel-diff validation for %s action", action_type)
         validation = ConfirmResult(
@@ -194,14 +230,15 @@ def execute_action(
             notes=f"Validation skipped for {action_type} (locate succeeded)",
         )
     else:
-        intended = f"{action_type} on {graph.get_node(source_id).get('label', source_id[:8])}"
+        intended = f"{action_type} on {graph.get_node(node_id).get('label', node_id[:8])}"
         validation = validate_action(before_img, after_img, intended)
 
-    # Record stats on the graph
-    graph.record_execution(source_id, target_id, validation.success)
+    # Record stats on the graph edge
+    if next_node_id:
+        graph.record_execution(node_id, next_node_id, validation.success)
 
     return ReplayStep(
-        node_id=source_id,
+        node_id=node_id,
         located_at=point,
         locate_method=location.method,
         vlm_confidence=validation.confidence,
@@ -248,30 +285,26 @@ def run_skill(
     reliability = plan["estimated_reliability"]
 
     logger.info(
-        "Skill replay: %d steps, reliability=%.2f, "
+        "Skill replay: %d nodes to click, reliability=%.2f, "
         "%d fingerprints, %d branches",
-        len(path) - 1,
+        len(path),
         reliability,
         len(fingerprints),
         len(branches),
     )
 
-    # Execute each edge in the path
-    for i in range(len(path) - 1):
-        src = path[i]
-        tgt = path[i + 1]
-
-        src_label = graph.get_node(src).get("label", src[:8])
-        tgt_label = graph.get_node(tgt).get("label", tgt[:8])
+    # Execute every node in the path (click each element in sequence)
+    for i, node_id in enumerate(path):
+        next_id = path[i + 1] if i < len(path) - 1 else None
+        node_label = graph.get_node(node_id).get("label", node_id[:8])
         logger.info(
-            "Step %d/%d: %s -> %s",
+            "Step %d/%d: %s",
             i + 1,
-            len(path) - 1,
-            src_label,
-            tgt_label,
+            len(path),
+            node_label,
         )
 
-        step = execute_action(graph, src, tgt, dry_run=dry_run)
+        step = execute_node(graph, node_id, next_node_id=next_id, dry_run=dry_run)
         replay_log.append_step(step)
 
         if not step.success:
