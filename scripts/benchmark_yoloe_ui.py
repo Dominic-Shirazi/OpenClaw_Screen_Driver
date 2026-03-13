@@ -18,6 +18,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -54,8 +55,12 @@ CLASS_CONF_THRESHOLDS = {
 # Maximum bbox area as fraction of image — filter out "group" detections
 MAX_BBOX_AREA_FRACTION = 0.40
 
+# Go/no-go threshold: 5 detections/image is the proxy for "YOLOE can see UI elements".
+# The spec's "> 50% recall" requires ground truth; avg detections is the practical substitute.
+GO_NO_GO_THRESHOLD = 5
 
-def load_model(model_path: str = "yoloe-26s-seg.pt"):
+
+def load_model(model_path: str = "yoloe-26s-seg.pt") -> Any:
     """Load YOLOE model and cache text embeddings."""
     from ultralytics import YOLOE
 
@@ -171,6 +176,9 @@ def main() -> None:
         sys.exit(1)
 
     output_dir = Path(args.output_dir)
+    if output_dir.resolve() == screenshots_dir.resolve():
+        logger.error("--output-dir must not be the same as --screenshots-dir")
+        sys.exit(1)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model = load_model(args.model)
@@ -223,7 +231,7 @@ def main() -> None:
 
     # Go/no-go verdict
     logger.info("\n=== GO / NO-GO VERDICT ===")
-    if avg >= 5:
+    if avg >= GO_NO_GO_THRESHOLD:
         logger.info("PASS: YOLOE text-prompt finds %.1f elements/image on average.", avg)
         logger.info("Proceed with Wave 1 pipeline integration.")
     else:
