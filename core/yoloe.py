@@ -14,6 +14,7 @@ Requires:
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,7 @@ MIN_BBOX_H = 5
 
 # Cached text embeddings (computed once, reused for all predictions)
 _element_embeddings: Any | None = None
+_embeddings_lock = threading.Lock()
 
 
 @dataclass
@@ -141,16 +143,22 @@ def init_text_embeddings() -> None:
     if _element_embeddings is not None:
         return
 
-    model = _load_model()
+    with _embeddings_lock:
+        if _element_embeddings is not None:
+            return
 
-    try:
-        logger.info("Computing YOLOE text embeddings for %d element classes...", len(ELEMENT_CLASSES))
-        _element_embeddings = model.model.get_text_pe(ELEMENT_CLASSES)
-        model.model.set_classes(ELEMENT_CLASSES, _element_embeddings)
-        logger.info("YOLOE text embeddings cached successfully")
-    except Exception as e:
-        logger.warning("Failed to cache text embeddings: %s", e)
-        _element_embeddings = None
+        model = _load_model()
+
+        try:
+            logger.info("Computing YOLOE text embeddings for %d element classes...", len(ELEMENT_CLASSES))
+            _element_embeddings = model.model.get_text_pe(ELEMENT_CLASSES)
+            model.model.set_classes(ELEMENT_CLASSES, _element_embeddings)
+            logger.info("YOLOE text embeddings cached successfully")
+        except Exception as e:
+            # Broad catch intentional: covers AttributeError (missing model API),
+            # RuntimeError (CLIP failure), and other ultralytics internals.
+            logger.warning("Failed to cache text embeddings: %s", e)
+            _element_embeddings = None
 
 
 def _ensure_text_embeddings() -> bool:

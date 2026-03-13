@@ -30,7 +30,7 @@ def mock_yoloe_model():
     return model
 
 
-def _fake_tensor(values):
+def _fake_tensor(values: list[int]) -> MagicMock:
     """Create a mock object that behaves like a torch tensor for testing."""
     t = MagicMock()
     t.cpu.return_value = t
@@ -69,6 +69,9 @@ class TestEmbeddingCache:
     def test_init_text_embeddings_calls_set_classes(self, mock_load, mock_yoloe_model):
         """init_text_embeddings caches embeddings via set_classes."""
         mock_load.return_value = mock_yoloe_model
+
+        import core.yoloe as yoloe_mod
+        yoloe_mod._element_embeddings = None
 
         from core.yoloe import init_text_embeddings
         init_text_embeddings()
@@ -118,6 +121,7 @@ class TestDetectAllElements:
         # Should filter out the oversized bbox (1920x1080 = 100% of image)
         # Should keep the two normal detections
         assert isinstance(candidates, list)
+        assert len(candidates) == 2
         for c in candidates:
             assert "rect" in c
             assert "type_guess" in c
