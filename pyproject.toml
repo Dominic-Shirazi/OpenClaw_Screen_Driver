@@ -56,7 +56,7 @@ dev = [
 ocsd = "main:main"
 
 [tool.setuptools.packages.find]
-include = ["api*", "core*", "executor*", "hub*", "mapper*", "recorder*", "skills*"]
+include = ["api*", "core*", "hub*", "mapper*", "recorder*", "skills*"]
 exclude = ["tests*"]
 
 [build-system]

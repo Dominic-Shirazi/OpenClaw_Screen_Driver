@@ -129,6 +129,115 @@ def quick_check(
     return diff >= threshold
 
 
+def validate_element_located(
+    screenshot: np.ndarray,
+    element_rect: tuple[int, int, int, int],
+    expected_type: str,
+    expected_label: str,
+    *,
+    confidence_threshold: float | None = None,
+    skip_vlm: bool = False,
+) -> ConfirmResult:
+    """Validates that a located element matches expectations.
+
+    Pre-action validation. Crops the element region from the screenshot
+    and asks the VLM if it matches the expected type and label.
+
+    Args:
+        screenshot: Full-screen screenshot (BGR numpy array).
+        element_rect: (x, y, w, h) bounding box of the located element.
+        expected_type: Expected ElementType value string.
+        expected_label: Expected human label.
+        confidence_threshold: Minimum confidence. Defaults to config value.
+        skip_vlm: If True, skip VLM and return optimistic result.
+
+    Returns:
+        ConfirmResult indicating whether the element matches expectations.
+    """
+    config = get_config()
+    if confidence_threshold is None:
+        confidence_threshold = config.get("execution", {}).get(
+            "default_confidence", 0.75
+        )
+
+    x, y, w, h = element_rect
+    img_h, img_w = screenshot.shape[:2]
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
+    w = min(w, img_w - x)
+    h = min(h, img_h - y)
+
+    if w <= 0 or h <= 0:
+        return ConfirmResult(
+            success=False,
+            confidence=0.0,
+            notes="Invalid element rect: zero or negative dimensions",
+        )
+
+    if skip_vlm:
+        return ConfirmResult(
+            success=True,
+            confidence=0.6,
+            notes="VLM validation skipped; assuming element is correct.",
+        )
+
+    crop = screenshot[y : y + h, x : x + w]
+    img_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            img_path = Path(tmp.name)
+            cv2.imwrite(str(img_path), crop)
+
+        result = analyze_crop(
+            str(img_path),
+            f"Is this a {expected_type} labeled '{expected_label}'?",
+        )
+
+        vlm_type = result.get("element_type", "unknown")
+        vlm_confidence = result.get("confidence", 0.0)
+
+        if vlm_type != expected_type:
+            return ConfirmResult(
+                success=False,
+                confidence=vlm_confidence,
+                notes=(
+                    f"Type mismatch: expected '{expected_type}', "
+                    f"VLM detected '{vlm_type}' "
+                    f"(confidence: {vlm_confidence:.2f})"
+                ),
+            )
+
+        if vlm_confidence < confidence_threshold:
+            return ConfirmResult(
+                success=False,
+                confidence=vlm_confidence,
+                notes=(
+                    f"Low confidence: {vlm_confidence:.2f} < "
+                    f"{confidence_threshold:.2f} for {expected_type}"
+                ),
+            )
+
+        return ConfirmResult(
+            success=True,
+            confidence=vlm_confidence,
+            notes=(
+                f"Element confirmed as {vlm_type} "
+                f"(confidence: {vlm_confidence:.2f}). "
+                f"Label guess: {result.get('label_guess', 'N/A')}"
+            ),
+        )
+    except Exception as e:
+        logger.warning("Element validation failed: %s", e)
+        return ConfirmResult(
+            success=False,
+            confidence=0.0,
+            notes=f"Validation error: {e}",
+        )
+    finally:
+        if img_path and img_path.exists():
+            img_path.unlink()
+
+
 def validate_destination(
     screenshot: np.ndarray, expected_description: str
 ) -> ConfirmResult:

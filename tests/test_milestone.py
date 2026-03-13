@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from core.types import ReplayLog
-from executor.pathfinder import find_path
-from executor.runner import RunnerEventType, run_path
+from mapper.pathfinder import find_path
+from mapper.runner import RunnerEventType, run_path
 from mapper.export import export_skill, import_skill, load_skill_from_file, save_skill_to_file
 from mapper.graph import OCSDGraph
 

@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Any
+from enum import Enum, auto
+from typing import Any, Callable
 
 import pyautogui
 
@@ -38,6 +39,24 @@ from mapper.pathfinder import get_execution_plan, get_fingerprint_checkpoints
 from mapper.validator import validate_action
 
 logger = logging.getLogger(__name__)
+
+
+class RunnerEventType(Enum):
+    """Events emitted during skill execution."""
+    STEP_START = auto()
+    ELEMENT_LOCATED = auto()
+    LOW_CONFIDENCE = auto()
+    ACTION_EXECUTED = auto()
+    VALIDATION_PASSED = auto()
+    VALIDATION_FAILED = auto()
+    ELEMENT_NOT_FOUND = auto()
+    STEP_COMPLETE = auto()
+    PATH_COMPLETE = auto()
+    PATH_FAILED = auto()
+
+
+# Type alias for event callback
+EventCallback = Callable[[RunnerEventType, dict[str, Any]], None]
 
 
 def _resolve_position_hint(
@@ -490,5 +509,123 @@ def run_skill(
         len(replay_log.steps),
         elapsed_ms,
     )
+
+    return replay_log
+
+
+def run_path(
+    path: list[str],
+    graph: OCSDGraph,
+    *,
+    dry_run: bool = False,
+    event_callback: EventCallback | None = None,
+    skip_vlm_validation: bool = False,
+) -> ReplayLog:
+    """Executes a sequence of nodes with event callbacks.
+
+    Lighter-weight alternative to run_skill() that takes a pre-computed
+    path and emits RunnerEventType events for monitoring.
+
+    Args:
+        path: Ordered list of node_ids to execute.
+        graph: The OCSDGraph containing node/edge data.
+        dry_run: If True, log actions without executing them.
+        event_callback: Optional callback for execution events.
+        skip_vlm_validation: If True, skip VLM for faster execution.
+
+    Returns:
+        ReplayLog with step-by-step results.
+    """
+    replay_log = ReplayLog(skill_id=graph.skill_id)
+    start_time = time.monotonic()
+
+    def emit(event_type: RunnerEventType, data: dict[str, Any]) -> None:
+        if event_callback:
+            try:
+                event_callback(event_type, data)
+            except Exception as e:
+                logger.error("Event callback error: %s", e)
+
+    for step_idx, node_id in enumerate(path):
+        emit(RunnerEventType.STEP_START, {"node_id": node_id, "step": step_idx})
+
+        try:
+            node_data = graph.get_node(node_id)
+        except KeyError:
+            step = ReplayStep(
+                node_id=node_id,
+                located_at=None,
+                locate_method="failed",
+                vlm_confidence=0.0,
+                pixel_diff_pct=0.0,
+                success=False,
+                error=f"Node not found: {node_id}",
+            )
+            replay_log.append_step(step)
+            emit(RunnerEventType.ELEMENT_NOT_FOUND, {"node_id": node_id})
+            continue
+
+        # Dry-run shortcut: produce a plausible result without screen interaction
+        if dry_run:
+            pos = node_data.get("relative_position", {})
+            x_pct = pos.get("x_pct", 0.5)
+            y_pct = pos.get("y_pct", 0.5)
+            located_point = Point(int(x_pct * 1920), int(y_pct * 1080))
+
+            emit(
+                RunnerEventType.ELEMENT_LOCATED,
+                {
+                    "node_id": node_id,
+                    "point": (located_point.x, located_point.y),
+                    "method": "dry_run",
+                    "confidence": 1.0,
+                },
+            )
+
+            step = ReplayStep(
+                node_id=node_id,
+                located_at=located_point,
+                locate_method="dry_run",
+                vlm_confidence=1.0,
+                pixel_diff_pct=0.0,
+                success=True,
+            )
+            replay_log.append_step(step)
+
+            emit(
+                RunnerEventType.STEP_COMPLETE,
+                {"node_id": node_id, "step": step_idx, "success": True},
+            )
+            continue
+
+        # Live execution: delegate to execute_node
+        next_id = path[step_idx + 1] if step_idx + 1 < len(path) else None
+        step = execute_node(
+            graph, node_id, next_node_id=next_id,
+            dry_run=False, skill_id=graph.skill_id,
+        )
+        replay_log.append_step(step)
+
+        if step.success:
+            emit(
+                RunnerEventType.ELEMENT_LOCATED,
+                {
+                    "node_id": node_id,
+                    "point": (step.located_at.x, step.located_at.y) if step.located_at else (0, 0),
+                    "method": step.locate_method,
+                    "confidence": step.vlm_confidence,
+                },
+            )
+            emit(RunnerEventType.STEP_COMPLETE, {"node_id": node_id, "step": step_idx, "success": True})
+        else:
+            emit(RunnerEventType.ELEMENT_NOT_FOUND, {"node_id": node_id})
+
+    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+    replay_log.duration_ms = elapsed_ms
+
+    if replay_log.overall_success:
+        emit(RunnerEventType.PATH_COMPLETE, {"duration_ms": elapsed_ms})
+    else:
+        emit(RunnerEventType.PATH_FAILED, {"duration_ms": elapsed_ms})
 
     return replay_log

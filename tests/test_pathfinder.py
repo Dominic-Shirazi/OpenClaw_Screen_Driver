@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from core.types import PathNotFoundError
-from executor.pathfinder import (
+from mapper.pathfinder import (
     find_all_paths,
     find_by_label,
     find_path,
@@ -58,7 +58,7 @@ class TestFindPath:
 
     def test_missing_node_raises(self):
         g, a, _, _ = _linear_graph()
-        with pytest.raises(KeyError):
+        with pytest.raises(PathNotFoundError):
             find_path(g, a, "nonexistent")
 
     def test_prefers_high_success_edges(self):
