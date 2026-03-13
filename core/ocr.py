@@ -1,4 +1,10 @@
 """Pytesseract OCR wrapper for text detection and screen search."""
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import sys
 
 import cv2
 import numpy as np
@@ -8,20 +14,66 @@ from pytesseract import TesseractNotFoundError
 from core.types import LocateResult, Point, Rect
 import core.capture as capture
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CONFIG = "--oem 3 --psm 6"
 
+# Well-known install paths per platform
+_TESSERACT_HINTS: dict[str, list[str]] = {
+    "win32": [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ],
+    "darwin": [
+        "/usr/local/bin/tesseract",      # Homebrew Intel
+        "/opt/homebrew/bin/tesseract",    # Homebrew Apple Silicon
+    ],
+    "linux": [
+        "/usr/bin/tesseract",
+    ],
+}
 
-def _ensure_tesseract_installed():
-    """Check if Tesseract is installed and available."""
+
+def _resolve_tesseract_cmd() -> str | None:
+    """Find the Tesseract binary, checking env var, PATH, then well-known locations."""
+    # 1. Explicit env-var override (from .env or system)
+    env_cmd = os.environ.get("TESSERACT_CMD")
+    if env_cmd and os.path.isfile(env_cmd):
+        return env_cmd
+
+    # 2. Already on PATH
+    on_path = shutil.which("tesseract")
+    if on_path:
+        return on_path
+
+    # 3. Platform-specific well-known locations
+    for hint in _TESSERACT_HINTS.get(sys.platform, []):
+        if os.path.isfile(hint):
+            return hint
+
+    return None
+
+
+def _ensure_tesseract_installed() -> None:
+    """Check if Tesseract is installed and available.
+
+    Tries env var → PATH → well-known locations before giving up.
+    """
+    resolved = _resolve_tesseract_cmd()
+    if resolved:
+        pytesseract.pytesseract.tesseract_cmd = resolved
+        logger.debug("Tesseract binary: %s", resolved)
+
     try:
         pytesseract.get_tesseract_version()
     except TesseractNotFoundError:
         raise RuntimeError(
             "Tesseract OCR binary not found. "
-            "Please install Tesseract OCR and ensure it's in your system PATH.\n"
-            "Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki\n"
-            "Mac: brew install tesseract\n"
-            "Linux: sudo apt install tesseract-ocr"
+            "Install Tesseract and ensure it's on PATH, or set TESSERACT_CMD "
+            "in your .env file.\n"
+            "Windows: winget install UB-Mannheim.TesseractOCR\n"
+            "Mac:     brew install tesseract\n"
+            "Linux:   sudo apt install tesseract-ocr"
         )
     except Exception as e:
         raise RuntimeError(f"Error accessing Tesseract: {e}")

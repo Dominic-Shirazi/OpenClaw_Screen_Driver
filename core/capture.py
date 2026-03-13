@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import ctypes
-import os
+import logging
+import sys
 from pathlib import Path
 
 import cv2
@@ -8,6 +11,8 @@ import numpy as np
 
 from core.config import get_config
 from core.types import Point, Rect
+
+logger = logging.getLogger(__name__)
 
 
 def screenshot_full() -> np.ndarray:
@@ -89,48 +94,59 @@ def save_snippet(img: np.ndarray, skill_id: str, element_id: str) -> str:
 
 
 def get_window_title() -> str:
-    """Retrieves the active window title via ctypes."""
+    """Retrieves the active window title.
+
+    Uses Win32 API on Windows, falls back to empty string on other platforms.
+    """
+    if sys.platform != "win32":
+        logger.debug("get_window_title() is only supported on Windows")
+        return ""
+
     hwnd = ctypes.windll.user32.GetForegroundWindow()
     length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-    
+
     # Create a buffer of the correct length
     buf = ctypes.create_unicode_buffer(length + 1)
-    
+
     # Fill the buffer with the window text
     ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
-    
+
     return buf.value
 
 
 def get_active_url() -> str | None:
     """Best-effort attempt to get the active browser URL via UIA.
-    
-    NOTE: This is heavily dependent on the browser and OS language,
+
+    NOTE: Windows-only (requires pywinauto). Returns None on other platforms.
+    This is heavily dependent on the browser and OS language,
     and is notoriously unreliable. Use only as a hint.
     """
+    if sys.platform != "win32":
+        return None
+
     try:
         from pywinauto import Application
-        
+
         hwnd = ctypes.windll.user32.GetForegroundWindow()
         if not hwnd:
             return None
-            
+
         # Connect to the active window
         app = Application(backend="uia").connect(handle=hwnd, timeout=0.5)
         window = app.window(handle=hwnd)
-        
+
         # Try to find an element that looks like an address bar
         # This regex attempts to catch common address bar UIA names
         address_bar = window.child_window(
-            control_type="Edit", 
-            title_re=".*[Aa]ddress.*|.*[Ss]earch.*|.*URL.*"
+            control_type="Edit",
+            title_re=".*[Aa]ddress.*|.*[Ss]earch.*|.*URL.*",
         )
-        
+
         if address_bar.exists():
             return address_bar.get_value()
-            
+
     except Exception:
         # Ignore all errors, this is best-effort only
         pass
-        
+
     return None
