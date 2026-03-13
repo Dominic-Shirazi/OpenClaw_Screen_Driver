@@ -19,6 +19,13 @@ from mapper.graph import OCSDGraph
 logger = logging.getLogger(__name__)
 
 
+def _json_default(obj: object) -> Any:
+    """JSON serializer fallback for enums and other non-standard types."""
+    if hasattr(obj, "value"):
+        return obj.value
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def calculate_checksum(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]]) -> str:
     """Calculates SHA256 checksum of nodes and edges arrays for integrity.
 
@@ -48,6 +55,7 @@ def calculate_checksum(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]])
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
+        default=_json_default,
     ).encode("utf-8")
 
     return hashlib.sha256(data).hexdigest()
@@ -137,14 +145,8 @@ def save_skill_to_file(skill_data: Dict[str, Any], file_path: Path | str) -> Non
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _default_serializer(obj: object) -> Any:
-        """Handle non-serializable types (enums, etc.)."""
-        if hasattr(obj, "value"):
-            return obj.value
-        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(skill_data, f, indent=2, ensure_ascii=False, default=_default_serializer)
+        json.dump(skill_data, f, indent=2, ensure_ascii=False, default=_json_default)
 
     logger.info("Saved skill '%s' (%s) to %s", skill_data["name"], skill_data["skill_id"][:8], path)
 
