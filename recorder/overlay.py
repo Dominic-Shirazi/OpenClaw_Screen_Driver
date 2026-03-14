@@ -384,7 +384,15 @@ class OverlayController:
         self._candidates = candidates
         if self._view is not None:
             self._view.render_candidates(candidates)
-        logger.debug("Updated %d candidates", len(candidates))
+        for c in candidates:
+            r = c.get("rect", {})
+            logger.info(
+                "  candidate: %s '%s' at (%d,%d) %dx%d conf=%.2f",
+                c.get("type_guess", "?"), c.get("label_guess", ""),
+                r.get("x", 0), r.get("y", 0), r.get("w", 0), r.get("h", 0),
+                c.get("confidence", 0),
+            )
+        logger.info("Rendered %d candidates on overlay", len(candidates))
 
     def clear_candidates(self) -> None:
         """Removes all candidate renderings."""
@@ -668,6 +676,9 @@ class _OverlayView(QGraphicsView):
                 text_item.setFont(font)
 
         self.refresh_overlay()
+        # Force viewport repaint — WA_TranslucentBackground on Windows
+        # may not auto-repaint when scene changes arrive via QTimer
+        self.viewport().update()
 
     def clear_scene(self) -> None:
         """Removes all items from the scene."""
