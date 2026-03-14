@@ -216,14 +216,106 @@ def _try_refine_bbox(
         return (refined.x, refined.y, refined.w, refined.h)
 
 
-def _trigger_smart_detect(overlay: Any) -> None:
+def _auto_snip(x: int, y: int, radius: int = 120) -> dict | None:
+    """Captures a region around a click and runs detection to find an element.
+
+    Used when the user clicks on an area with no existing candidate —
+    snips the region, runs OmniParser, and returns the best detection
+    as a candidate dict with auto-adjusted borders.
+
+    Args:
+        x: Click X coordinate on screen.
+        y: Click Y coordinate on screen.
+        radius: Pixel radius around click to capture.
+
+    Returns:
+        Candidate dict with rect/type_guess/label_guess, or None if
+        no element was detected.
+    """
+    try:
+        from core.capture import screenshot_full
+        from core.detection import get_detector
+    except ImportError:
+        logger.debug("Detection module not available for auto-snip")
+        return None
+
+    try:
+        screen = screenshot_full()
+    except Exception as e:
+        logger.warning("Auto-snip: could not capture screen: %s", e)
+        return None
+
+    sh, sw = screen.shape[:2]
+    x1 = max(0, x - radius)
+    y1 = max(0, y - radius)
+    x2 = min(sw, x + radius)
+    y2 = min(sh, y + radius)
+    crop = screen[y1:y2, x1:x2]
+
+    if crop.size == 0:
+        return None
+
+    try:
+        detector = get_detector()
+        candidates = detector.detect(crop)
+    except Exception as e:
+        logger.debug("Auto-snip detection failed: %s", e)
+        return None
+
+    if not candidates:
+        return None
+
+    # Find the candidate closest to the click point (in crop coords)
+    click_cx = x - x1
+    click_cy = y - y1
+    best = None
+    best_dist = float("inf")
+
+    for c in candidates:
+        r = c["rect"]
+        cx = r["x"] + r["w"] / 2
+        cy = r["y"] + r["h"] / 2
+        dist = ((cx - click_cx) ** 2 + (cy - click_cy) ** 2) ** 0.5
+        if dist < best_dist:
+            best = c
+            best_dist = dist
+
+    if best is None:
+        return None
+
+    # Offset rect back to screen coordinates
+    r = best["rect"]
+    best["rect"] = {
+        "x": r["x"] + x1,
+        "y": r["y"] + y1,
+        "w": r["w"],
+        "h": r["h"],
+    }
+    logger.info(
+        "Auto-snip found element at (%d,%d) %dx%d near click (%d,%d)",
+        best["rect"]["x"], best["rect"]["y"],
+        best["rect"]["w"], best["rect"]["h"], x, y,
+    )
+    return best
+
+
+def _trigger_smart_detect(
+    overlay: Any,
+    recorded_elements: list[dict],
+    refine_mode: str,
+    on_element_clicked: Any,
+) -> None:
     """Captures the screen and runs smart detection in the background.
 
-    Results are marshaled back to the Qt main thread and rendered
-    as candidate bounding boxes on the overlay.
+    After detection completes, renders candidates on the overlay and
+    starts the one-by-one review flow where each element is presented
+    to the user via TagDialog with pre-filled LM data.
 
     Args:
         overlay: The OverlayController to populate with candidates.
+        recorded_elements: List to append accepted elements to.
+        refine_mode: Bbox refinement mode ("auto", "review", "skip").
+        on_element_clicked: The element recording callback.
     """
     from PyQt6.QtCore import QTimer as _QTimer
 
@@ -237,11 +329,110 @@ def _trigger_smart_detect(overlay: Any) -> None:
         return
 
     def _on_results(candidates: list[dict]) -> None:
+        def _set_and_review() -> None:
+            overlay.set_candidates(candidates)
+            if candidates:
+                # Start review after a brief delay so the user sees all boxes
+                _QTimer.singleShot(
+                    1500,
+                    lambda: _start_review(
+                        overlay, candidates, recorded_elements,
+                        refine_mode, on_element_clicked,
+                    ),
+                )
+
         # Marshal to Qt main thread
-        _QTimer.singleShot(0, lambda: overlay.set_candidates(candidates))
+        _QTimer.singleShot(0, _set_and_review)
 
     detect_ui_elements_async(screenshot, _on_results)
     logger.info("Smart detection triggered (%d x %d)", screenshot.shape[1], screenshot.shape[0])
+
+
+def _start_review(
+    overlay: Any,
+    candidates: list[dict],
+    recorded_elements: list[dict],
+    refine_mode: str,
+    on_element_clicked: Any,
+) -> None:
+    """Iterates through detected candidates one-by-one for review.
+
+    For each candidate, highlights it on the overlay, opens a TagDialog
+    with pre-filled LM data (type, label, caption). User can accept
+    (Enter/Confirm) or skip. After all reviewed, the user can manually
+    add missed elements by clicking/dragging.
+
+    Args:
+        overlay: The OverlayController with candidates rendered.
+        candidates: List of candidate dicts from detection.
+        recorded_elements: List to append accepted elements to.
+        refine_mode: Bbox refinement mode.
+        on_element_clicked: The element recording callback for manual adds.
+    """
+    from recorder.dialog import TagDialog
+
+    logger.info("Starting review of %d detected elements...", len(candidates))
+
+    def _review_one(index: int, candidate: dict[str, Any]) -> bool:
+        """Review a single candidate. Returns True if accepted."""
+        rect = candidate.get("rect", {})
+        x = rect.get("x", 0)
+        y = rect.get("y", 0)
+        w = rect.get("w", 0)
+        h = rect.get("h", 0)
+
+        dialog_x = x + w // 2
+        dialog_y = y + h // 2
+
+        type_guess = candidate.get("type_guess", "unknown")
+        label_guess = candidate.get("label_guess", "")
+        florence_caption = candidate.get("florence_caption", "")
+
+        dialog = TagDialog(
+            element_type_guess=type_guess,
+            label_guess=florence_caption or label_guess,
+            ocr_text=candidate.get("ocr_text"),
+            layer_guess=candidate.get("layer_guess", "page_specific"),
+            uia_hint=candidate.get("uia_hint"),
+            x=dialog_x,
+            y=dialog_y,
+            is_bbox=True,
+        )
+
+        if dialog.exec():
+            result = dialog.get_result()
+            if result:
+                result["_refinement_status"] = "detected"
+                if w > 0 and h > 0:
+                    result["x"] = x + w // 2
+                    result["y"] = y + h // 2
+                    result["bbox_x"] = x
+                    result["bbox_y"] = y
+                    result["bbox_w"] = w
+                    result["bbox_h"] = h
+                else:
+                    result["x"] = x
+                    result["y"] = y
+                    result["bbox_w"] = 0
+                    result["bbox_h"] = 0
+
+                recorded_elements.append(result)
+                logger.info(
+                    "Review accepted [%d/%d]: %s (%s)",
+                    index + 1, len(candidates),
+                    result.get("label"), result.get("element_type"),
+                )
+                return True
+
+        logger.info("Review skipped [%d/%d]", index + 1, len(candidates))
+        return False
+
+    overlay.start_review(_review_one)
+    logger.info(
+        "Review complete. %d elements recorded so far. "
+        "Click/drag to add missed elements.",
+        len(recorded_elements),
+    )
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -269,9 +460,23 @@ def cmd_record(args: argparse.Namespace) -> int:
     def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> bool:
         """Handle an element selection (click or bbox) during recording.
 
+        For point clicks with no matching candidate, auto-snip is triggered:
+        captures a region around the click, runs detection, and uses the
+        closest detected element with auto-adjusted borders.
+
         Returns:
             True if element was recorded, False if skipped/cancelled.
         """
+        # Auto-snip: if point click with no candidate, try to detect element
+        if w == 0 and h == 0 and candidate is None:
+            snipped = _auto_snip(x, y)
+            if snipped:
+                candidate = snipped
+                r = snipped["rect"]
+                x, w, h = r["x"], r["w"], r["h"]
+                y = r["y"]
+                logger.info("Auto-snip adjusted click to bbox (%d,%d) %dx%d", x, y, w, h)
+
         if w > 0 and h > 0:
             logger.info("Bbox at (%d, %d) %dx%d, candidate=%s", x, y, w, h, candidate is not None)
         else:
@@ -383,7 +588,9 @@ def cmd_record(args: argparse.Namespace) -> int:
     def on_mode_changed(mode: OverlayMode) -> None:
         logger.info("Overlay mode: %s", mode.name)
         if mode == OverlayMode.RECORD:
-            _trigger_smart_detect(overlay)
+            _trigger_smart_detect(
+                overlay, recorded_elements, refine_mode, on_element_clicked,
+            )
 
     def on_close() -> None:
         logger.info("Recording ended. Captured %d elements.", len(recorded_elements))
