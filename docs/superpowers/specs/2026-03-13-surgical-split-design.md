@@ -38,6 +38,12 @@ The Qt window:
 - Mouse events: press/move/release with handle detection
 - `refresh_overlay()`, `_draw_border()`, `_update_mode_indicator()`, `_update_click_catcher()`
 - Imports `_HandleItem`, `_ElementBoxGroup` from `overlay_items`
+- **Circular import note:** `_OverlayView.__init__` takes `controller: OverlayController` as a type hint. Use `from __future__ import annotations` (already present) + `TYPE_CHECKING` guard to avoid circular import with `overlay.py`:
+  ```python
+  from typing import TYPE_CHECKING
+  if TYPE_CHECKING:
+      from recorder.overlay import OverlayController
+  ```
 
 ### `recorder/overlay.py` (~250 lines, slimmed)
 Controller only:
@@ -51,24 +57,28 @@ Controller only:
 
 ## 2. main.py Split
 
-### `recorder/record_controller.py` (~500 lines)
+### `recorder/record_controller.py` (~750 lines)
 All recording logic extracted from main.py:
 - `_auto_snip(x, y, radius)` — snip region around click, run detection
 - `_try_refine_bbox(...)` — bbox refinement with OmniParser
 - `_trigger_smart_detect(...)` — async detection trigger
 - `_start_review(...)` — one-by-one element review with TagDialog
 - `on_element_clicked(...)` — click handler callback
-- `cmd_record(args)` — overlay setup, callback wiring, skill saving
-- `cmd_diagram(args)` — diagram mode variant
+- `_save_recording(...)` — serialize graph + skill JSON
+- `_save_snippets_and_embeddings(...)` — save element crops + CLIP embeddings
+- `cmd_record(args)` — overlay setup, callback wiring, skill saving (handles both workflow and diagram modes via `is_diagram` flag; there is no separate `cmd_diagram` function)
+- `cmd_compose(args)` — compose mode (overlay-heavy, belongs with recording UI)
 
 ### `mapper/execute_controller.py` (~200 lines)
 All execution logic:
 - `cmd_execute(args)` — load skill, plan path, run replay
-- `cmd_compose(args)` — compose mode if separate from record
 - Dry-run support
 
 ### `main.py` (~150 lines, thin router)
 - `_setup_logging()`, `_setup_dpi_awareness()`
+- `_ensure_dirs()` — create skills/snippets directories
+- `_setup_signal_handler()` — Ctrl+C handling
+- `_has_mode_arg()`, `_run_tui()` — TUI dispatch helpers
 - `build_parser()` — argument definitions
 - `main()` — parse args, lazy-import and dispatch to controllers
 - No business logic
@@ -80,14 +90,18 @@ All execution logic:
 ### `core/locate.py` (~300 lines)
 The 5-stage locate cascade as a standalone module:
 - `locate_element(graph, node_id, screen) -> LocateResult | None`
+- `_resolve_position_hint(graph, node_id)` — helper to get expected position from graph
 - Private stage functions: `_try_omniparser()`, `_try_clip()`, `_try_ocr()`, `_try_vlm()`, `_try_position()`
 - Each stage is self-contained, returns `LocateResult` or `None`
+- Uses sibling imports: `from core.capture import ...`, `from core.detection import ...`, etc.
 
 ### `mapper/runner.py` (~350 lines, slimmed)
 Replay loop only:
 - `replay_skill()` — step through nodes, call `locate_element()`, execute actions
+- `execute_node()` — perform the action (click/type/scroll) for a located element
+- `_action_type_for_node()`, `_resolve_input_text()` — action helpers
 - Event emission, step logging, ReplayLog generation
-- Imports `locate_element` from `core/locate`
+- Imports `locate_element` from `core.locate`
 
 ---
 
@@ -159,7 +173,7 @@ recorder/
     overlay.py                   (~250 lines, OverlayController only)
     overlay_view.py              (~350 lines, Qt window)
     overlay_items.py             (~200 lines, graphics primitives)
-    record_controller.py         (~500 lines, recording flow)
+    record_controller.py         (~750 lines, recording flow)
     dialog.py                    (unchanged)
     refine_dialog.py             (unchanged)
     smart_detect.py              (unchanged)
