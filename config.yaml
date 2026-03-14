@@ -27,7 +27,7 @@ models:
   omniparser_weights: "microsoft/OmniParser-v2.0"
 
 detection:
-  # OmniParser confidence threshold (lower than YOLOE — UI-trained model is more precise)
+  # OmniParser confidence threshold
   confidence_threshold: 0.3
   # CLIP cosine similarity threshold for replay matching
   match_threshold: 0.7
@@ -45,7 +45,7 @@ recovery:
   max_retries: 2
 
 fingerprinting:
-  # App/page identity detection (YOLO-E based)
+  # App/page identity detection (OmniParser based)
   enabled: true
   # Seconds to wait for app to load before retrying
   wait_timeout_s: 5

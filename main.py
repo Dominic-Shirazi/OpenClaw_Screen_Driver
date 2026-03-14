@@ -343,7 +343,7 @@ def cmd_record(args: argparse.Namespace) -> int:
                 cur_x, cur_y, cur_w, cur_h = x, y, w, h
                 result["_refinement_status"] = "original"
 
-                # Attempt YOLOE bbox refinement (for all selections)
+                # Attempt OmniParser bbox refinement (for all selections)
                 refined = _try_refine_bbox(
                     cur_x, cur_y, cur_w, cur_h,
                     refine_mode, candidate,
@@ -512,7 +512,7 @@ def _save_recording(elements: list[dict], args: argparse.Namespace) -> None:
 
     In workflow mode (--record), nodes are connected with sequential edges.
     In diagram mode (--diagram), nodes are unordered annotations with no edges
-    — used for page layout training (YOLO-E) rather than replay.
+    — used for page layout training (OmniParser) rather than replay.
     """
     import pyautogui
 
@@ -934,7 +934,7 @@ def build_parser() -> argparse.ArgumentParser:
     refine_group = parser.add_mutually_exclusive_group()
     refine_group.add_argument(
         "--auto-refine", action="store_const", const="auto",
-        dest="refine_mode", help="Silently tighten bboxes via YOLOE (default)",
+        dest="refine_mode", help="Silently tighten bboxes via OmniParser (default)",
     )
     refine_group.add_argument(
         "--review-refine", action="store_const", const="review",

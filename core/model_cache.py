@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
 
 from core.config import get_config
 
