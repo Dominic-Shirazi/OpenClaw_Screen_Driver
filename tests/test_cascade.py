@@ -321,7 +321,7 @@ class TestFullCascade:
         """Mock pyautogui.size() to 1920x1080 for all cascade tests."""
         mocker.patch("pyautogui.size", return_value=(1920, 1080))
         mocker.patch(
-            "mapper.runner.screenshot_full",
+            "core.locate.screenshot_full",
             return_value=_full_screen_image(),
         )
 
@@ -401,13 +401,12 @@ class TestFullCascade:
             "core.embeddings.get_embedding_by_id", return_value=None
         )
 
-        # OCR succeeds — patch on the runner module since it's imported
-        # at the top of mapper/runner.py (from core.ocr import find_text_on_screen)
+        # OCR succeeds — patch on core.locate where find_text_on_screen is imported
         ocr_result = LocateResult(
             point=Point(960, 540), method="ocr", confidence=0.88
         )
         mocker.patch(
-            "mapper.runner.find_text_on_screen", return_value=ocr_result
+            "core.locate.find_text_on_screen", return_value=ocr_result
         )
 
         from core.locate import locate_element

@@ -22,7 +22,7 @@ class TestTryRefineBbox:
         ]
         mock_get_detector.return_value = mock_detector
 
-        from main import _try_refine_bbox
+        from recorder.record_controller import _try_refine_bbox
 
         result = _try_refine_bbox(
             x=120, y=215, w=0, h=0,
@@ -46,7 +46,7 @@ class TestTryRefineBbox:
         ]
         mock_get_detector.return_value = mock_detector
 
-        from main import _try_refine_bbox
+        from recorder.record_controller import _try_refine_bbox
 
         result = _try_refine_bbox(
             x=120, y=215, w=0, h=0,
@@ -70,7 +70,7 @@ class TestTryRefineBbox:
         ]
         mock_get_detector.return_value = mock_detector
 
-        from main import _try_refine_bbox
+        from recorder.record_controller import _try_refine_bbox
 
         result = _try_refine_bbox(
             x=95, y=195, w=90, h=40,
@@ -93,7 +93,7 @@ class TestTryRefineBbox:
         ]
         mock_get_detector.return_value = mock_detector
 
-        from main import _try_refine_bbox
+        from recorder.record_controller import _try_refine_bbox
 
         result = _try_refine_bbox(
             x=100, y=100, w=0, h=0,
