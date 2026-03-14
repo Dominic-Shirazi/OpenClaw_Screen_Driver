@@ -2,7 +2,7 @@
 
 Usage:
     python main.py --record                         Record a workflow (sequential edges)
-    python main.py --diagram --name chrome_login     Annotate page layout (no edges, for YOLO-E)
+    python main.py --diagram --name chrome_login     Annotate page layout (no edges, for OmniParser)
     python main.py --execute skills/login.json       Execute a saved skill
     python main.py --execute skills/login.json --to "Submit"  Execute to a label
     python main.py --dry-run --execute skills/login.json      Simulate without acting
@@ -85,10 +85,11 @@ def _try_refine_bbox(
     review_mode: str,
     matched_candidate: dict | None,
 ) -> tuple[int, int, int, int] | None:
-    """Attempts YOLOE bbox refinement for a recorded element.
+    """Attempts OmniParser bbox refinement for a recorded element.
 
-    For drawn bboxes: calls refine_bbox() to tighten the user's selection.
-    For point clicks: infers a bbox from the click point via YOLOE.
+    For drawn bboxes: finds the detection with the highest IoU overlap.
+    For point clicks: uses matched_candidate rect if available, otherwise
+    finds the smallest OmniParser detection containing the click point.
 
     Args:
         x: Element X coordinate.
@@ -107,10 +108,10 @@ def _try_refine_bbox(
 
     try:
         from core.capture import screenshot_full
+        from core.detection import get_detector
         from core.types import Rect
-        from core.yoloe import infer_bbox_at_point, refine_bbox
     except (ImportError, OSError) as e:
-        logger.debug("YOLOE not available, skipping bbox refinement: %s", e)
+        logger.debug("Detection module not available, skipping bbox refinement: %s", e)
         return None
 
     try:
@@ -119,33 +120,64 @@ def _try_refine_bbox(
         logger.warning("Could not capture screen for refinement: %s", e)
         return None
 
-    yoloe_match = None
+    # Detect all elements on screen
+    try:
+        detector = get_detector()
+        candidates = detector.detect(screen)
+    except Exception as e:
+        logger.debug("Detection failed during refinement: %s", e)
+        return None
 
-    if w > 0 and h > 0:
-        # Drawn bbox — refine it
-        user_rect = Rect(x=x, y=y, w=w, h=h)
-        yoloe_match = refine_bbox(screen, user_rect)
-    else:
-        # Point click — check if smart_detect already has a bbox
+    if not candidates:
+        return None
+
+    # Check if smart_detect already has a bbox for point clicks
+    if w == 0 and h == 0:
         if matched_candidate and "rect" in matched_candidate:
             r = matched_candidate["rect"]
             if r.get("w", 0) > 0 and r.get("h", 0) > 0:
                 logger.info("Using smart_detect bbox for point click")
                 return (r["x"], r["y"], r["w"], r["h"])
-        # Otherwise ask YOLOE to infer a bbox from the click point
-        yoloe_match = infer_bbox_at_point(screen, x, y)
 
-    if yoloe_match is None:
-        logger.debug("YOLOE refinement returned no match")
+    # Find best overlapping detection
+    best_overlap = 0.0
+    best_rect = None
+
+    for c in candidates:
+        r = c["rect"]
+        if w > 0 and h > 0:
+            # Drawn bbox — compute IoU
+            ix1 = max(x, r["x"])
+            iy1 = max(y, r["y"])
+            ix2 = min(x + w, r["x"] + r["w"])
+            iy2 = min(y + h, r["y"] + r["h"])
+            if ix2 > ix1 and iy2 > iy1:
+                inter = (ix2 - ix1) * (iy2 - iy1)
+                union = w * h + r["w"] * r["h"] - inter
+                iou = inter / union if union > 0 else 0
+                if iou > best_overlap:
+                    best_overlap = iou
+                    best_rect = r
+        else:
+            # Point click — find detection containing (x, y)
+            if (r["x"] <= x <= r["x"] + r["w"]
+                    and r["y"] <= y <= r["y"] + r["h"]):
+                area = r["w"] * r["h"]
+                # Prefer smallest containing bbox
+                if best_rect is None or area < best_rect["w"] * best_rect["h"]:
+                    best_overlap = 1.0
+                    best_rect = r
+
+    if best_rect is None:
+        logger.debug("No detection overlaps the selection")
         return None
 
-    refined = yoloe_match.bbox
+    refined = Rect(best_rect["x"], best_rect["y"], best_rect["w"], best_rect["h"])
 
     if review_mode == "auto":
         logger.info(
-            "Auto-refined bbox: (%d,%d) %dx%d → (%d,%d) %dx%d conf=%.2f",
+            "Auto-refined bbox: (%d,%d) %dx%d → (%d,%d) %dx%d",
             x, y, w, h, refined.x, refined.y, refined.w, refined.h,
-            yoloe_match.confidence,
         )
         return (refined.x, refined.y, refined.w, refined.h)
 
@@ -157,15 +189,15 @@ def _try_refine_bbox(
         user_crop = screen[y:y + h, x:x + w] if w > 0 and h > 0 else screen[
             max(0, y - 30):y + 30, max(0, x - 30):x + 30
         ]
-        yoloe_crop = screen[
+        refined_crop = screen[
             refined.y:refined.y + refined.h,
             refined.x:refined.x + refined.w,
         ]
 
-        if user_crop.size == 0 or yoloe_crop.size == 0:
+        if user_crop.size == 0 or refined_crop.size == 0:
             return (refined.x, refined.y, refined.w, refined.h)
 
-        dialog = RefineDialog(user_crop, yoloe_crop, refined)
+        dialog = RefineDialog(user_crop, refined_crop, refined)
         dialog.exec()
         action, result_rect = dialog.get_result()
 
@@ -271,9 +303,19 @@ def cmd_record(args: argparse.Namespace) -> int:
                 if crop.size > 0:
                     # analyze_crop_array returns a dict with keys:
                     # element_type, label_guess, confidence, ocr_text
-                    vision_result = analyze_crop_array(
-                        crop, "Identify this UI element type and label"
-                    )
+                    florence_label = candidate.get("florence_caption", "")
+                    if florence_label:
+                        context_prompt = (
+                            f'A fast vision model identified this element as: '
+                            f'"{florence_label}". Confirm or correct the '
+                            f'identification. Return JSON: '
+                            f'{{"element_type": ..., "label_guess": ..., '
+                            f'"confidence": 0.0-1.0, "ocr_text": ...}}'
+                        )
+                    else:
+                        context_prompt = "Identify this UI element type and label"
+
+                    vision_result = analyze_crop_array(crop, context_prompt)
                     if vision_result:
                         vlm_label = vision_result.get("label_guess", "")
                         vlm_type = vision_result.get("element_type", "")
@@ -349,12 +391,18 @@ def cmd_record(args: argparse.Namespace) -> int:
             _save_recording(recorded_elements, args)
         app.quit()
 
-    # Initialize YOLOE text embeddings for fast detection during recording
+    # Pre-load OmniParser and Florence-2 for fast detection during recording
     try:
-        from core.yoloe import init_text_embeddings
-        init_text_embeddings()
+        from core.detection import get_detector
+        get_detector()  # triggers lazy model load
     except (ImportError, RuntimeError, OSError) as e:
-        logger.warning("YOLOE text embeddings not available: %s", e)
+        logger.warning("Detection models not available: %s", e)
+
+    try:
+        from core.florence import load_model as load_florence
+        load_florence()
+    except (ImportError, RuntimeError, OSError) as e:
+        logger.warning("Florence-2 not available: %s", e)
 
     overlay = OverlayController(
         on_element_clicked=on_element_clicked,
