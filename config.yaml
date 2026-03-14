@@ -19,17 +19,21 @@ models:
   clip: "openai/clip-vit-base-patch32"
   # Whisper for voice input (Stage 2)
   whisper_model: "small"
-  # YOLOE model for one-shot visual grounding (downloads on first use)
-  # Options: yoloe-26s-seg.pt (~50MB), yoloe-26l-seg.pt (~140MB)
-  yoloe: "yoloe-26s-seg.pt"
+  # Detection backend selector
+  detector: "omniparser"
+  # Florence-2 captioning model (or "microsoft/Florence-2-base" for lighter)
+  florence: "microsoft/Florence-2-large"
+  # OmniParser YOLOv8 weights repo
+  omniparser_weights: "microsoft/OmniParser-v2.0"
 
 detection:
-  # Fast element detector — scans full screen for interactive elements
-  model: "yolo-e"
-  confidence_threshold: 0.4
+  # OmniParser confidence threshold (lower than YOLOE — UI-trained model is more precise)
+  confidence_threshold: 0.3
+  # CLIP cosine similarity threshold for replay matching
+  match_threshold: 0.7
   # Extra padding around detected elements when cropping for VLM
-  crop_buffer_pct: 0.30
-  # YOLOE search radius (pixels) around expected position
+  crop_buffer_pct: 0.10
+  # Search radius (pixels) around expected position
   search_radius: 400
 
 
@@ -59,6 +63,7 @@ paths:
   snippets_dir: "./assets/snippets"
   faiss_index: "./assets/faiss.index"
   replay_logs: "./logs/replays"
+  model_cache: "~/.cache/ocsd/models"
 
 execution:
   mouse_duration: 0.15
