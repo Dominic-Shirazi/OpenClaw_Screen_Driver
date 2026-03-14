@@ -315,6 +315,13 @@ def cmd_record(args: argparse.Namespace) -> int:
             _save_recording(recorded_elements, args)
         app.quit()
 
+    # Initialize YOLOE text embeddings for fast detection during recording
+    try:
+        from core.yoloe import init_text_embeddings
+        init_text_embeddings()
+    except (ImportError, RuntimeError, OSError) as e:
+        logger.warning("YOLOE text embeddings not available: %s", e)
+
     overlay = OverlayController(
         on_element_clicked=on_element_clicked,
         on_mode_changed=on_mode_changed,
