@@ -24,7 +24,7 @@ embeddings = [
     "faiss-cpu>=1.7",
     "torch>=2.1",
 ]
-# YOLO-E visual grounding (targeted element finder)
+# YOLO-E visual grounding (dormant — kept for reference)
 yoloe = [
     "ultralytics>=8.3",
 ]
@@ -45,9 +45,26 @@ api = [
 tui = [
     "rich>=13.0",
 ]
+# OmniParser YOLOv8 icon detection
+omniparser = [
+    "ultralytics>=8.3",
+]
+# Florence-2 captioning
+florence = [
+    "transformers>=4.36",
+    "torch>=2.1",
+]
+# Model weight management
+model-cache = [
+    "huggingface-hub>=0.20",
+]
+# Full detection stack (OmniParser + Florence-2 + model cache)
+detection = [
+    "openclaw-screen-driver[omniparser,florence,model-cache]",
+]
 # Everything (install all optional features)
 all = [
-    "openclaw-screen-driver[embeddings,yoloe,vlm,windows,api,tui]",
+    "openclaw-screen-driver[detection,embeddings,vlm,windows,api,tui]",
 ]
 # Development tools
 dev = [
