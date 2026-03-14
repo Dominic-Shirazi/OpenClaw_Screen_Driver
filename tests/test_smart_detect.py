@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -41,33 +42,40 @@ def vlm_candidates() -> list[dict]:
     ]
 
 
-class TestDetectUIElements:
-    """Tests for the synchronous detect_ui_elements function."""
+class TestYOLOEFirstPipeline:
+    """Tests for the YOLOE-first detection pipeline (Wave 1)."""
 
-    @patch("recorder.smart_detect._detect_via_vlm")
-    def test_vlm_returns_results(
-        self, mock_vlm: MagicMock, fake_screenshot: np.ndarray, vlm_candidates: list[dict]
+    @patch("recorder.smart_detect._detect_via_yoloe")
+    def test_yoloe_returns_results(
+        self, mock_yoloe: MagicMock, fake_screenshot: np.ndarray
     ) -> None:
-        """When VLM succeeds, its results are returned directly."""
-        mock_vlm.return_value = vlm_candidates
+        """When YOLOE succeeds, its results are returned directly."""
+        mock_yoloe.return_value = [
+            {
+                "rect": {"x": 10, "y": 20, "w": 80, "h": 30},
+                "type_guess": "button",
+                "label_guess": "button",
+                "confidence": 0.15,
+                "ocr_text": None,
+            },
+        ]
 
-        results = detect_ui_elements(fake_screenshot, use_vlm=True)
+        results = detect_ui_elements(fake_screenshot)
 
-        assert len(results) == 2
+        assert len(results) == 1
         assert results[0]["type_guess"] == "button"
-        assert results[1]["type_guess"] == "textbox"
-        mock_vlm.assert_called_once_with(fake_screenshot)
+        mock_yoloe.assert_called_once()
 
     @patch("recorder.smart_detect._detect_via_ocr")
-    @patch("recorder.smart_detect._detect_via_vlm")
-    def test_vlm_empty_falls_back_to_ocr(
+    @patch("recorder.smart_detect._detect_via_yoloe")
+    def test_yoloe_empty_falls_back_to_ocr(
         self,
-        mock_vlm: MagicMock,
+        mock_yoloe: MagicMock,
         mock_ocr: MagicMock,
         fake_screenshot: np.ndarray,
     ) -> None:
-        """When VLM returns empty, OCR fallback is used."""
-        mock_vlm.return_value = []
+        """When YOLOE returns empty, OCR fallback is used."""
+        mock_yoloe.return_value = []
         mock_ocr.return_value = [
             {
                 "rect": {"x": 5, "y": 5, "w": 40, "h": 15},
@@ -78,18 +86,22 @@ class TestDetectUIElements:
             }
         ]
 
-        results = detect_ui_elements(fake_screenshot, use_vlm=True)
+        results = detect_ui_elements(fake_screenshot)
 
         assert len(results) == 1
         assert results[0]["ocr_text"] == "Login"
-        mock_vlm.assert_called_once()
+        mock_yoloe.assert_called_once()
         mock_ocr.assert_called_once()
 
     @patch("recorder.smart_detect._detect_via_ocr")
-    def test_vlm_disabled_uses_ocr(
-        self, mock_ocr: MagicMock, fake_screenshot: np.ndarray
+    @patch("recorder.smart_detect._detect_via_yoloe")
+    def test_yoloe_disabled_uses_ocr(
+        self,
+        mock_yoloe: MagicMock,
+        mock_ocr: MagicMock,
+        fake_screenshot: np.ndarray,
     ) -> None:
-        """When use_vlm=False, only OCR is used."""
+        """When use_yoloe=False, falls through to OCR."""
         mock_ocr.return_value = [
             {
                 "rect": {"x": 0, "y": 0, "w": 50, "h": 20},
@@ -100,26 +112,33 @@ class TestDetectUIElements:
             }
         ]
 
-        results = detect_ui_elements(fake_screenshot, use_vlm=False)
+        results = detect_ui_elements(fake_screenshot, use_yoloe=False)
 
         assert len(results) == 1
+        mock_yoloe.assert_not_called()
         mock_ocr.assert_called_once()
 
-    @patch("recorder.smart_detect._detect_via_ocr")
-    @patch("recorder.smart_detect._detect_via_vlm")
-    def test_both_empty_returns_empty(
-        self,
-        mock_vlm: MagicMock,
-        mock_ocr: MagicMock,
-        fake_screenshot: np.ndarray,
+    @patch("recorder.smart_detect._detect_via_yoloe")
+    def test_vlm_flag_has_no_effect_on_detection(
+        self, mock_yoloe: MagicMock, fake_screenshot: np.ndarray
     ) -> None:
-        """When both backends return empty, result is empty."""
-        mock_vlm.return_value = []
-        mock_ocr.return_value = []
+        """use_vlm flag no longer affects detection (VLM removed from pipeline)."""
+        mock_yoloe.return_value = [
+            {
+                "rect": {"x": 10, "y": 20, "w": 80, "h": 30},
+                "type_guess": "button",
+                "label_guess": "button",
+                "confidence": 0.15,
+                "ocr_text": None,
+            },
+        ]
 
-        results = detect_ui_elements(fake_screenshot)
+        results_vlm_on = detect_ui_elements(fake_screenshot, use_vlm=True)
+        results_vlm_off = detect_ui_elements(fake_screenshot, use_vlm=False)
 
-        assert results == []
+        # Both should use YOLOE, VLM flag is kept for API compat but ignored
+        assert len(results_vlm_on) == 1
+        assert len(results_vlm_off) == 1
 
 
 class TestDetectUIElementsAsync:
@@ -164,37 +183,25 @@ class TestDetectUIElementsAsync:
         thread.join(timeout=5)
 
 
-class TestDetectViaVLM:
-    """Tests for the VLM detection backend."""
+class TestDetectViaYOLOE:
+    """Tests for the YOLOE detection wrapper in smart_detect."""
 
-    @patch("recorder.smart_detect.first_pass_map_array", create=True)
-    def test_vlm_import_error_returns_empty(self, fake_screenshot: np.ndarray) -> None:
-        """ImportError from core.vision returns empty list."""
-        # We test this by directly calling _detect_via_vlm with the import mocked to fail
-        from recorder.smart_detect import _detect_via_vlm
+    def test_import_error_returns_empty(self, fake_screenshot: np.ndarray) -> None:
+        """ImportError from core.yoloe returns empty list."""
+        from recorder.smart_detect import _detect_via_yoloe
 
-        with patch.dict("sys.modules", {"core.vision": None}):
-            # The lazy import inside _detect_via_vlm catches ImportError
-            result = _detect_via_vlm(fake_screenshot)
+        with patch.dict("sys.modules", {"core.yoloe": None}):
+            result = _detect_via_yoloe(fake_screenshot)
             assert result == []
 
-    def test_vlm_exception_returns_empty(self, fake_screenshot: np.ndarray) -> None:
-        """Runtime exception from VLM returns empty list."""
-        from recorder.smart_detect import _detect_via_vlm
+    def test_exception_returns_empty(self, fake_screenshot: np.ndarray) -> None:
+        """Runtime exception from YOLOE returns empty list."""
+        from recorder.smart_detect import _detect_via_yoloe
 
-        with patch(
-            "recorder.smart_detect.first_pass_map_array",
-            create=True,
-            side_effect=RuntimeError("model not loaded"),
-        ):
-            # The function catches the import internally, so we mock at module level
-            pass
-
-        # Test via the import path inside the function
         mock_module = MagicMock()
-        mock_module.first_pass_map_array.side_effect = RuntimeError("boom")
-        with patch.dict("sys.modules", {"core.vision": mock_module}):
-            result = _detect_via_vlm(fake_screenshot)
+        mock_module.detect_all_elements.side_effect = RuntimeError("CUDA OOM")
+        with patch.dict("sys.modules", {"core.yoloe": mock_module}):
+            result = _detect_via_yoloe(fake_screenshot)
             assert result == []
 
 

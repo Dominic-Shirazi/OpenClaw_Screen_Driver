@@ -1,14 +1,14 @@
 """Smart element detection for recording sessions.
 
 During --record mode, automatically detects UI elements on screen using
-YOLOE (fast object detection) and/or VLM (vision language model) to
-pre-populate candidate bounding boxes on the overlay.
+YOLOE text-prompt mode (fast, local object detection). VLM is NOT used
+for detection — only for labeling individual crops on user click.
 
-Detection pipeline:
+Detection pipeline (Wave 1):
 1. Capture screenshot
-2. Run YOLOE object detection (fast, ~20ms) for bounding boxes
-3. Optionally run VLM (slow, 1-3s) for element classification/labeling
-4. Return candidates compatible with OverlayController.set_candidates()
+2. Run YOLOE text-prompt detection → bounding boxes + element types
+3. If YOLOE returns 0 results, fall back to OCR
+4. Return candidates for OverlayController.set_candidates()
 
 All AI calls are guarded with try/except so recording works even without
 GPU libs installed — candidates will just be empty.
@@ -17,14 +17,10 @@ GPU libs installed — candidates will just be empty.
 from __future__ import annotations
 
 import logging
-import tempfile
 import threading
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +31,18 @@ def detect_ui_elements(
     use_vlm: bool = True,
     use_yoloe: bool = True,
 ) -> list[dict[str, Any]]:
-    """Detects UI elements on a screenshot using available AI backends.
+    """Detects UI elements on a screenshot using YOLOE text-prompt mode.
 
-    Tries YOLOE first (fast), then VLM (comprehensive). Results are
-    merged and deduplicated.
+    Pipeline: YOLOE text-prompt (primary) → OCR (fallback).
+    VLM is NOT used for detection. The use_vlm parameter is kept for
+    API compatibility but has no effect on the detection pipeline.
 
     Args:
         screenshot: BGR full-screen image as numpy array.
-        use_vlm: Whether to use VLM for classification. Slower but gives
-                 element types and labels.
-        use_yoloe: Whether to use YOLOE for fast bbox detection.
+        use_vlm: Kept for API compatibility. Has no effect (VLM removed
+                 from detection pipeline in Wave 1).
+        use_yoloe: Whether to use YOLOE for detection. If False,
+                   falls through directly to OCR.
 
     Returns:
         List of candidate dicts with keys:
@@ -52,20 +50,17 @@ def detect_ui_elements(
         - type_guess: element type string
         - label_guess: human-readable label
         - confidence: 0.0-1.0
-        - ocr_text: visible text (if detected)
+        - ocr_text: visible text (if detected via OCR)
     """
     candidates: list[dict[str, Any]] = []
 
-    # Strategy: Use VLM for full detection (it returns typed + labeled candidates)
-    # YOLOE is best for targeted re-finding, not general detection.
-    # For recording, VLM's first_pass_map is the right tool.
-    if use_vlm:
-        vlm_candidates = _detect_via_vlm(screenshot)
-        if vlm_candidates:
-            candidates.extend(vlm_candidates)
-            return candidates  # VLM gives the best results
+    # Primary: YOLOE text-prompt detection (fast, local)
+    if use_yoloe:
+        yoloe_candidates = _detect_via_yoloe(screenshot)
+        if yoloe_candidates:
+            return yoloe_candidates
 
-    # Fallback: try OCR-based detection for text elements
+    # Fallback: OCR-based detection for text elements
     ocr_candidates = _detect_via_ocr(screenshot)
     if ocr_candidates:
         candidates.extend(ocr_candidates)
@@ -78,6 +73,7 @@ def detect_ui_elements_async(
     callback: Any,
     *,
     use_vlm: bool = True,
+    use_yoloe: bool = True,
 ) -> threading.Thread:
     """Runs detection in a background thread and calls callback with results.
 
@@ -86,14 +82,17 @@ def detect_ui_elements_async(
         callback: Callable that receives list[dict] of candidates.
                   Called on the background thread — use QTimer.singleShot
                   to marshal to Qt main thread if needed.
-        use_vlm: Whether to use VLM.
+        use_vlm: Kept for API compatibility. Has no effect.
+        use_yoloe: Whether to use YOLOE for detection.
 
     Returns:
         The started Thread object (for joining if needed).
     """
     def _worker() -> None:
         try:
-            results = detect_ui_elements(screenshot, use_vlm=use_vlm)
+            results = detect_ui_elements(
+                screenshot, use_vlm=use_vlm, use_yoloe=use_yoloe,
+            )
             callback(results)
         except Exception as e:
             logger.error("Async detection failed: %s", e)
@@ -104,8 +103,11 @@ def detect_ui_elements_async(
     return thread
 
 
-def _detect_via_vlm(screenshot: np.ndarray) -> list[dict[str, Any]]:
-    """Uses VLM first_pass_map to detect and classify all UI elements.
+def _detect_via_yoloe(screenshot: np.ndarray) -> list[dict[str, Any]]:
+    """Uses YOLOE text-prompt mode to detect all UI elements.
+
+    Calls detect_all_elements() from core.yoloe which uses pre-cached
+    CLIP text embeddings for fast inference.
 
     Args:
         screenshot: BGR full-screen image.
@@ -114,24 +116,25 @@ def _detect_via_vlm(screenshot: np.ndarray) -> list[dict[str, Any]]:
         List of candidate dicts, or empty list on failure.
     """
     try:
-        from core.vision import first_pass_map_array
+        from core.yoloe import detect_all_elements
 
-        candidates = first_pass_map_array(screenshot)
-        logger.info("VLM detected %d UI elements", len(candidates))
+        candidates = detect_all_elements(screenshot)
+        logger.info("YOLOE detected %d UI elements", len(candidates))
         return candidates
     except ImportError:
-        logger.debug("VLM module not available for smart detection")
+        logger.debug("YOLOE module not available for smart detection")
         return []
     except Exception as e:
-        logger.warning("VLM detection failed: %s", e)
+        logger.warning("YOLOE detection failed: %s", e)
         return []
 
 
 def _detect_via_ocr(screenshot: np.ndarray) -> list[dict[str, Any]]:
     """Uses OCR to find text regions as potential UI elements.
 
-    This is a lightweight fallback when VLM is unavailable. It finds
-    text on screen and creates candidate boxes for each text region.
+    This is a lightweight fallback when YOLOE is unavailable or returns
+    zero results. It finds text on screen and creates candidate boxes
+    for each text region.
 
     Args:
         screenshot: BGR full-screen image.
