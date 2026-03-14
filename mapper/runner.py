@@ -119,22 +119,43 @@ def execute_node(
         except (KeyError, Exception):
             pass
 
-    # Locate the element
-    try:
-        location = locate_element(graph, node_id, skill_id=skill_id)
-    except ElementNotFoundError:
-        logger.error("Cannot locate element for node %s", node_id[:8])
-        if next_node_id:
-            graph.record_execution(node_id, next_node_id, False)
-        return ReplayStep(
-            node_id=node_id,
-            located_at=None,
-            locate_method="failed",
-            vlm_confidence=0.0,
-            pixel_diff_pct=0.0,
-            success=False,
-            error=f"Element not found: {node_id[:8]}",
-        )
+    # Locate the element — retry with timeout for dynamic load times
+    cfg = get_config()
+    exec_cfg = cfg.get("execution", {})
+    timeout_s = exec_cfg.get("locate_timeout_s", 5.0)
+    poll_s = exec_cfg.get("locate_poll_s", 0.5)
+
+    location = None
+    deadline = time.monotonic() + timeout_s
+    attempt = 0
+
+    while True:
+        attempt += 1
+        try:
+            location = locate_element(graph, node_id, skill_id=skill_id)
+            break
+        except ElementNotFoundError:
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "Cannot locate element [%s] after %d attempts (%.1fs timeout)",
+                    node_id[:8], attempt, timeout_s,
+                )
+                if next_node_id:
+                    graph.record_execution(node_id, next_node_id, False)
+                return ReplayStep(
+                    node_id=node_id,
+                    located_at=None,
+                    locate_method="failed",
+                    vlm_confidence=0.0,
+                    pixel_diff_pct=0.0,
+                    success=False,
+                    error=f"Element not found: {node_id[:8]}",
+                )
+            logger.debug(
+                "Element [%s] not found (attempt %d), retrying in %.1fs...",
+                node_id[:8], attempt, poll_s,
+            )
+            time.sleep(poll_s)
 
     point = location.point
 

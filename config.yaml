@@ -73,6 +73,10 @@ execution:
   default_confidence: 0.75
   vlm_confirm: true
   abort_on_failure: true
+  # Seconds to wait for an element to appear before failing
+  locate_timeout_s: 5.0
+  # Seconds between locate retries while waiting
+  locate_poll_s: 0.5
   # Human-like delay multiplier (override with OCSD_HUMAN_DELAY in .env)
   # 0 = instant (no sleeps at all — speed mode)
   # 1.0 = normal human speed
