@@ -29,6 +29,7 @@ _MOCK_MODULES = [
     "pywinauto",
     "pywinauto.application",
     "pytesseract",
+    "huggingface_hub",
 ]
 
 for mod_name in _MOCK_MODULES:
