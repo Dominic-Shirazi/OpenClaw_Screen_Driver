@@ -127,6 +127,13 @@ def _try_refine_bbox(
     except Exception as e:
         logger.debug("Detection failed during refinement: %s", e)
         return None
+    finally:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
     if not candidates:
         return None
@@ -261,6 +268,15 @@ def _auto_snip(x: int, y: int, radius: int = 120) -> dict | None:
     except Exception as e:
         logger.debug("Auto-snip detection failed: %s", e)
         return None
+    finally:
+        # Free the full screenshot — only crop is needed
+        del screen
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
     if not candidates:
         return None

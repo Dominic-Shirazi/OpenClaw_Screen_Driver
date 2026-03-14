@@ -153,6 +153,14 @@ def _enrich_with_florence(
                 c["label_guess"] = cap
                 c["florence_caption"] = cap
 
+        # Free GPU memory after batch captioning
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
     except ImportError:
         logger.debug("Florence-2 not available, skipping captioning")
     except Exception as e:

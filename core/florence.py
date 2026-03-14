@@ -133,12 +133,15 @@ def caption_crop(image: np.ndarray, task: str = "<CAPTION>") -> str:
         if hasattr(inputs[k], "to"):
             inputs[k] = inputs[k].to(_device)
 
-    generated_ids = _model.generate(
-        input_ids=inputs["input_ids"],
-        pixel_values=inputs["pixel_values"],
-        max_new_tokens=128,
-        num_beams=3,
-    )
+    import torch
+
+    with torch.no_grad():
+        generated_ids = _model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=128,
+            num_beams=3,
+        )
 
     generated_text = _processor.batch_decode(
         generated_ids, skip_special_tokens=False,
@@ -152,6 +155,11 @@ def caption_crop(image: np.ndarray, task: str = "<CAPTION>") -> str:
     caption = parsed.get(task, generated_text)
     if isinstance(caption, dict):
         caption = str(caption)
+
+    # Free intermediate tensors
+    del generated_ids, inputs
+    if _device != "cpu":
+        torch.cuda.empty_cache()
 
     return caption.strip()
 
