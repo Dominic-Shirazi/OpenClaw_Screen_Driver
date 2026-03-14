@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -22,8 +21,8 @@ def fake_screenshot() -> np.ndarray:
 
 
 @pytest.fixture
-def vlm_candidates() -> list[dict]:
-    """Sample VLM detection results."""
+def sample_candidates() -> list[dict]:
+    """Sample detection candidates for testing."""
     return [
         {
             "rect": {"x": 10, "y": 20, "w": 80, "h": 30},
@@ -146,16 +145,16 @@ class TestDetectUIElementsAsync:
 
     @patch("recorder.smart_detect.detect_ui_elements")
     def test_async_calls_callback_with_results(
-        self, mock_detect: MagicMock, fake_screenshot: np.ndarray, vlm_candidates: list[dict]
+        self, mock_detect: MagicMock, fake_screenshot: np.ndarray, sample_candidates: list[dict]
     ) -> None:
         """Async wrapper calls callback with detection results."""
-        mock_detect.return_value = vlm_candidates
+        mock_detect.return_value = sample_candidates
         callback = MagicMock()
 
         thread = detect_ui_elements_async(fake_screenshot, callback)
         thread.join(timeout=5)
 
-        callback.assert_called_once_with(vlm_candidates)
+        callback.assert_called_once_with(sample_candidates)
 
     @patch("recorder.smart_detect.detect_ui_elements")
     def test_async_calls_callback_empty_on_error(
