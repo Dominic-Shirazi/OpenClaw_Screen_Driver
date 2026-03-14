@@ -24,10 +24,6 @@ embeddings = [
     "faiss-cpu>=1.7",
     "torch>=2.1",
 ]
-# YOLO-E visual grounding (dormant — kept for reference)
-yoloe = [
-    "ultralytics>=8.3",
-]
 # VLM vision analysis via LiteLLM proxy
 vlm = [
     "openai>=1.0.0",
