@@ -14,6 +14,7 @@ from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
+    QFrame,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
@@ -67,6 +68,9 @@ class _OverlayView(QGraphicsView):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setStyleSheet("background: transparent;")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setViewportMargins(0, 0, 0, 0)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -166,6 +170,21 @@ class _OverlayView(QGraphicsView):
             )
             self._element_boxes.append(box)
 
+        logger.debug(
+            "render_candidates: %d boxes created, scene has %d items, "
+            "sceneRect=(%.0f,%.0f %.0fx%.0f), viewport=%dx%d",
+            len(self._element_boxes), len(self.scene().items()),
+            self.sceneRect().x(), self.sceneRect().y(),
+            self.sceneRect().width(), self.sceneRect().height(),
+            self.viewport().width(), self.viewport().height(),
+        )
+        if self._element_boxes:
+            first = self._element_boxes[0]
+            rx, ry, rw, rh = first.get_rect()
+            logger.debug(
+                "render_candidates: first box rect=(%d,%d %dx%d)",
+                rx, ry, rw, rh,
+            )
         self.refresh_overlay()
         self.viewport().update()
 

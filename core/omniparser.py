@@ -149,7 +149,18 @@ class OmniParserProvider:
                 "confidence": conf,
             })
 
-        logger.info("OmniParser detected %d UI elements", len(candidates))
+        logger.info(
+            "OmniParser detected %d UI elements from %dx%d image",
+            len(candidates), screenshot.shape[1], screenshot.shape[0],
+        )
+        if candidates:
+            c0 = candidates[0]
+            r0 = c0["rect"]
+            logger.debug(
+                "OmniParser first candidate: type=%s rect=(%d,%d %dx%d) conf=%.2f",
+                c0["type_guess"], r0["x"], r0["y"], r0["w"], r0["h"],
+                c0["confidence"],
+            )
         return candidates
 
     def detect_and_match(

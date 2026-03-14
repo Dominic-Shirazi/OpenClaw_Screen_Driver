@@ -12,9 +12,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from PyQt6.QtCore import QObject, pyqtSignal
 from core.config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+class _SignalBridge(QObject):
+    """Thread-safe bridge for delivering detection results to the Qt main thread.
+
+    QTimer.singleShot called from a background thread (no Qt event loop) may
+    silently fail in PyQt6. This QObject emits a signal instead, which Qt
+    guarantees to deliver via queued connection to the main thread.
+    """
+
+    candidates_ready = pyqtSignal(list)
 
 
 def _try_refine_bbox(
@@ -267,6 +279,10 @@ def _trigger_smart_detect(
     starts the one-by-one review flow where each element is presented
     to the user via TagDialog with pre-filled LM data.
 
+    Uses a _SignalBridge (QObject signal) instead of QTimer.singleShot
+    from the background thread, because QTimer.singleShot called from
+    a non-Qt thread without an event loop may silently fail in PyQt6.
+
     Args:
         overlay: The OverlayController to populate with candidates.
         recorded_elements: List to append accepted elements to.
@@ -284,21 +300,32 @@ def _trigger_smart_detect(
         logger.warning("Smart detect: could not capture screen: %s", e)
         return
 
-    def _on_results(candidates: list[dict]) -> None:
-        def _set_and_review() -> None:
-            overlay.set_candidates(candidates)
-            if candidates:
-                # Start review after a brief delay so the user sees all boxes
-                _QTimer.singleShot(
-                    1500,
-                    lambda: _start_review(
-                        overlay, candidates, recorded_elements,
-                        refine_mode, on_element_clicked,
-                    ),
-                )
+    # Create signal bridge on the main thread (must be created here, not in bg thread)
+    bridge = _SignalBridge()
 
-        # Marshal to Qt main thread
-        _QTimer.singleShot(0, _set_and_review)
+    def _set_and_review(candidates: list[dict]) -> None:
+        logger.debug(
+            "Signal bridge delivered %d candidates to main thread", len(candidates),
+        )
+        overlay.set_candidates(candidates)
+        if candidates:
+            # Start review after a brief delay so the user sees all boxes
+            _QTimer.singleShot(
+                1500,
+                lambda: _start_review(
+                    overlay, candidates, recorded_elements,
+                    refine_mode, on_element_clicked,
+                ),
+            )
+
+    bridge.candidates_ready.connect(_set_and_review)
+
+    def _on_results(candidates: list[dict]) -> None:
+        logger.debug(
+            "Background thread emitting %d candidates via signal bridge",
+            len(candidates),
+        )
+        bridge.candidates_ready.emit(candidates)
 
     detect_ui_elements_async(screenshot, _on_results)
     logger.info("Smart detection triggered (%d x %d)", screenshot.shape[1], screenshot.shape[0])

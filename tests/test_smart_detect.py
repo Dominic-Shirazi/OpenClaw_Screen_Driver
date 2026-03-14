@@ -251,7 +251,7 @@ class TestEnrichWithFlorence:
              patch.dict("sys.modules", {"cv2": mock_cv2}):
             result = _enrich_with_florence(candidates, fake_screenshot)
 
-        assert result[0]["label_guess"] == "Submit button"
+        assert result[0]["label_guess"] == "submit_button"
         assert result[0]["florence_caption"] == "Submit button"
 
     def test_handles_import_error(self, fake_screenshot: np.ndarray) -> None:

@@ -113,6 +113,35 @@ def _detect_via_omniparser(screenshot: np.ndarray) -> list[dict[str, Any]]:
         return []
 
 
+import re as _re
+
+# Words to strip from Florence-2 captions when building labels
+_STRIP_WORDS = frozenset({
+    "a", "an", "the", "on", "in", "of", "with", "and", "or", "is", "are",
+    "was", "were", "to", "for", "at", "by", "from", "that", "this", "it",
+    "its", "be", "has", "have", "had", "do", "does", "did", "will", "would",
+    "could", "should", "may", "might", "can", "shall", "being", "been",
+    "background", "foreground", "image", "picture", "photo", "screenshot",
+})
+
+
+def _caption_to_label(caption: str, max_words: int = 4) -> str:
+    """Convert a Florence-2 caption to a short snake_case label.
+
+    Examples:
+        "a red flower on a white background" -> "red_flower"
+        "The Submit button in the form"      -> "submit_button"
+        "A magnifying glass icon"            -> "magnifying_glass_icon"
+    """
+    # Lowercase and strip punctuation
+    text = _re.sub(r"[^a-z0-9\s]", "", caption.lower()).strip()
+    # Remove filler words
+    words = [w for w in text.split() if w not in _STRIP_WORDS]
+    # Limit length
+    words = words[:max_words]
+    return "_".join(words) if words else "element"
+
+
 def _enrich_with_florence(
     candidates: list[dict[str, Any]],
     screenshot: np.ndarray,
@@ -150,8 +179,8 @@ def _enrich_with_florence(
         captions = caption_batch(crops)
         for c, cap in zip(candidates, captions):
             if cap:
-                c["label_guess"] = cap
                 c["florence_caption"] = cap
+                c["label_guess"] = _caption_to_label(cap)
 
         # Free GPU memory after batch captioning
         try:
