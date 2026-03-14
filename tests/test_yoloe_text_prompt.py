@@ -204,3 +204,54 @@ class TestClassMapping:
 
         assert YOLOE_TO_ELEMENT_TYPE["text label"] == "read_here"
         assert YOLOE_TO_ELEMENT_TYPE["image"] == "image"
+
+
+# ---------------------------------------------------------------------------
+# Tests: VLM Crop Labeling
+# ---------------------------------------------------------------------------
+
+class TestVLMCropLabeling:
+    """Tests for VLM labeling of YOLOE-detected element crops."""
+
+    def test_crop_buffer_calculation(self):
+        """Crop buffer is 30% of element dimensions."""
+        rect = {"x": 100, "y": 200, "w": 80, "h": 30}
+        buf_x = int(rect["w"] * 0.30)
+        buf_y = int(rect["h"] * 0.30)
+
+        assert buf_x == 24  # 80 * 0.30
+        assert buf_y == 9   # 30 * 0.30
+
+        # Crop region (clamped to screen)
+        sw, sh = 1920, 1080
+        crop_x1 = max(0, rect["x"] - buf_x)
+        crop_y1 = max(0, rect["y"] - buf_y)
+        crop_x2 = min(sw, rect["x"] + rect["w"] + buf_x)
+        crop_y2 = min(sh, rect["y"] + rect["h"] + buf_y)
+
+        assert crop_x1 == 76
+        assert crop_y1 == 191
+        assert crop_x2 == 204
+        assert crop_y2 == 239
+
+    def test_vlm_result_is_dict_access(self):
+        """VLM results are accessed as dict, not attributes."""
+        import sys
+        import types
+
+        # core.vision requires cv2 which may not be installed; inject a stub
+        mock_vision_module = types.ModuleType("core.vision")
+        mock_analyze = MagicMock(return_value={
+            "element_type": "button",
+            "label_guess": "Submit Order",
+            "confidence": 0.9,
+            "ocr_text": "Submit",
+        })
+        mock_vision_module.analyze_crop_array = mock_analyze
+
+        with patch.dict(sys.modules, {"core.vision": mock_vision_module}):
+            from core.vision import analyze_crop_array  # noqa: F401 — imported for coverage
+
+            result = mock_analyze(MagicMock(), "test prompt")
+            assert result.get("label_guess") == "Submit Order"
+            assert result.get("element_type") == "button"

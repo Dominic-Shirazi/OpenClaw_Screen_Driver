@@ -249,10 +249,44 @@ def cmd_record(args: argparse.Namespace) -> int:
         dialog_x = x + w // 2 if w > 0 else x
         dialog_y = y + h // 2 if h > 0 else y
 
+        # VLM labeling: crop element + 30% buffer, ask VLM for label
+        vlm_label = ""
+        vlm_type = ""
+        if candidate and candidate.get("rect"):
+            try:
+                from core.vision import analyze_crop_array
+                from core.capture import screenshot_full
+
+                screen = screenshot_full()
+                r = candidate["rect"]
+                buf_x = int(r["w"] * 0.30)
+                buf_y = int(r["h"] * 0.30)
+                sh, sw = screen.shape[:2]
+                crop_x1 = max(0, r["x"] - buf_x)
+                crop_y1 = max(0, r["y"] - buf_y)
+                crop_x2 = min(sw, r["x"] + r["w"] + buf_x)
+                crop_y2 = min(sh, r["y"] + r["h"] + buf_y)
+                crop = screen[crop_y1:crop_y2, crop_x1:crop_x2]
+
+                if crop.size > 0:
+                    # analyze_crop_array returns a dict with keys:
+                    # element_type, label_guess, confidence, ocr_text
+                    vision_result = analyze_crop_array(
+                        crop, "Identify this UI element type and label"
+                    )
+                    if vision_result:
+                        vlm_label = vision_result.get("label_guess", "")
+                        vlm_type = vision_result.get("element_type", "")
+                        logger.info("VLM labeled element: %s (%s)", vlm_label, vlm_type)
+            except ImportError:
+                logger.debug("VLM module not available for labeling")
+            except RuntimeError as e:
+                logger.debug("VLM labeling failed: %s", e)
+
         is_bbox = w > 0 and h > 0
         dialog = TagDialog(
-            element_type_guess=candidate.get("type_guess", "unknown") if candidate else "unknown",
-            label_guess=candidate.get("label_guess", "") if candidate else "",
+            element_type_guess=vlm_type or (candidate.get("type_guess", "unknown") if candidate else "unknown"),
+            label_guess=vlm_label or (candidate.get("label_guess", "") if candidate else ""),
             ocr_text=candidate.get("ocr_text") if candidate else None,
             layer_guess=candidate.get("layer_guess", "page_specific") if candidate else "page_specific",
             uia_hint=candidate.get("uia_hint") if candidate else None,
