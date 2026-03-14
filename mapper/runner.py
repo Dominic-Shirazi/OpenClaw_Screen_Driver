@@ -5,8 +5,8 @@ path from start to goal, and replays each step using the locate
 cascade, action executor, and post-action validator.
 
 Locate cascade (ordered by speed, cheapest first):
-1. YOLO-E targeted finder — saved snippet → "find this on screen" (~20ms)
-2. CLIP embedding — compare SAVED embedding against YOLO-E candidates
+1. OmniParser detect+match — saved snippet → detect boxes → CLIP match (~50ms)
+2. CLIP embedding — compare SAVED embedding against OmniParser candidates
 3. OCR text match — SCOPED to region around expected position (~200ms)
 4. VLM full scan — screenshot → LiteLLM → match by label (expensive)
 5. Position fallback — blind click at recorded coordinates (no confirmation)
@@ -86,11 +86,11 @@ def locate_element(
     """Locates an element on screen using the cascading strategy.
 
     Cascade order (fastest / cheapest first):
-    1. **YOLO-E targeted finder** — give it the saved snippet from recording
-       and approximate position → one-shot visual grounding, ~20 ms.
+    1. **OmniParser detect+match** — give it the saved snippet from recording
+       and approximate position → detect all UI boxes then CLIP-match, ~50 ms.
     2. **CLIP embedding** — retrieve the SAVED embedding (from recording),
        compare against crops of the current screen near the expected
-       position.  Confirms YOLO-E hits or finds the element independently.
+       position.  Confirms OmniParser hits or finds the element independently.
     3. **OCR text match** — search ONLY within a region around the expected
        position (not full screen!) to avoid false positives from ads etc.
     4. **VLM full-screen scan** — expensive LiteLLM call, most reliable.
@@ -112,40 +112,36 @@ def locate_element(
     hint_x, hint_y, sw, sh = _resolve_position_hint(node_data)
 
     # ------------------------------------------------------------------
-    # Stage 1: YOLO-E targeted finder
-    # "here's the snippet from recording → find it on this screen"
+    # Stage 1: OmniParser detect + CLIP match
+    # "here's the snippet from recording → detect all boxes → CLIP-match"
     # ------------------------------------------------------------------
     try:
         from core.capture import load_snippet
-        from core.yoloe import find_element_locate
+        from core.detection import get_detector
 
         snippet = load_snippet(skill_id, node_id[:12])
         if snippet is not None:
             screen = screenshot_full()
-            result = find_element_locate(
-                snippet,
-                screen,
-                hint_x=hint_x,
-                hint_y=hint_y,
-                search_radius=400,
-                conf_threshold=0.35,
+            cfg = get_config()
+            detector = get_detector()
+            result = detector.detect_and_match(
+                screen, snippet, hint_x or 0, hint_y or 0,
+                match_threshold=cfg.get("detection", {}).get("match_threshold", 0.7),
+                search_radius=cfg.get("detection", {}).get("search_radius", 400),
             )
             if result is not None:
                 logger.info(
-                    "Located [%s] via YOLOE at (%d, %d) conf=%.2f",
-                    node_id[:8],
-                    result.point.x,
-                    result.point.y,
-                    result.confidence,
+                    "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
+                    node_id[:8], result.point.x, result.point.y, result.confidence,
                 )
                 return result
-            logger.debug("YOLOE found no match for [%s]", node_id[:8])
+            logger.debug("OmniParser found no match for [%s]", node_id[:8])
         else:
-            logger.debug("No snippet on disk for [%s], skipping YOLOE", node_id[:8])
+            logger.debug("No snippet on disk for [%s], skipping Stage 1", node_id[:8])
     except ImportError:
-        logger.debug("YOLOE (ultralytics) not installed, skipping Stage 1")
+        logger.debug("Detection module not available, skipping Stage 1")
     except Exception as e:
-        logger.debug("YOLOE locate error: %s", e)
+        logger.debug("OmniParser locate error: %s", e)
 
     # ------------------------------------------------------------------
     # Stage 2: CLIP embedding — CORRECT direction

@@ -1,6 +1,6 @@
 """Tests for the locate cascade and related modules.
 
-Covers YOLOE targeted finder, OCR region scoping, CLIP embedding
+Covers OmniParser detect+match, OCR region scoping, CLIP embedding
 retrieval, snippet loading, and the full cascade in mapper.runner.
 
 All external dependencies (ultralytics, torch, transformers, faiss,
@@ -532,39 +532,42 @@ class TestFullCascade:
             return_value=_full_screen_image(),
         )
 
-    # -- Stage 1 success: YOLOE finds it, no later stages called ----------
+    # -- Stage 1 success: OmniParser finds it, no later stages called ------
 
-    def test_yoloe_succeeds_returns_early(self, mocker: Any) -> None:
-        """When YOLOE matches, cascade returns immediately without OCR/VLM."""
-        yoloe_result = LocateResult(
-            point=Point(960, 540), method="yoloe", confidence=0.9
+    def test_omniparser_succeeds_returns_early(self, mocker: Any) -> None:
+        """When OmniParser matches, cascade returns immediately without OCR/VLM."""
+        omni_result = LocateResult(
+            point=Point(960, 540), method="omniparser", confidence=0.9
         )
         mocker.patch(
             "core.capture.load_snippet", return_value=_bgr_image(50, 50)
         )
-        mocker.patch(
-            "core.yoloe.find_element_locate", return_value=yoloe_result
-        )
+        mock_detector = MagicMock()
+        mock_detector.detect_and_match.return_value = omni_result
+        mocker.patch("core.detection.get_detector", return_value=mock_detector)
         mock_ocr = mocker.patch("core.ocr.find_text_on_screen")
 
         from mapper.runner import locate_element
 
         result = locate_element(_make_mock_graph(), "node-abc", skill_id="s1")
 
-        assert result.method == "yoloe"
+        assert result.method == "omniparser"
         assert result.confidence == pytest.approx(0.9)
         # OCR should NOT have been called
         mock_ocr.assert_not_called()
+        mock_detector.detect_and_match.assert_called_once()
 
     # -- Stage 1 fails, Stage 2 (CLIP) succeeds ---------------------------
 
-    def test_yoloe_fails_clip_succeeds(self, mocker: Any) -> None:
-        """When YOLOE finds nothing but CLIP score is high, returns clip."""
-        # YOLOE returns None
+    def test_omniparser_fails_clip_succeeds(self, mocker: Any) -> None:
+        """When OmniParser finds nothing but CLIP score is high, returns clip."""
+        # OmniParser returns None
         mocker.patch(
             "core.capture.load_snippet", return_value=_bgr_image(50, 50)
         )
-        mocker.patch("core.yoloe.find_element_locate", return_value=None)
+        mock_detector = MagicMock()
+        mock_detector.detect_and_match.return_value = None
+        mocker.patch("core.detection.get_detector", return_value=mock_detector)
 
         # CLIP returns high similarity
         saved_emb = np.random.randn(1, 512).astype("float32")
@@ -595,9 +598,9 @@ class TestFullCascade:
 
     # -- Stages 1+2 fail, Stage 3 (OCR) succeeds --------------------------
 
-    def test_yoloe_clip_fail_ocr_succeeds(self, mocker: Any) -> None:
-        """When YOLOE and CLIP both fail, OCR takes over."""
-        # YOLOE — no snippet on disk
+    def test_omniparser_clip_fail_ocr_succeeds(self, mocker: Any) -> None:
+        """When OmniParser and CLIP both fail, OCR takes over."""
+        # OmniParser — no snippet on disk (Stage 1 skipped)
         mocker.patch("core.capture.load_snippet", return_value=None)
 
         # CLIP — no saved embedding
