@@ -340,7 +340,7 @@ class TestFullCascade:
         mocker.patch("core.detection.get_detector", return_value=mock_detector)
         mock_ocr = mocker.patch("core.ocr.find_text_on_screen")
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-abc", skill_id="s1")
 
@@ -381,7 +381,7 @@ class TestFullCascade:
 
         mock_ocr = mocker.patch("core.ocr.find_text_on_screen")
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-xyz", skill_id="s1")
 
@@ -410,7 +410,7 @@ class TestFullCascade:
             "mapper.runner.find_text_on_screen", return_value=ocr_result
         )
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-ocr", skill_id="s1")
 
@@ -430,7 +430,7 @@ class TestFullCascade:
         # VLM also fails (ImportError path)
         mocker.patch.dict("sys.modules", {"core.vision": None})
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         graph = _make_mock_graph({"ocr_text": None, "label": ""})
         result = locate_element(graph, "node-fallback", skill_id="s1")
@@ -450,7 +450,7 @@ class TestFullCascade:
         mocker.patch("core.ocr.find_text_on_screen", return_value=None)
         mocker.patch.dict("sys.modules", {"core.vision": None})
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         # Node with NO position data at all
         graph = _make_mock_graph(

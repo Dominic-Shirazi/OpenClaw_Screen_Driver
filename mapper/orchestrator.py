@@ -24,11 +24,11 @@ from core.config import get_config
 from core.types import ReplayLog, ReplayStep
 from mapper.graph import OCSDGraph
 from mapper.pathfinder import get_execution_plan
+from core.locate import locate_element
 from mapper.runner import (
     EventCallback,
     RunnerEventType,
     execute_node,
-    locate_element,
 )
 
 logger = logging.getLogger(__name__)
