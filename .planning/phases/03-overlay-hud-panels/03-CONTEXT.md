@@ -24,7 +24,7 @@ Two interactive overlay panels — a frosted-glass tag dialog and a floating too
 - **Card glow animation**: Slow shimmer sweep at idle. During VLM typewriter fill, brightness pulses/flashes synchronized with keystrokes — like you can "see" the AI typing by watching the glow. Quick flashes, varying brightness, like a fast typist
 - **Field styling**: Subtle dark recessed input wells for each field. Clearly defined but low contrast against frost
 - **Dismiss**: Smooth opacity fade out
-- **Confirm/Cancel**: Green "Confirm" and dim "Cancel" buttons at bottom, plus Enter to confirm and Esc to cancel
+- **Confirm/Dismiss**: Green "Confirm" and dim "Dismiss" buttons at bottom, plus Enter to confirm and Esc to dismiss
 - **Shimmer interaction**: Tag dialog registers as avoidance rect — screen border shimmer retreats from it
 
 ### Typewriter fill behavior (HUD-02, HUD-03)
@@ -56,7 +56,7 @@ Two interactive overlay panels — a frosted-glass tag dialog and a floating too
 - **Visual**: Same frosted glass + backlit green glow as tag dialog. Consistent HUD family
 - **Context-sensitive buttons** that swap with fade transitions:
   - **Recording mode**: [Pause] [Undo Last]
-  - **Tag dialog open**: [Confirm] [Cancel] [Skip]
+  - **Tag dialog open**: [Confirm] [Dismiss] [Skip]
   - **Dry-run mode**: [Run Step] [Skip Step] [Finish]
 - **Draggable**: Full drag support, remembers position during session
 - **Hide behavior (HUD-06)**: Fully hides before any screenshot capture (same as all overlay elements)
