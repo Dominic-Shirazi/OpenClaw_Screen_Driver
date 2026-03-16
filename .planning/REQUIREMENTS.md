@@ -18,7 +18,7 @@
 - [x] **ANIM-01**: Border shimmer glow — faded moving pulse along screen edges, green=ready, red=recording
 - [x] **ANIM-02**: Element scan animation — glowing perimeter trace around selection, scan line sweep top→bottom then left→right
 - [x] **ANIM-03**: Bbox animation — smooth morph from rough selection to AI-fitted bounding box
-- [ ] **ANIM-04**: Donut cloud — probability density visualizer showing where simulated clicks will land
+- [x] **ANIM-04**: Donut cloud — probability density visualizer showing where simulated clicks will land
 - [x] **ANIM-05**: All animations run at 60fps via QTimer (16ms interval), never trigger repaint loops
 - [x] **ANIM-06**: All overlay elements use fluid transitions — slides, fades, scales, eases — nothing "appears"
 
@@ -175,7 +175,7 @@
 | ANIM-01 | Phase 2 | Complete |
 | ANIM-02 | Phase 2 | Complete |
 | ANIM-03 | Phase 2 | Complete |
-| ANIM-04 | Phase 2 | Pending |
+| ANIM-04 | Phase 2 | Complete |
 | ANIM-05 | Phase 2 | Complete |
 | ANIM-06 | Phase 2 | Complete |
 | HUD-01 | Phase 3 | Pending |

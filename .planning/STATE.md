@@ -3,30 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-03-16T21:34:13.386Z"
-last_activity: 2026-03-16 — Completed 02-01-PLAN.md (AnimationClock + ShimmerLayer)
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-03-16T21:40:01Z"
+last_activity: 2026-03-16 — Completed 02-03-PLAN.md (DonutCloud + Animation Integration)
 progress:
   total_phases: 10
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 5
-  percent: 83
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-03-16T21:32:27.887Z"
-last_activity: 2026-03-16 — Completed 02-01-PLAN.md (AnimationClock + ShimmerLayer)
-progress:
-  [████████░░] 83%
-  completed_phases: 1
-  total_plans: 6
-  completed_plans: 4
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -40,19 +25,19 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 ## Current Position
 
-Phase: 2 of 10 (Overlay Animations)
-Plan: 1 of 3 in current phase -- COMPLETE
-Status: Plan 02-01 complete, ready for Plan 02-02
-Last activity: 2026-03-16 — Completed 02-01-PLAN.md (AnimationClock + ShimmerLayer)
+Phase: 2 of 10 (Overlay Animations) -- COMPLETE
+Plan: 3 of 3 in current phase -- COMPLETE
+Status: Phase 02 complete, ready for Phase 03
+Last activity: 2026-03-16 — Completed 02-03-PLAN.md (DonutCloud + Animation Integration)
 
-Progress: [███████░░░] 67% (4 of 6 plans)
+Progress: [██████████] 100% (6 of 6 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
+- Total plans completed: 6
 - Average duration: 4min
-- Total execution time: 0.25 hours
+- Total execution time: 0.38 hours
 
 **By Phase:**
 
@@ -63,12 +48,12 @@ Progress: [███████░░░] 67% (4 of 6 plans)
 | Phase 01 P03 | 4min | 2 tasks | 2 files |
 | Phase 02 P01 | 3min | 2 tasks | 4 files |
 
-**Recent Trend:**
-- Last 5 plans: 5min, 3min, 4min, 3min
-- Trend: stable
-
-*Updated after each plan completion*
 | Phase 02 P02 | 5min | 2 tasks | 4 files |
+| Phase 02 P03 | 5min | 2 tasks | 7 files |
+
+**Recent Trend:**
+- Last 5 plans: 3min, 4min, 3min, 5min, 5min
+- Trend: stable
 
 ## Accumulated Context
 
@@ -91,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 32-segment border sampling for mouse retreat modulation
 - [Phase 02]: Avoidance rects API on ShimmerLayer for UI element retreat
 - [Phase 02]: ScanLayer WAITING_AI is instant-transition phase (no duration); _MorphHelper QObject bridge for QPropertyAnimation on QGraphicsItemGroup
+- [Phase 02]: BorderLayer replaced by ShimmerLayer in view -- no backward compatibility shim
+- [Phase 02]: DonutCloudLayer z-value 45 (below BboxLayer at 50) for visual layering
 
 ### Pending Todos
 
@@ -106,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-16T21:34:13.383Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-03-16T21:40:01Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
