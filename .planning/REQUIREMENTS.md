@@ -7,7 +7,7 @@
 
 ### Overlay Foundation
 
-- [ ] **OVLY-01**: Overlay renders as transparent fullscreen window with click-through passthrough when not interacting
+- [x] **OVLY-01**: Overlay renders as transparent fullscreen window with click-through passthrough when not interacting
 - [x] **OVLY-02**: Overlay hides ALL visual elements before any screenshot capture (80ms+ DWM flush)
 - [x] **OVLY-03**: Overlay handles DPI scaling correctly — all coordinates use physical pixels matching mss output
 - [x] **OVLY-04**: Overlay state machine: ready (green) ↔ recording (red) ↔ paused (green) with smooth transitions
@@ -167,7 +167,7 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OVLY-01 | Phase 1 | Pending |
+| OVLY-01 | Phase 1 | Complete |
 | OVLY-02 | Phase 1 | Complete |
 | OVLY-03 | Phase 1 | Complete |
 | OVLY-04 | Phase 1 | Complete |
