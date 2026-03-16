@@ -8,10 +8,10 @@
 ### Overlay Foundation
 
 - [ ] **OVLY-01**: Overlay renders as transparent fullscreen window with click-through passthrough when not interacting
-- [ ] **OVLY-02**: Overlay hides ALL visual elements before any screenshot capture (80ms+ DWM flush)
-- [ ] **OVLY-03**: Overlay handles DPI scaling correctly — all coordinates use physical pixels matching mss output
-- [ ] **OVLY-04**: Overlay state machine: ready (green) ↔ recording (red) ↔ paused (green) with smooth transitions
-- [ ] **OVLY-05**: Overlay works on Windows (primary) and Ubuntu (X11/XCB fallback for Wayland)
+- [x] **OVLY-02**: Overlay hides ALL visual elements before any screenshot capture (80ms+ DWM flush)
+- [x] **OVLY-03**: Overlay handles DPI scaling correctly — all coordinates use physical pixels matching mss output
+- [x] **OVLY-04**: Overlay state machine: ready (green) ↔ recording (red) ↔ paused (green) with smooth transitions
+- [x] **OVLY-05**: Overlay works on Windows (primary) and Ubuntu (X11/XCB fallback for Wayland)
 
 ### Overlay Animations
 
@@ -168,10 +168,10 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | OVLY-01 | Phase 1 | Pending |
-| OVLY-02 | Phase 1 | Pending |
-| OVLY-03 | Phase 1 | Pending |
-| OVLY-04 | Phase 1 | Pending |
-| OVLY-05 | Phase 1 | Pending |
+| OVLY-02 | Phase 1 | Complete |
+| OVLY-03 | Phase 1 | Complete |
+| OVLY-04 | Phase 1 | Complete |
+| OVLY-05 | Phase 1 | Complete |
 | ANIM-01 | Phase 2 | Pending |
 | ANIM-02 | Phase 2 | Pending |
 | ANIM-03 | Phase 2 | Pending |
