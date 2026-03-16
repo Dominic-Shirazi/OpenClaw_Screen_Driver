@@ -32,13 +32,11 @@ Declared values (must be multiples of 4):
 | Token | Value | Usage |
 |-------|-------|-------|
 | xs | 4px | Icon gaps, inline padding within input fields |
-| sm | 8px | Field-to-label spacing, button internal padding |
-| md | 12px | Gap between element bbox and tag dialog |
-| lg | 16px | Internal panel padding (left/right/top margins) |
-| xl | 20px | Breathing room from screen edges |
-| 2xl | 24px | Section spacing within tag dialog (between field groups) |
+| sm | 8px | Field-to-label spacing, button internal padding, input field horizontal padding |
+| md | 16px | Internal panel padding (left/right/top margins), gap between element bbox and tag dialog |
+| lg | 24px | Section spacing within tag dialog (between field groups), breathing room from screen edges |
 
-Exceptions: 15px corner radius on panels (not a spacing token, a shape property). 6px horizontal padding inside input fields.
+Exceptions: 15px corner radius on panels (not a spacing token, a shape property).
 
 ---
 
@@ -48,11 +46,9 @@ All fonts use Segoe UI on Windows with system sans-serif fallback. Font weight 3
 
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
-| Field label | 11px | 400 (regular) | 1.3 | Labels above input fields ("Label", "Caption", "Action Type") |
-| Field input | 13px | 300 (light) | 1.4 | Text inside QLineEdit and QComboBox fields |
-| Section heading | 14px | 400 (regular) | 1.2 | Tag dialog title text if needed |
 | Helper tip | 10px | 300 (light) | 1.3 | Dimmed contextual tips below fields |
-| Toolbar button | 11px | 400 (regular) | 1.0 | Button labels on floating toolbar |
+| Field label / Toolbar button | 12px | 400 (regular) | 1.3 | Labels above input fields, toolbar button text |
+| Field input / Section heading | 14px | 300 (light) | 1.4 | Text inside QLineEdit and QComboBox, tag dialog title if needed |
 
 ---
 
@@ -86,6 +82,8 @@ Accent reserved for:
 
 ### Tag Dialog Panel
 
+Primary focal point: the Label field -- it is the first field the user sees and the most important metadata for the captured element.
+
 | Property | Value | Source |
 |----------|-------|--------|
 | Default size | 400 x 280px | CONTEXT.md locked decision |
@@ -97,7 +95,7 @@ Accent reserved for:
 | Z-value | 100 | RESEARCH.md (above all animation layers) |
 | Fade-in duration | 200ms, ease-out | Default |
 | Fade-out duration | 150ms, ease-in | Default |
-| Positioning | Prefer below-right of captured element, flip if near edge, 20px breathing room from screen edges, 12px gap from element | CONTEXT.md + RESEARCH.md |
+| Positioning | Prefer below-right of captured element, flip if near edge, 24px breathing room from screen edges, 16px gap from element | CONTEXT.md + RESEARCH.md |
 
 ### Tag Dialog Fields
 
@@ -120,7 +118,7 @@ Accent reserved for:
 | Button | Label | Color | Shortcut |
 |--------|-------|-------|----------|
 | Confirm | "Confirm" | Green fill rgba(50, 200, 50, 180), white text | Enter |
-| Cancel | "Cancel" | Dim fill rgba(60, 60, 70, 150), dim text rgba(180, 180, 190, 180) | Esc |
+| Dismiss | "Dismiss" | Dim fill rgba(60, 60, 70, 150), dim text rgba(180, 180, 190, 180) | Esc |
 
 ### Floating Toolbar
 
@@ -128,7 +126,7 @@ Accent reserved for:
 |----------|-------|--------|
 | Size | 250 x 40px | CONTEXT.md locked decision |
 | Shape | Horizontal pill (20px corner radius = half height) | CONTEXT.md |
-| Default position | Top-right corner, 20px from edges | CONTEXT.md |
+| Default position | Top-right corner, 24px from edges | CONTEXT.md |
 | Background | rgba(15, 15, 25, 200) | Same as tag dialog |
 | Border glow | Same card glow technique, fewer lights (12) | CONTEXT.md visual family |
 | Z-value | 110 | RESEARCH.md (above tag dialog) |
@@ -139,7 +137,7 @@ Accent reserved for:
 | Mode | Buttons | Source |
 |------|---------|--------|
 | RECORDING | [Pause] [Undo Last] | CONTEXT.md |
-| TAG_OPEN | [Confirm] [Cancel] [Skip] | CONTEXT.md |
+| TAG_OPEN | [Confirm] [Dismiss] [Skip] | CONTEXT.md |
 | DRY_RUN | [Run Step] [Skip Step] [Finish] | CONTEXT.md |
 
 Button swap transition: 150ms cross-fade (fade out old, fade in new simultaneously).
@@ -214,7 +212,7 @@ Button swap transition: 150ms cross-fade (fade out old, fade in new simultaneous
 | Typewriting | All fields filling simultaneously, glow pulses with keystrokes | VLM returns data |
 | Editable | All fields filled, glow returns to idle sweep, user can edit | Typewriter completes or user interrupts |
 | Pre-filled (edit) | Fields instantly populated, no typewriter, idle glow | show_tag_dialog(edit_mode=True) |
-| Dismissing | Fade out (1 to 0 opacity, 150ms) | Confirm or Cancel |
+| Dismissing | Fade out (1 to 0 opacity, 150ms) | Confirm or Dismiss |
 
 ### Toolbar Lifecycle
 
