@@ -14,9 +14,9 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 from recorder.overlay.bbox_layer import BboxLayer
-from recorder.overlay.border_layer import BorderLayer
 from recorder.overlay.click_catcher_layer import ClickCatcherLayer
 from recorder.overlay.mode_indicator_layer import ModeIndicatorLayer
+from recorder.overlay.shimmer_layer import ShimmerLayer
 from recorder.overlay.state import OverlayState
 from recorder.overlay.view import OverlayView
 
@@ -43,11 +43,11 @@ class TestViewSetup:
         scene = view.scene()
         assert scene is not None
 
-    def test_view_has_border_layer(self, view: OverlayView) -> None:
-        """The scene contains a BorderLayer item."""
+    def test_view_has_shimmer_layer(self, view: OverlayView) -> None:
+        """The scene contains a ShimmerLayer item (replaced BorderLayer)."""
         items = view.scene().items()
-        border_items = [i for i in items if isinstance(i, BorderLayer)]
-        assert len(border_items) >= 1
+        shimmer_items = [i for i in items if isinstance(i, ShimmerLayer)]
+        assert len(shimmer_items) >= 1
 
     def test_view_has_mode_indicator(self, view: OverlayView) -> None:
         """The scene contains a ModeIndicatorLayer item."""
@@ -59,24 +59,18 @@ class TestViewSetup:
 class TestApplyState:
     """Tests for apply_state() visual updates."""
 
-    def test_apply_state_updates_border(self, view: OverlayView) -> None:
-        """apply_state(RECORDING) changes the border color to red."""
+    def test_apply_state_updates_shimmer(self, view: OverlayView) -> None:
+        """apply_state(RECORDING) updates the shimmer layer state."""
         view.apply_state(OverlayState.RECORDING)
 
-        # Find the border layer and check a child rect's brush
+        # ShimmerLayer should have updated its base color to red
         items = view.scene().items()
-        border_layers = [i for i in items if isinstance(i, BorderLayer)]
-        assert len(border_layers) >= 1
-        border = border_layers[0]
+        shimmer_layers = [i for i in items if isinstance(i, ShimmerLayer)]
+        assert len(shimmer_layers) >= 1
+        shimmer = shimmer_layers[0]
 
-        # Border children are QGraphicsRectItem — check that at least
-        # one has a red-ish brush (R channel > 200)
-        for child in border.childItems():
-            color = child.brush().color()
-            if color.red() > 200:
-                break
-        else:
-            pytest.fail("No border child has red brush after RECORDING state")
+        # After set_state(RECORDING), base color should be red
+        assert shimmer._base_color.red() > 200
 
     def test_apply_state_adds_click_catcher(self, view: OverlayView) -> None:
         """apply_state(RECORDING) adds a ClickCatcherLayer to the scene."""

@@ -12,6 +12,7 @@ import logging
 import sys
 from typing import Any, Callable
 
+from recorder.overlay.bbox_layer import BboxLayer
 from recorder.overlay.state import OverlayState, transition
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,69 @@ class OverlayController:
         """Remove all bounding boxes from the overlay."""
         if self._view is not None:
             self._view.clear_bboxes()
+
+    # ------------------------------------------------------------------
+    # Scan / Donut cloud API
+    # ------------------------------------------------------------------
+
+    def start_scan(
+        self,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        bbox: BboxLayer | None = None,
+    ) -> None:
+        """Start a scan animation at the given coordinates.
+
+        Args:
+            x: Left edge of rough snip boundary.
+            y: Top edge of rough snip boundary.
+            w: Width of rough snip boundary.
+            h: Height of rough snip boundary.
+            bbox: Optional BboxLayer to morph when AI result arrives.
+        """
+        if self._view is not None:
+            self._view.start_scan(x, y, w, h, bbox=bbox)
+
+    def finish_scan(
+        self,
+        fitted_x: int,
+        fitted_y: int,
+        fitted_w: int,
+        fitted_h: int,
+    ) -> None:
+        """Deliver AI-fitted bbox to the scan layer and trigger morph.
+
+        Args:
+            fitted_x: Left edge of AI-fitted bbox.
+            fitted_y: Top edge of AI-fitted bbox.
+            fitted_w: Width of AI-fitted bbox.
+            fitted_h: Height of AI-fitted bbox.
+        """
+        if self._view is not None:
+            self._view.finish_scan(fitted_x, fitted_y, fitted_w, fitted_h)
+
+    def show_donut_cloud(
+        self,
+        center_x: float,
+        center_y: float,
+        radius: float = 60.0,
+    ) -> None:
+        """Show a donut cloud probability visualizer.
+
+        Args:
+            center_x: Cloud center X coordinate.
+            center_y: Cloud center Y coordinate.
+            radius: Cloud radius.
+        """
+        if self._view is not None:
+            self._view.show_donut_cloud(center_x, center_y, radius)
+
+    def accept_donut_cloud(self) -> None:
+        """Transition the donut cloud color to green (accepted)."""
+        if self._view is not None:
+            self._view.accept_donut_cloud()
 
     # ------------------------------------------------------------------
     # Private: hotkey handlers

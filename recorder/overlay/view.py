@@ -22,10 +22,13 @@ from PyQt6.QtWidgets import (
     QGraphicsView,
 )
 
+from recorder.overlay.animation_clock import AnimationClock
 from recorder.overlay.bbox_layer import BboxLayer
-from recorder.overlay.border_layer import BorderLayer
 from recorder.overlay.click_catcher_layer import ClickCatcherLayer
+from recorder.overlay.donut_cloud_layer import DonutCloudLayer
 from recorder.overlay.mode_indicator_layer import ModeIndicatorLayer
+from recorder.overlay.scan_layer import ScanLayer
+from recorder.overlay.shimmer_layer import ShimmerLayer
 from recorder.overlay.state import STATE_COLORS, OverlayState
 
 logger = logging.getLogger(__name__)
@@ -82,15 +85,30 @@ class OverlayView(QGraphicsView):
             self._screen_h = geom.height()
         self.setSceneRect(0, 0, self._screen_w, self._screen_h)
 
+        # ---- Animation clock ----
+        self._clock = AnimationClock()
+
         # ---- Layers ----
-        self._border = BorderLayer(self._screen_w, self._screen_h)
-        scene.addItem(self._border)
+        self._shimmer = ShimmerLayer(self._screen_w, self._screen_h)
+        scene.addItem(self._shimmer)
+        self._clock.register(self._shimmer.tick)
 
         self._mode_indicator = ModeIndicatorLayer()
         scene.addItem(self._mode_indicator)
 
         self._click_catcher: ClickCatcherLayer | None = None
         self._bbox_layers: list[BboxLayer] = []
+
+        # ---- Animation layer tracking ----
+        self._scan_layer: ScanLayer | None = None
+        self._donut_cloud: DonutCloudLayer | None = None
+        self._active_bbox: BboxLayer | None = None
+
+        # ---- Mouse tracking ----
+        self.setMouseTracking(True)
+
+        # ---- Start animation clock ----
+        self._clock.start()
 
         # ---- Drag-to-draw state ----
         self._on_selection = on_selection
@@ -117,9 +135,8 @@ class OverlayView(QGraphicsView):
         Args:
             state: The overlay state to apply.
         """
-        # Border colour
-        r, g, b, a = STATE_COLORS[state]
-        self._border.set_color(r, g, b, a)
+        # Shimmer state
+        self._shimmer.set_state(state)
 
         # Mode indicator text
         self._mode_indicator.update_mode(state)
@@ -166,11 +183,13 @@ class OverlayView(QGraphicsView):
 
     def hide_for_capture(self) -> None:
         """Hide the overlay window before a screenshot capture."""
+        self._clock.stop()
         self.hide()
 
     def show_after_capture(self) -> None:
         """Restore the overlay window after a screenshot capture."""
         self.show()
+        self._clock.start()
 
     # ------------------------------------------------------------------
     # Bounding box management
@@ -224,16 +243,18 @@ class OverlayView(QGraphicsView):
         event.accept()
 
     def mouseMoveEvent(self, event: Any) -> None:
-        """Update the rubber-band rectangle during drag."""
+        """Update the rubber-band rectangle during drag and feed mouse position to shimmer."""
+        pos = self.mapToScene(event.pos())
+        self._shimmer.set_mouse_pos(pos.x(), pos.y())
+
         if (
             self._drag_start is not None
             and self._rubber_band is not None
         ):
-            current = self.mapToScene(event.pos())
-            x1 = min(self._drag_start.x(), current.x())
-            y1 = min(self._drag_start.y(), current.y())
-            x2 = max(self._drag_start.x(), current.x())
-            y2 = max(self._drag_start.y(), current.y())
+            x1 = min(self._drag_start.x(), pos.x())
+            y1 = min(self._drag_start.y(), pos.y())
+            x2 = max(self._drag_start.x(), pos.x())
+            y2 = max(self._drag_start.y(), pos.y())
             self._rubber_band.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
         event.accept()
 
@@ -261,6 +282,99 @@ class OverlayView(QGraphicsView):
 
             self._drag_start = None
         event.accept()
+
+    # ------------------------------------------------------------------
+    # Scan layer lifecycle
+    # ------------------------------------------------------------------
+
+    def start_scan(
+        self,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        bbox: BboxLayer | None = None,
+    ) -> None:
+        """Create and start a scan animation at the given coordinates.
+
+        Args:
+            x: Left edge of rough snip boundary.
+            y: Top edge of rough snip boundary.
+            w: Width of rough snip boundary.
+            h: Height of rough snip boundary.
+            bbox: Optional BboxLayer whose corners will morph when
+                AI result arrives.
+        """
+        self._scan_layer = ScanLayer(x, y, w, h)
+        self.scene().addItem(self._scan_layer)
+        self._clock.register(self._scan_layer.tick)
+        self._scan_layer.start_scan()
+        self._active_bbox = bbox
+
+    def finish_scan(
+        self,
+        fitted_x: int,
+        fitted_y: int,
+        fitted_w: int,
+        fitted_h: int,
+    ) -> None:
+        """Deliver AI-fitted bbox to the scan layer and trigger bbox morph.
+
+        Args:
+            fitted_x: Left edge of AI-fitted bbox.
+            fitted_y: Top edge of AI-fitted bbox.
+            fitted_w: Width of AI-fitted bbox.
+            fitted_h: Height of AI-fitted bbox.
+        """
+        if self._scan_layer is not None:
+            self._scan_layer.receive_fitted_bbox(
+                fitted_x, fitted_y, fitted_w, fitted_h,
+            )
+        if self._active_bbox is not None:
+            self._active_bbox.morph_to(
+                fitted_x, fitted_y, fitted_w, fitted_h,
+            )
+
+    def remove_scan(self) -> None:
+        """Remove the scan layer from the scene and unregister its tick."""
+        if self._scan_layer is not None:
+            self._clock.unregister(self._scan_layer.tick)
+            self.scene().removeItem(self._scan_layer)
+            self._scan_layer = None
+        self._active_bbox = None
+
+    # ------------------------------------------------------------------
+    # Donut cloud lifecycle
+    # ------------------------------------------------------------------
+
+    def show_donut_cloud(
+        self,
+        center_x: float,
+        center_y: float,
+        radius: float = 60.0,
+    ) -> None:
+        """Create and display a donut cloud probability visualizer.
+
+        Args:
+            center_x: Cloud center X coordinate.
+            center_y: Cloud center Y coordinate.
+            radius: Cloud radius (used for both rx and ry).
+        """
+        self._donut_cloud = DonutCloudLayer(center_x, center_y, radius, radius)
+        self.scene().addItem(self._donut_cloud)
+        self._clock.register(self._donut_cloud.tick)
+
+    def accept_donut_cloud(self) -> None:
+        """Transition the donut cloud color from red to green (accepted)."""
+        if self._donut_cloud is not None:
+            self._donut_cloud.accept()
+
+    def remove_donut_cloud(self) -> None:
+        """Remove the donut cloud from the scene and unregister its tick."""
+        if self._donut_cloud is not None:
+            self._clock.unregister(self._donut_cloud.tick)
+            self.scene().removeItem(self._donut_cloud)
+            self._donut_cloud = None
 
     # ------------------------------------------------------------------
     # Keyboard fallback
