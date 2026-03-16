@@ -16,8 +16,8 @@
 ### Overlay Animations
 
 - [x] **ANIM-01**: Border shimmer glow — faded moving pulse along screen edges, green=ready, red=recording
-- [ ] **ANIM-02**: Element scan animation — glowing perimeter trace around selection, scan line sweep top→bottom then left→right
-- [ ] **ANIM-03**: Bbox animation — smooth morph from rough selection to AI-fitted bounding box
+- [x] **ANIM-02**: Element scan animation — glowing perimeter trace around selection, scan line sweep top→bottom then left→right
+- [x] **ANIM-03**: Bbox animation — smooth morph from rough selection to AI-fitted bounding box
 - [ ] **ANIM-04**: Donut cloud — probability density visualizer showing where simulated clicks will land
 - [x] **ANIM-05**: All animations run at 60fps via QTimer (16ms interval), never trigger repaint loops
 - [x] **ANIM-06**: All overlay elements use fluid transitions — slides, fades, scales, eases — nothing "appears"
@@ -173,8 +173,8 @@
 | OVLY-04 | Phase 1 | Complete |
 | OVLY-05 | Phase 1 | Complete |
 | ANIM-01 | Phase 2 | Complete |
-| ANIM-02 | Phase 2 | Pending |
-| ANIM-03 | Phase 2 | Pending |
+| ANIM-02 | Phase 2 | Complete |
+| ANIM-03 | Phase 2 | Complete |
 | ANIM-04 | Phase 2 | Pending |
 | ANIM-05 | Phase 2 | Complete |
 | ANIM-06 | Phase 2 | Complete |

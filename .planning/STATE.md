@@ -3,11 +3,27 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-03-16T21:34:13.386Z"
+last_activity: 2026-03-16 — Completed 02-01-PLAN.md (AnimationClock + ShimmerLayer)
+progress:
+  total_phases: 10
+  completed_phases: 1
+  total_plans: 6
+  completed_plans: 5
+  percent: 83
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
 stopped_at: Completed 02-01-PLAN.md
 last_updated: "2026-03-16T21:32:27.887Z"
 last_activity: 2026-03-16 — Completed 02-01-PLAN.md (AnimationClock + ShimmerLayer)
 progress:
-  total_phases: 10
+  [████████░░] 83%
   completed_phases: 1
   total_plans: 6
   completed_plans: 4
@@ -52,6 +68,7 @@ Progress: [███████░░░] 67% (4 of 6 plans)
 - Trend: stable
 
 *Updated after each plan completion*
+| Phase 02 P02 | 5min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -73,6 +90,7 @@ Recent decisions affecting current work:
 - [Phase 02]: QGraphicsObject as base for animated items (avoids MRO issues from Phase 1 blocker)
 - [Phase 02]: 32-segment border sampling for mouse retreat modulation
 - [Phase 02]: Avoidance rects API on ShimmerLayer for UI element retreat
+- [Phase 02]: ScanLayer WAITING_AI is instant-transition phase (no duration); _MorphHelper QObject bridge for QPropertyAnimation on QGraphicsItemGroup
 
 ### Pending Todos
 
@@ -88,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-16T21:32:27.884Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-03-16T21:34:13.383Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
