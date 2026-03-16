@@ -15,12 +15,12 @@
 
 ### Overlay Animations
 
-- [ ] **ANIM-01**: Border shimmer glow — faded moving pulse along screen edges, green=ready, red=recording
+- [x] **ANIM-01**: Border shimmer glow — faded moving pulse along screen edges, green=ready, red=recording
 - [ ] **ANIM-02**: Element scan animation — glowing perimeter trace around selection, scan line sweep top→bottom then left→right
 - [ ] **ANIM-03**: Bbox animation — smooth morph from rough selection to AI-fitted bounding box
 - [ ] **ANIM-04**: Donut cloud — probability density visualizer showing where simulated clicks will land
-- [ ] **ANIM-05**: All animations run at 60fps via QTimer (16ms interval), never trigger repaint loops
-- [ ] **ANIM-06**: All overlay elements use fluid transitions — slides, fades, scales, eases — nothing "appears"
+- [x] **ANIM-05**: All animations run at 60fps via QTimer (16ms interval), never trigger repaint loops
+- [x] **ANIM-06**: All overlay elements use fluid transitions — slides, fades, scales, eases — nothing "appears"
 
 ### Overlay HUD
 
@@ -172,12 +172,12 @@
 | OVLY-03 | Phase 1 | Complete |
 | OVLY-04 | Phase 1 | Complete |
 | OVLY-05 | Phase 1 | Complete |
-| ANIM-01 | Phase 2 | Pending |
+| ANIM-01 | Phase 2 | Complete |
 | ANIM-02 | Phase 2 | Pending |
 | ANIM-03 | Phase 2 | Pending |
 | ANIM-04 | Phase 2 | Pending |
-| ANIM-05 | Phase 2 | Pending |
-| ANIM-06 | Phase 2 | Pending |
+| ANIM-05 | Phase 2 | Complete |
+| ANIM-06 | Phase 2 | Complete |
 | HUD-01 | Phase 3 | Pending |
 | HUD-02 | Phase 3 | Pending |
 | HUD-03 | Phase 3 | Pending |
