@@ -163,17 +163,103 @@
 
 ## Traceability
 
-<!-- Updated during roadmap creation -->
+<!-- Updated during roadmap creation — 2026-03-16 -->
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| OVLY-01 | Phase 1 | Pending |
+| OVLY-02 | Phase 1 | Pending |
+| OVLY-03 | Phase 1 | Pending |
+| OVLY-04 | Phase 1 | Pending |
+| OVLY-05 | Phase 1 | Pending |
+| ANIM-01 | Phase 2 | Pending |
+| ANIM-02 | Phase 2 | Pending |
+| ANIM-03 | Phase 2 | Pending |
+| ANIM-04 | Phase 2 | Pending |
+| ANIM-05 | Phase 2 | Pending |
+| ANIM-06 | Phase 2 | Pending |
+| HUD-01 | Phase 3 | Pending |
+| HUD-02 | Phase 3 | Pending |
+| HUD-03 | Phase 3 | Pending |
+| HUD-04 | Phase 3 | Pending |
+| HUD-05 | Phase 3 | Pending |
+| HUD-06 | Phase 3 | Pending |
+| REC-01 | Phase 4 | Pending |
+| REC-02 | Phase 4 | Pending |
+| REC-03 | Phase 4 | Pending |
+| REC-04 | Phase 4 | Pending |
+| REC-05 | Phase 4 | Pending |
+| REC-06 | Phase 4 | Pending |
+| REC-07 | Phase 4 | Pending |
+| REC-08 | Phase 4 | Pending |
+| REC-09 | Phase 4 | Pending |
+| REC-10 | Phase 4 | Pending |
+| REC-11 | Phase 4 | Pending |
+| FMT-01 | Phase 5 | Pending |
+| FMT-02 | Phase 5 | Pending |
+| FMT-03 | Phase 5 | Pending |
+| FMT-04 | Phase 5 | Pending |
+| FMT-05 | Phase 5 | Pending |
+| FMT-06 | Phase 5 | Pending |
+| FMT-07 | Phase 5 | Pending |
+| ACT-01 | Phase 6 | Pending |
+| ACT-02 | Phase 6 | Pending |
+| ACT-03 | Phase 6 | Pending |
+| ACT-04 | Phase 6 | Pending |
+| ACT-05 | Phase 6 | Pending |
+| ACT-06 | Phase 6 | Pending |
+| ACT-07 | Phase 6 | Pending |
+| ACT-08 | Phase 6 | Pending |
+| ACT-09 | Phase 6 | Pending |
+| ACT-10 | Phase 6 | Pending |
+| ACT-11 | Phase 6 | Pending |
+| ACT-12 | Phase 6 | Pending |
+| RUN-01 | Phase 7 | Pending |
+| RUN-02 | Phase 7 | Pending |
+| RUN-03 | Phase 7 | Pending |
+| RUN-04 | Phase 7 | Pending |
+| RUN-05 | Phase 7 | Pending |
+| RUN-06 | Phase 7 | Pending |
+| RUN-07 | Phase 7 | Pending |
+| RUN-08 | Phase 7 | Pending |
+| RUN-09 | Phase 7 | Pending |
+| MGMT-01 | Phase 8 | Pending |
+| MGMT-02 | Phase 8 | Pending |
+| MGMT-03 | Phase 8 | Pending |
+| MGMT-04 | Phase 8 | Pending |
+| TUI-01 | Phase 9 | Pending |
+| TUI-02 | Phase 9 | Pending |
+| TUI-03 | Phase 9 | Pending |
+| TUI-04 | Phase 9 | Pending |
+| TUI-05 | Phase 9 | Pending |
+| TUI-06 | Phase 9 | Pending |
+| CLI-01 | Phase 9 | Pending |
+| CLI-02 | Phase 9 | Pending |
+| CLI-03 | Phase 9 | Pending |
+| CLI-04 | Phase 9 | Pending |
+| CLI-05 | Phase 9 | Pending |
+| CLI-06 | Phase 9 | Pending |
+| CLI-07 | Phase 9 | Pending |
+| CLI-08 | Phase 9 | Pending |
+| CLI-09 | Phase 9 | Pending |
+| API-01 | Phase 10 | Pending |
+| API-02 | Phase 10 | Pending |
+| API-03 | Phase 10 | Pending |
+| API-04 | Phase 10 | Pending |
+| API-05 | Phase 10 | Pending |
+| API-06 | Phase 10 | Pending |
+| API-07 | Phase 10 | Pending |
+| API-08 | Phase 10 | Pending |
+| API-09 | Phase 10 | Pending |
+| SEC-01 | Phase 10 | Pending |
+| SEC-02 | Phase 10 | Pending |
+| SEC-03 | Phase 10 | Pending |
 
 **Coverage:**
-- v1 requirements: 68 total
-- Mapped to phases: 0
-- Unmapped: 68
+- v1 requirements: 87 total
+- Mapped to phases: 87
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-16*
-*Last updated: 2026-03-16 after initial definition*
+*Last updated: 2026-03-16 — traceability populated by roadmapper*
