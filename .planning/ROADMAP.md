@@ -51,7 +51,11 @@ Plans:
   3. The rough selection bounding box visibly morphs to the AI-fitted tight bbox with a smooth eased animation
   4. The donut cloud renders concentric probability rings centered on the click target
   5. No animation drives `self.update()` from within `paintEvent` — CPU stays under 10% during idle animation
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 02-01-PLAN.md -- Animation clock infrastructure and border shimmer glow layer
+- [ ] 02-02-PLAN.md -- Element scan animation and bbox morph capability
+- [ ] 02-03-PLAN.md -- Donut cloud visualizer and full animation integration into view/controller
 
 ### Phase 3: Overlay HUD Panels
 **Goal**: Users can interact with a frosted-glass tag dialog and a floating toolbar during recording without leaving the overlay
@@ -157,7 +161,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Overlay Foundation | 3/3 | Complete | 2026-03-16 |
-| 2. Overlay Animations | 0/TBD | Not started | - |
+| 2. Overlay Animations | 0/3 | Not started | - |
 | 3. Overlay HUD Panels | 0/TBD | Not started | - |
 | 4. Record Flow | 0/TBD | Not started | - |
 | 5. Routine File Format | 0/TBD | Not started | - |
