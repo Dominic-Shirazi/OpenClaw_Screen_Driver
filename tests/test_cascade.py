@@ -1,6 +1,6 @@
 """Tests for the locate cascade and related modules.
 
-Covers YOLOE targeted finder, OCR region scoping, CLIP embedding
+Covers OmniParser detect+match, OCR region scoping, CLIP embedding
 retrieval, snippet loading, and the full cascade in mapper.runner.
 
 All external dependencies (ultralytics, torch, transformers, faiss,
@@ -36,214 +36,7 @@ def _full_screen_image() -> np.ndarray:
 
 
 # -----------------------------------------------------------------------
-# 1. YOLOE targeted finder  (core/yoloe.py)
-# -----------------------------------------------------------------------
-
-
-class TestYOLOEFindElement:
-    """Tests for core.yoloe.find_element and find_element_locate."""
-
-    @pytest.fixture(autouse=True)
-    def _reset_model(self) -> None:
-        """Reset module-level singleton before each test."""
-        import core.yoloe as yoloe_mod
-
-        yoloe_mod._model = None
-        yoloe_mod._model_path = ""
-
-    def _make_fake_result(
-        self, xyxy: list[int], conf: float
-    ) -> MagicMock:
-        """Builds a mock YOLOE result with one detection box."""
-        box_mock = MagicMock()
-        box_mock.conf = MagicMock()
-        box_mock.conf.__getitem__ = lambda _self, i: conf
-        box_mock.conf.__len__ = lambda _self: 1
-
-        tensor = MagicMock()
-        tensor.cpu.return_value.numpy.return_value.astype.return_value = np.array(
-            xyxy, dtype=int
-        )
-        box_mock.xyxy = MagicMock()
-        box_mock.xyxy.__getitem__ = lambda _self, i: tensor
-        box_mock.__len__ = lambda _self: 1
-
-        result = MagicMock()
-        result.boxes = box_mock
-        return result
-
-    def test_find_element_passes_snippet_as_refer_image(
-        self, mocker: Any
-    ) -> None:
-        """Verify snippet is passed as refer_image with visual_prompts."""
-        fake_model = MagicMock()
-        fake_model.predict.return_value = []
-
-        mocker.patch("core.yoloe._load_model", return_value=fake_model)
-        # Mock the ultralytics predictor import inside find_element
-        fake_predictor = MagicMock()
-        mocker.patch.dict(
-            "sys.modules",
-            {
-                "ultralytics": MagicMock(),
-                "ultralytics.models": MagicMock(),
-                "ultralytics.models.yolo": MagicMock(),
-                "ultralytics.models.yolo.yoloe": MagicMock(
-                    YOLOEVPSegPredictor=fake_predictor
-                ),
-            },
-        )
-
-        from core.yoloe import find_element
-
-        snippet = _bgr_image(h=50, w=60)
-        screen = _full_screen_image()
-        find_element(snippet, screen)
-
-        fake_model.predict.assert_called_once()
-        call_kwargs = fake_model.predict.call_args
-        assert call_kwargs.kwargs["refer_image"] is snippet
-        assert "visual_prompts" in call_kwargs.kwargs
-        vp = call_kwargs.kwargs["visual_prompts"]
-        np.testing.assert_array_equal(vp["bboxes"], [[0, 0, 60, 50]])
-
-    def test_find_element_crops_when_hint_provided(
-        self, mocker: Any
-    ) -> None:
-        """With hint_x/hint_y the search region should be spatially cropped."""
-        fake_model = MagicMock()
-        fake_model.predict.return_value = []
-
-        mocker.patch("core.yoloe._load_model", return_value=fake_model)
-        mocker.patch.dict(
-            "sys.modules",
-            {
-                "ultralytics": MagicMock(),
-                "ultralytics.models": MagicMock(),
-                "ultralytics.models.yolo": MagicMock(),
-                "ultralytics.models.yolo.yoloe": MagicMock(
-                    YOLOEVPSegPredictor=MagicMock()
-                ),
-            },
-        )
-
-        from core.yoloe import find_element
-
-        screen = _full_screen_image()
-        find_element(
-            _bgr_image(50, 50),
-            screen,
-            hint_x=960,
-            hint_y=540,
-            search_radius=200,
-        )
-
-        # The first positional arg to predict should be the cropped region
-        target_arg = fake_model.predict.call_args.args[0]
-        assert target_arg.shape[0] == 400  # 200*2 radius
-        assert target_arg.shape[1] == 400
-
-    def test_find_element_offsets_back_to_full_screen(
-        self, mocker: Any
-    ) -> None:
-        """Detections in a crop must be offset back to full-screen coords."""
-        # Detection at (10, 20, 50, 60) inside the crop
-        fake_result = self._make_fake_result([10, 20, 50, 60], 0.9)
-        fake_model = MagicMock()
-        fake_model.predict.return_value = [fake_result]
-
-        mocker.patch("core.yoloe._load_model", return_value=fake_model)
-        mocker.patch.dict(
-            "sys.modules",
-            {
-                "ultralytics": MagicMock(),
-                "ultralytics.models": MagicMock(),
-                "ultralytics.models.yolo": MagicMock(),
-                "ultralytics.models.yolo.yoloe": MagicMock(
-                    YOLOEVPSegPredictor=MagicMock()
-                ),
-            },
-        )
-
-        from core.yoloe import find_element
-
-        screen = _full_screen_image()
-        matches = find_element(
-            _bgr_image(50, 50),
-            screen,
-            hint_x=500,
-            hint_y=400,
-            search_radius=200,
-        )
-
-        assert len(matches) == 1
-        m = matches[0]
-        # Offset should be (500-200, 400-200) = (300, 200)
-        assert m.bbox.x == 10 + 300
-        assert m.bbox.y == 20 + 200
-
-    def test_find_element_locate_returns_locate_result(
-        self, mocker: Any
-    ) -> None:
-        """find_element_locate wraps the best match into a LocateResult."""
-        fake_result = self._make_fake_result([100, 200, 150, 260], 0.85)
-        fake_model = MagicMock()
-        fake_model.predict.return_value = [fake_result]
-
-        mocker.patch("core.yoloe._load_model", return_value=fake_model)
-        mocker.patch.dict(
-            "sys.modules",
-            {
-                "ultralytics": MagicMock(),
-                "ultralytics.models": MagicMock(),
-                "ultralytics.models.yolo": MagicMock(),
-                "ultralytics.models.yolo.yoloe": MagicMock(
-                    YOLOEVPSegPredictor=MagicMock()
-                ),
-            },
-        )
-
-        from core.yoloe import find_element_locate
-
-        result = find_element_locate(
-            _bgr_image(50, 50), _full_screen_image()
-        )
-
-        assert result is not None
-        assert isinstance(result, LocateResult)
-        assert result.method == "yoloe"
-        assert result.confidence == pytest.approx(0.85)
-
-    def test_find_element_locate_returns_none_on_no_match(
-        self, mocker: Any
-    ) -> None:
-        """find_element_locate returns None when nothing is detected."""
-        fake_model = MagicMock()
-        fake_model.predict.return_value = []
-
-        mocker.patch("core.yoloe._load_model", return_value=fake_model)
-        mocker.patch.dict(
-            "sys.modules",
-            {
-                "ultralytics": MagicMock(),
-                "ultralytics.models": MagicMock(),
-                "ultralytics.models.yolo": MagicMock(),
-                "ultralytics.models.yolo.yoloe": MagicMock(
-                    YOLOEVPSegPredictor=MagicMock()
-                ),
-            },
-        )
-
-        from core.yoloe import find_element_locate
-
-        result = find_element_locate(
-            _bgr_image(50, 50), _full_screen_image()
-        )
-        assert result is None
-
-
-# -----------------------------------------------------------------------
-# 2. OCR region scoping  (core/ocr.py)
+# 1. OCR region scoping  (core/ocr.py)
 # -----------------------------------------------------------------------
 
 
@@ -528,43 +321,46 @@ class TestFullCascade:
         """Mock pyautogui.size() to 1920x1080 for all cascade tests."""
         mocker.patch("pyautogui.size", return_value=(1920, 1080))
         mocker.patch(
-            "mapper.runner.screenshot_full",
+            "core.locate.screenshot_full",
             return_value=_full_screen_image(),
         )
 
-    # -- Stage 1 success: YOLOE finds it, no later stages called ----------
+    # -- Stage 1 success: OmniParser finds it, no later stages called ------
 
-    def test_yoloe_succeeds_returns_early(self, mocker: Any) -> None:
-        """When YOLOE matches, cascade returns immediately without OCR/VLM."""
-        yoloe_result = LocateResult(
-            point=Point(960, 540), method="yoloe", confidence=0.9
+    def test_omniparser_succeeds_returns_early(self, mocker: Any) -> None:
+        """When OmniParser matches, cascade returns immediately without OCR/VLM."""
+        omni_result = LocateResult(
+            point=Point(960, 540), method="omniparser", confidence=0.9
         )
         mocker.patch(
             "core.capture.load_snippet", return_value=_bgr_image(50, 50)
         )
-        mocker.patch(
-            "core.yoloe.find_element_locate", return_value=yoloe_result
-        )
+        mock_detector = MagicMock()
+        mock_detector.detect_and_match.return_value = omni_result
+        mocker.patch("core.detection.get_detector", return_value=mock_detector)
         mock_ocr = mocker.patch("core.ocr.find_text_on_screen")
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-abc", skill_id="s1")
 
-        assert result.method == "yoloe"
+        assert result.method == "omniparser"
         assert result.confidence == pytest.approx(0.9)
         # OCR should NOT have been called
         mock_ocr.assert_not_called()
+        mock_detector.detect_and_match.assert_called_once()
 
     # -- Stage 1 fails, Stage 2 (CLIP) succeeds ---------------------------
 
-    def test_yoloe_fails_clip_succeeds(self, mocker: Any) -> None:
-        """When YOLOE finds nothing but CLIP score is high, returns clip."""
-        # YOLOE returns None
+    def test_omniparser_fails_clip_succeeds(self, mocker: Any) -> None:
+        """When OmniParser finds nothing but CLIP score is high, returns clip."""
+        # OmniParser returns None
         mocker.patch(
             "core.capture.load_snippet", return_value=_bgr_image(50, 50)
         )
-        mocker.patch("core.yoloe.find_element_locate", return_value=None)
+        mock_detector = MagicMock()
+        mock_detector.detect_and_match.return_value = None
+        mocker.patch("core.detection.get_detector", return_value=mock_detector)
 
         # CLIP returns high similarity
         saved_emb = np.random.randn(1, 512).astype("float32")
@@ -585,7 +381,7 @@ class TestFullCascade:
 
         mock_ocr = mocker.patch("core.ocr.find_text_on_screen")
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-xyz", skill_id="s1")
 
@@ -595,9 +391,9 @@ class TestFullCascade:
 
     # -- Stages 1+2 fail, Stage 3 (OCR) succeeds --------------------------
 
-    def test_yoloe_clip_fail_ocr_succeeds(self, mocker: Any) -> None:
-        """When YOLOE and CLIP both fail, OCR takes over."""
-        # YOLOE — no snippet on disk
+    def test_omniparser_clip_fail_ocr_succeeds(self, mocker: Any) -> None:
+        """When OmniParser and CLIP both fail, OCR takes over."""
+        # OmniParser — no snippet on disk (Stage 1 skipped)
         mocker.patch("core.capture.load_snippet", return_value=None)
 
         # CLIP — no saved embedding
@@ -605,16 +401,15 @@ class TestFullCascade:
             "core.embeddings.get_embedding_by_id", return_value=None
         )
 
-        # OCR succeeds — patch on the runner module since it's imported
-        # at the top of mapper/runner.py (from core.ocr import find_text_on_screen)
+        # OCR succeeds — patch on core.locate where find_text_on_screen is imported
         ocr_result = LocateResult(
             point=Point(960, 540), method="ocr", confidence=0.88
         )
         mocker.patch(
-            "mapper.runner.find_text_on_screen", return_value=ocr_result
+            "core.locate.find_text_on_screen", return_value=ocr_result
         )
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         result = locate_element(_make_mock_graph(), "node-ocr", skill_id="s1")
 
@@ -634,7 +429,7 @@ class TestFullCascade:
         # VLM also fails (ImportError path)
         mocker.patch.dict("sys.modules", {"core.vision": None})
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         graph = _make_mock_graph({"ocr_text": None, "label": ""})
         result = locate_element(graph, "node-fallback", skill_id="s1")
@@ -654,7 +449,7 @@ class TestFullCascade:
         mocker.patch("core.ocr.find_text_on_screen", return_value=None)
         mocker.patch.dict("sys.modules", {"core.vision": None})
 
-        from mapper.runner import locate_element
+        from core.locate import locate_element
 
         # Node with NO position data at all
         graph = _make_mock_graph(

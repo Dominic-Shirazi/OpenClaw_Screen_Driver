@@ -24,10 +24,6 @@ embeddings = [
     "faiss-cpu>=1.7",
     "torch>=2.1",
 ]
-# YOLO-E visual grounding (targeted element finder)
-yoloe = [
-    "ultralytics>=8.3",
-]
 # VLM vision analysis via LiteLLM proxy
 vlm = [
     "openai>=1.0.0",
@@ -41,9 +37,30 @@ api = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.23",
 ]
+# TUI launcher (rich-based interactive menu)
+tui = [
+    "rich>=13.0",
+]
+# OmniParser YOLOv8 icon detection
+omniparser = [
+    "ultralytics>=8.3",
+]
+# Florence-2 captioning
+florence = [
+    "transformers>=4.36",
+    "torch>=2.1",
+]
+# Model weight management
+model-cache = [
+    "huggingface-hub>=0.20",
+]
+# Full detection stack (OmniParser + Florence-2 + model cache)
+detection = [
+    "openclaw-screen-driver[omniparser,florence,model-cache]",
+]
 # Everything (install all optional features)
 all = [
-    "openclaw-screen-driver[embeddings,yoloe,vlm,windows,api]",
+    "openclaw-screen-driver[detection,embeddings,vlm,windows,api,tui]",
 ]
 # Development tools
 dev = [
@@ -56,7 +73,7 @@ dev = [
 ocsd = "main:main"
 
 [tool.setuptools.packages.find]
-include = ["api*", "core*", "executor*", "hub*", "mapper*", "recorder*", "skills*"]
+include = ["api*", "core*", "hub*", "mapper*", "recorder*", "skills*"]
 exclude = ["tests*"]
 
 [build-system]

@@ -26,6 +26,9 @@ build/
 assets/snippets/
 logs/
 
+# Benchmark visualization outputs (generated at runtime)
+assets/screenshots/benchmark_results/
+
 # IDE
 .vscode/
 .idea/

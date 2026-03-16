@@ -207,6 +207,7 @@ class TagDialog(QDialog):
         x: int,
         y: int,
         parent: QWidget | None = None,
+        is_bbox: bool = False,
     ) -> None:
         """Initializes the TagDialog.
 
@@ -219,6 +220,7 @@ class TagDialog(QDialog):
             x: X-coordinate for dialog positioning.
             y: Y-coordinate for dialog positioning.
             parent: Parent widget.
+            is_bbox: If True, element was selected via bounding box (shows tip).
         """
         super().__init__(parent)
         self.setWindowTitle("Tag Element")
@@ -296,6 +298,51 @@ class TagDialog(QDialog):
 
         layout.addLayout(form2)
 
+        # ── Input Spec section (visible when type is textbox) ──
+        self._input_spec_widget = QWidget()
+        input_spec_layout = QVBoxLayout(self._input_spec_widget)
+        input_spec_layout.setContentsMargins(0, 4, 0, 4)
+        input_spec_layout.setSpacing(4)
+
+        spec_header = QLabel("Input Spec — what gets typed during replay?")
+        spec_header.setStyleSheet(
+            "color: #aaa; font-size: 11px; font-weight: bold;"
+        )
+        input_spec_layout.addWidget(spec_header)
+
+        spec_form = QFormLayout()
+        spec_form.setSpacing(4)
+
+        self._input_mode_combo = QComboBox()
+        self._input_mode_combo.addItem(
+            "Variable — agent fills at runtime", "variable"
+        )
+        self._input_mode_combo.addItem(
+            "Literal — same text every replay", "literal"
+        )
+        spec_form.addRow("Mode:", self._input_mode_combo)
+
+        self._input_value_edit = QLineEdit()
+        self._input_value_edit.setPlaceholderText("enter_text")
+        spec_form.addRow("Value:", self._input_value_edit)
+
+        self._input_hint_label = QLabel()
+        self._input_hint_label.setWordWrap(True)
+        self._input_hint_label.setStyleSheet("color: #666; font-size: 10px;")
+        input_spec_layout.addLayout(spec_form)
+        input_spec_layout.addWidget(self._input_hint_label)
+
+        self._input_mode_combo.currentIndexChanged.connect(
+            self._update_input_spec_hint
+        )
+        self._update_input_spec_hint()
+
+        layout.addWidget(self._input_spec_widget)
+        # Start hidden — shown when type changes to textbox
+        self._input_spec_widget.setVisible(False)
+        self.type_combo.currentIndexChanged.connect(self._toggle_input_spec)
+        self._toggle_input_spec()  # Set initial visibility
+
         # ── Action buttons ──
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
@@ -337,6 +384,16 @@ class TagDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+        # ── Bbox tip (visible only when element was selected via bbox) ──
+        if is_bbox:
+            bbox_tip = QLabel(
+                "Tip: tight boxes improve replay accuracy. "
+                "Drag edges close to the element."
+            )
+            bbox_tip.setStyleSheet("color: #666; font-size: 10px;")
+            bbox_tip.setWordWrap(True)
+            layout.addWidget(bbox_tip)
+
         # ── Voice Input button (stubbed for Stage 1) ──
         voice_btn = QPushButton("🎤 Voice Input (Stage 2)")
         voice_btn.setEnabled(False)
@@ -349,8 +406,8 @@ class TagDialog(QDialog):
         # Dialog size — taller to fit explainer
         self.setFixedSize(520, 420)
 
-        # Position near the clicked element (offset so we don't cover it)
-        self.move(x + 20, y + 20)
+        # Position near the clicked element, clamped to screen bounds
+        self._clamp_to_screen(x + 20, y + 20)
 
         # Focus the label input so user can start typing immediately
         self.label_input.setFocus()
@@ -362,6 +419,34 @@ class TagDialog(QDialog):
             y + 20,
             element_type_guess,
         )
+
+    def _clamp_to_screen(self, target_x: int, target_y: int) -> None:
+        """Moves the dialog to (target_x, target_y), clamped to screen bounds.
+
+        Ensures the dialog is fully visible — even if the element is near
+        the taskbar, screen edges, or on a secondary monitor.
+
+        Args:
+            target_x: Desired X position.
+            target_y: Desired Y position.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        screen = QApplication.screenAt(self.pos())
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen is None:
+            self.move(target_x, target_y)
+            return
+
+        geom = screen.availableGeometry()  # excludes taskbar
+        dw, dh = self.width(), self.height()
+
+        # Clamp so the full dialog fits within available screen area
+        final_x = max(geom.x(), min(target_x, geom.x() + geom.width() - dw))
+        final_y = max(geom.y(), min(target_y, geom.y() + geom.height() - dh))
+
+        self.move(final_x, final_y)
 
     def _populate_type_combo(self) -> None:
         """Fills the type dropdown with grouped items and separator headers."""
@@ -414,14 +499,42 @@ class TagDialog(QDialog):
         else:
             self._explainer.setText("")
 
+    def _toggle_input_spec(self) -> None:
+        """Shows/hides the Input Spec section based on element type."""
+        data = self.type_combo.currentData()
+        is_textbox = isinstance(data, ElementType) and data.value == "textbox"
+        self._input_spec_widget.setVisible(is_textbox)
+        # Adjust dialog height when input spec is shown
+        if is_textbox:
+            self.setFixedSize(520, 520)
+        else:
+            self.setFixedSize(520, 420)
+
+    def _update_input_spec_hint(self) -> None:
+        """Updates the hint text below the input spec value field."""
+        mode = self._input_mode_combo.currentData()
+        if mode == "variable":
+            self._input_value_edit.setPlaceholderText("enter_text")
+            self._input_hint_label.setText(
+                "Variable name — the agent passes the value at runtime.\n"
+                "Stored as {{variable_name}} in the skill JSON."
+            )
+        elif mode == "literal":
+            self._input_value_edit.setPlaceholderText("https://example.com")
+            self._input_hint_label.setText(
+                "This exact text will be typed every replay. Use for fixed "
+                "values only (URLs, app names, search terms) — NOT for "
+                "credentials or anything that changes."
+            )
+
     def _collect_data(self) -> dict[str, Any]:
         """Collects current field values into a dict.
 
         Returns:
             Dict with element_type, label, layer, notes, is_branch,
-            ocr_text, and uia_hint.
+            ocr_text, uia_hint, and optionally input_spec.
         """
-        return {
+        data: dict[str, Any] = {
             "element_type": self.type_combo.currentData(),
             "label": self.label_input.text().strip(),
             "layer": self.layer_combo.currentData(),
@@ -430,6 +543,26 @@ class TagDialog(QDialog):
             "ocr_text": self._ocr_text,
             "uia_hint": self._uia_hint,
         }
+
+        # Add input_spec for textbox elements
+        et = self.type_combo.currentData()
+        if isinstance(et, ElementType) and et.value == "textbox":
+            mode = self._input_mode_combo.currentData()
+            raw_value = self._input_value_edit.text().strip()
+            if mode == "variable":
+                # Default to "enter_text" if user left it blank
+                var_name = raw_value or "enter_text"
+                data["input_spec"] = {
+                    "type": "variable",
+                    "value": f"{{{{{var_name}}}}}",
+                }
+            elif mode == "literal":
+                data["input_spec"] = {
+                    "type": "literal",
+                    "value": raw_value,
+                }
+
+        return data
 
     def _on_confirm(self) -> None:
         """Handles the Confirm button click."""

@@ -34,12 +34,14 @@ _DEFAULTS: dict[str, Any] = {
         "coding": os.environ.get("OCSD_CODING_MODEL", "coding"),
         "clip": "openai/clip-vit-base-patch32",
         "whisper_model": "small",
-        "yoloe": "yoloe-26s-seg.pt",
+        "detector": "omniparser",
+        "florence": "microsoft/Florence-2-large",
+        "omniparser_weights": "microsoft/OmniParser-v2.0",
     },
     "detection": {
-        "model": "yolo-e",
-        "confidence_threshold": 0.4,
-        "crop_buffer_pct": 0.30,
+        "confidence_threshold": 0.3,
+        "match_threshold": 0.7,
+        "crop_buffer_pct": 0.10,
         "search_radius": 400,
     },
     "recovery": {
@@ -61,6 +63,7 @@ _DEFAULTS: dict[str, Any] = {
         "snippets_dir": "./assets/snippets",
         "faiss_index": "./assets/faiss.index",
         "replay_logs": "./logs/replays",
+        "model_cache": "~/.cache/ocsd/models",
     },
     "execution": {
         "mouse_duration": 0.15,
