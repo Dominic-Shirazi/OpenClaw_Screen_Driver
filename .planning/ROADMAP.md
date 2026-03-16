@@ -12,10 +12,10 @@ OCSD V1 builds the recording studio for the OpenClaw ecosystem on top of an exis
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Overlay Foundation** - Transparent fullscreen overlay with DPI correctness, click-through passthrough, F2 state machine, and guaranteed clean-capture cycle
+- [x] **Phase 1: Overlay Foundation** - Transparent fullscreen overlay with DPI correctness, click-through passthrough, F2 state machine, and guaranteed clean-capture cycle
 - [ ] **Phase 2: Overlay Animations** - 60fps border shimmer glow, element scan animation, bbox morph, and donut cloud probability visualizer
 - [ ] **Phase 3: Overlay HUD Panels** - Frosted-glass tag dialog with typewriter VLM fill and floating draggable toolbar
-- [ ] **Phase 4: Record Flow** - End-to-end F2→click→bbox→VLM→tag→dry-run→save wiring
+- [ ] **Phase 4: Record Flow** - End-to-end F2->click->bbox->VLM->tag->dry-run->save wiring
 - [ ] **Phase 5: Routine File Format** - Human-readable routine.json with NetworkX serialization, snippet storage, and embedding paths
 - [ ] **Phase 6: Action Types** - All 12 action types implemented and capturable during recording
 - [ ] **Phase 7: Run Flow** - 5-stage cascade replay, human-like execution, failure cascade, and step-visible progress
@@ -35,7 +35,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. All overlay-saved coordinates match mss physical pixel positions on both 1x and 2x DPI displays
   4. F2 toggles the overlay between ready (green shimmer) and recording (red shimmer) states with a smooth visual transition
   5. Overlay launches successfully on Windows and on Ubuntu under X11/XCB (Wayland session forces xcb backend automatically)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 01-01-PLAN.md -- Core infrastructure: state machine, DPI utilities, platform helpers, capture guard
+- [ ] 01-02-PLAN.md -- Overlay view shell, 4 layer items, and controller
+- [ ] 01-03-PLAN.md -- Integration tests and visual verification
 
 ### Phase 2: Overlay Animations
 **Goal**: Cinematic animation items run at 60fps without CPU spike and give users clear visual feedback during element capture
@@ -82,7 +86,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. A saved routine.json is readable by a human without tooling — steps, bboxes, region hints, and VLM metadata are plainly structured
   2. Each step in routine.json includes element_type, label, caption, and confidence from VLM analysis
   3. Snippet PNGs (30% padded) exist in `snippets/` and embedding .npy files exist in `embeddings/` alongside routine.json
-  4. The NetworkX graph round-trips through routine.json with no data loss — load→serialize→load produces identical graphs
+  4. The NetworkX graph round-trips through routine.json with no data loss — load->serialize->load produces identical graphs
   5. Routine files include top-level metadata: name, version, created, author, description, and tags
 **Plans**: TBD
 
@@ -104,8 +108,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Requirements**: RUN-01, RUN-02, RUN-03, RUN-04, RUN-05, RUN-06, RUN-07, RUN-08, RUN-09
 **Success Criteria** (what must be TRUE):
   1. User selects a routine from the TUI browser or CLI and execution begins with no additional setup
-  2. Each step locates its target element using the 5-stage cascade (pixel → CLIP → OCR → VLM → position) — visible in step status
-  3. Mouse moves to targets via Bézier curves with overshoot-and-correct; typing uses per-letter delays with occasional typo and self-correction
+  2. Each step locates its target element using the 5-stage cascade (pixel -> CLIP -> OCR -> VLM -> position) — visible in step status
+  3. Mouse moves to targets via Bezier curves with overshoot-and-correct; typing uses per-letter delays with occasional typo and self-correction
   4. Execution speed is configurable via human_delay multiplier — setting 0 runs instantly, 1.0 is natural, 5.0 is slow
   5. When a step fails: auto-retries 2x, widens search to full screen, then surfaces the failure to the user or agent via API — never blind-clicks when uncertain
 **Plans**: TBD
@@ -148,11 +152,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Overlay Foundation | 0/TBD | Not started | - |
+| 1. Overlay Foundation | 3/3 | Complete | 2026-03-16 |
 | 2. Overlay Animations | 0/TBD | Not started | - |
 | 3. Overlay HUD Panels | 0/TBD | Not started | - |
 | 4. Record Flow | 0/TBD | Not started | - |
