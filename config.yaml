@@ -86,6 +86,11 @@ execution:
   # 0.0 = no typos, 0.04 = ~1 in 25 chars, 0.10 = frequent typos
   typo_chance: 0.04
 
+overlay:
+  # Milliseconds to wait after hiding overlay before screenshot capture.
+  # Windows uses DwmFlush() + this as safety margin; Linux uses this as sleep.
+  capture_delay_ms: 100
+
 api:
   host: "0.0.0.0"
   port: 8742
