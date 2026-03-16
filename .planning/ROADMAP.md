@@ -12,7 +12,7 @@ OCSD V1 builds the recording studio for the OpenClaw ecosystem on top of an exis
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Overlay Foundation** - Transparent fullscreen overlay with DPI correctness, click-through passthrough, F2 state machine, and guaranteed clean-capture cycle
+- [x] **Phase 1: Overlay Foundation** - Transparent fullscreen overlay with DPI correctness, click-through passthrough, F2 state machine, and guaranteed clean-capture cycle
 - [ ] **Phase 2: Overlay Animations** - 60fps border shimmer glow, element scan animation, bbox morph, and donut cloud probability visualizer
 - [ ] **Phase 3: Overlay HUD Panels** - Frosted-glass tag dialog with typewriter VLM fill and floating draggable toolbar
 - [ ] **Phase 4: Record Flow** - End-to-end F2->click->bbox->VLM->tag->dry-run->save wiring
@@ -156,7 +156,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Overlay Foundation | 2/3 | In Progress|  |
+| 1. Overlay Foundation | 3/3 | Complete | 2026-03-16 |
 | 2. Overlay Animations | 0/TBD | Not started | - |
 | 3. Overlay HUD Panels | 0/TBD | Not started | - |
 | 4. Record Flow | 0/TBD | Not started | - |
