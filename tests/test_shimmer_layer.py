@@ -1,8 +1,8 @@
 """Unit tests for ShimmerLayer -- animated border shimmer glow.
 
-Tests cover instantiation, bounding rect, state-driven color/speed/width,
-mouse position storage, tick phase advancement, shimmer intensity near/far
-from mouse, and border width per state.
+Tests cover instantiation, bounding rect, state-driven color/speed/glow,
+mouse position storage, tick phase advancement, retreat factor near/far
+from mouse, and glow radius per state.
 """
 
 from __future__ import annotations
@@ -130,51 +130,50 @@ class TestTickPhase:
         assert abs(layer._phase - 0.1) < 0.01
 
 
-class TestShimmerIntensity:
-    """Test 7: shimmer_intensity_at returns ~0 near mouse, ~1 far away."""
+class TestRetreatFactor:
+    """Test 7: retreat_factor returns ~0 near mouse, ~1 far away."""
 
-    def test_intensity_far_from_mouse(self) -> None:
+    def test_retreat_far_from_mouse(self) -> None:
         layer = _make_shimmer()
         layer.set_mouse_pos(-1000.0, -1000.0)  # Far offscreen
-        intensity = layer._shimmer_intensity_at(960.0, 0.0)
-        assert intensity > 0.95
+        factor = layer._retreat_factor(960.0, 0.0)
+        assert factor > 0.95
 
-    def test_intensity_at_mouse(self) -> None:
+    def test_retreat_at_mouse(self) -> None:
         layer = _make_shimmer()
         layer.set_mouse_pos(960.0, 0.0)
-        intensity = layer._shimmer_intensity_at(960.0, 0.0)
-        assert intensity < 0.05
+        factor = layer._retreat_factor(960.0, 0.0)
+        assert factor < 0.05
 
-    def test_intensity_smoothstep_midpoint(self) -> None:
-        """At half the retreat radius, intensity should be ~0.5 (smoothstep)."""
+    def test_retreat_smoothstep_midpoint(self) -> None:
+        """At half the retreat radius, factor should be ~0.5 (smoothstep)."""
         layer = _make_shimmer()
-        # _RETREAT_RADIUS is 200.0
+        # _RETREAT_RADIUS is 250.0
         layer.set_mouse_pos(0.0, 0.0)
-        intensity = layer._shimmer_intensity_at(100.0, 0.0)
-        assert 0.3 < intensity < 0.7  # smoothstep at t=0.5 => 0.5
+        factor = layer._retreat_factor(125.0, 0.0)
+        assert 0.3 < factor < 0.7  # smoothstep at t=0.5 => 0.5
 
 
-class TestBorderWidth:
-    """Test 8: border_width is 16 for READY/PAUSED and 12 for RECORDING."""
+class TestGlowRadius:
+    """Test 8: glow_radius is 150 for READY/PAUSED and 100 for RECORDING."""
 
-    def test_ready_width(self) -> None:
+    def test_ready_glow(self) -> None:
         from recorder.overlay.state import OverlayState
 
         layer = _make_shimmer()
         layer.set_state(OverlayState.READY)
-        # Target border width should be 16
-        assert layer._target_border_width == 16
+        assert layer._target_glow_radius == 140.0
 
-    def test_recording_width(self) -> None:
+    def test_recording_glow(self) -> None:
         from recorder.overlay.state import OverlayState
 
         layer = _make_shimmer()
         layer.set_state(OverlayState.RECORDING)
-        assert layer._target_border_width == 12
+        assert layer._target_glow_radius == 120.0
 
-    def test_paused_width(self) -> None:
+    def test_paused_glow(self) -> None:
         from recorder.overlay.state import OverlayState
 
         layer = _make_shimmer()
         layer.set_state(OverlayState.PAUSED)
-        assert layer._target_border_width == 16
+        assert layer._target_glow_radius == 140.0

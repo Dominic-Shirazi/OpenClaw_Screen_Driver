@@ -1,41 +1,52 @@
 """Animated border shimmer glow replacing the static BorderLayer.
 
-Renders a rotating conical gradient sweep along the screen border
-that changes color and speed with overlay state.  The shimmer wave
-retreats from the mouse cursor and registered avoidance rects with
-a smooth organic falloff (smoothstep).
+Renders soft lights that shine INWARD from behind the screen bezel.
+Each light source is positioned off-screen with its gradient center
+outside the visible area, so only the inner spill is seen.  Lights
+vary in size, overlap additively via QPainter.CompositionMode_Plus
+so they blend rather than stack, and sweep continuously around the
+perimeter.
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import random
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QConicalGradient, QPainter, QPainterPath
+from PyQt6.QtGui import QColor, QPainter, QRadialGradient
 from PyQt6.QtWidgets import QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
 from recorder.overlay.state import STATE_COLORS, OverlayState
 
 logger = logging.getLogger(__name__)
 
-# Border width per state (user decision: 12-20px range)
-_BORDER_READY: int = 16
-_BORDER_RECORDING: int = 12
-_RETREAT_RADIUS: float = 200.0
+# How far inward the glow bleeds (base radius before per-light variance)
+_GLOW_READY: float = 140.0
+_GLOW_RECORDING: float = 120.0
+_RETREAT_RADIUS: float = 250.0
 
-# Number of segments to divide the border into for mouse-retreat alpha modulation
-_SEGMENT_COUNT: int = 32
+# How far off-screen the light centers sit (behind the bezel)
+_OFFSCREEN_DEPTH: float = 80.0
+
+# Number of light sources around the perimeter
+_LIGHT_COUNT: int = 48
+# Fraction of perimeter that is lit at once
+_ACTIVE_SPAN: float = 0.35
+
+# Seed for deterministic per-light size variance
+_SIZE_SEED: int = 42
 
 
 class ShimmerLayer(QGraphicsObject):
     """Animated border shimmer glow indicating overlay state.
 
-    Renders a rotating QConicalGradient clipped to the screen border
-    strip.  The gradient rotates continuously, with speed and color
-    determined by the current OverlayState.  The shimmer intensity
-    is attenuated near the mouse cursor and registered avoidance rects
-    using a smoothstep distance falloff.
+    Renders soft radial gradient blobs along the screen perimeter,
+    creating a wide feathered glow that bleeds inward from the edges.
+    The glow sweep rotates continuously, with speed and color determined
+    by the current OverlayState.  Intensity is attenuated near the mouse
+    cursor and registered avoidance rects using smoothstep falloff.
 
     Args:
         screen_w: Logical screen width in pixels.
@@ -46,11 +57,12 @@ class ShimmerLayer(QGraphicsObject):
         super().__init__()
         self._screen_w = screen_w
         self._screen_h = screen_h
-        self._phase: float = 0.0  # 0.0 to 1.0, maps to 0-360 degrees
+        self._phase: float = 0.0  # 0.0 to 1.0, maps to position around perimeter
         self._loop_duration: float = 5.0  # seconds for one full rotation
-        self._border_width: float = _BORDER_READY
-        self._target_border_width: float = _BORDER_READY
+        self._glow_radius: float = _GLOW_READY
+        self._target_glow_radius: float = _GLOW_READY
         self._base_color: QColor = QColor(50, 200, 50)  # Green default
+        self._alpha_mult: float = 0.40  # Peak alpha multiplier
         self._mouse_pos: QPointF = QPointF(-1000, -1000)  # Offscreen initially
         self._avoidance_rects: list[QRectF] = []
         self.setZValue(10)  # Same as old BorderLayer
@@ -76,10 +88,12 @@ class ShimmerLayer(QGraphicsObject):
         self._base_color = QColor(r, g, b)
         if state == OverlayState.RECORDING:
             self._loop_duration = 2.0
-            self._target_border_width = _BORDER_RECORDING
+            self._target_glow_radius = _GLOW_RECORDING
+            self._alpha_mult = 0.55
         else:
             self._loop_duration = 5.0
-            self._target_border_width = _BORDER_READY
+            self._target_glow_radius = _GLOW_READY
+            self._alpha_mult = 0.40
 
     def set_mouse_pos(self, x: float, y: float) -> None:
         """Store the current mouse position for retreat calculation.
@@ -101,22 +115,22 @@ class ShimmerLayer(QGraphicsObject):
     def tick(self, dt: float) -> None:
         """Advance the shimmer animation by one frame.
 
-        Called by AnimationClock each tick.  Advances the gradient
-        rotation phase and smoothly transitions border width.
+        Called by AnimationClock each tick.  Advances the sweep
+        position and smoothly transitions glow radius.
 
         Args:
             dt: Elapsed seconds since last tick.
         """
         self._phase = (self._phase + dt / self._loop_duration) % 1.0
-        # Smooth border width transition
-        self._border_width += (
-            (self._target_border_width - self._border_width)
+        # Smooth glow radius transition
+        self._glow_radius += (
+            (self._target_glow_radius - self._glow_radius)
             * min(1.0, dt * 4.0)
         )
         self.update()  # Schedule repaint (safe: called from tick, NOT from paint)
 
-    def _shimmer_intensity_at(self, px: float, py: float) -> float:
-        """Calculate shimmer intensity at a point based on mouse distance.
+    def _retreat_factor(self, px: float, py: float) -> float:
+        """Calculate retreat factor at a point based on mouse/rect distance.
 
         Returns 1.0 far from mouse/avoidance rects, 0.0 at the mouse
         position, with smoothstep falloff in between.
@@ -126,14 +140,11 @@ class ShimmerLayer(QGraphicsObject):
             py: Point Y coordinate.
 
         Returns:
-            Intensity from 0.0 (fully retreated) to 1.0 (full shimmer).
+            Factor from 0.0 (fully retreated) to 1.0 (full glow).
         """
-        # Distance from mouse
         dist = math.hypot(px - self._mouse_pos.x(), py - self._mouse_pos.y())
 
-        # Distance from avoidance rects
         for rect in self._avoidance_rects:
-            # Closest point on rect to (px, py)
             cx = max(rect.left(), min(px, rect.right()))
             cy = max(rect.top(), min(py, rect.bottom()))
             rect_dist = math.hypot(px - cx, py - cy)
@@ -141,53 +152,71 @@ class ShimmerLayer(QGraphicsObject):
 
         if dist >= _RETREAT_RADIUS:
             return 1.0
-        # Smoothstep: t * t * (3 - 2t)
         t = dist / _RETREAT_RADIUS
         return t * t * (3.0 - 2.0 * t)
 
-    def _build_border_path(self) -> QPainterPath:
-        """Build a QPainterPath representing the border strip.
+    def _build_lights(self) -> list[tuple[float, float, float, float, float]]:
+        """Build the fixed light source layout around the perimeter.
+
+        Each light has its center pushed OFF-SCREEN by _OFFSCREEN_DEPTH
+        so only the inner spill is visible (light shining inward).
+        Sizes are varied deterministically per light.
 
         Returns:
-            Path covering only the border region (outer - inner rect).
+            List of (center_x, center_y, radius, edge_x, edge_y, frac)
+            tuples.  center is off-screen, edge is the on-screen point.
         """
-        bw = self._border_width
-        outer = QPainterPath()
-        outer.addRect(QRectF(0, 0, self._screen_w, self._screen_h))
-        inner = QPainterPath()
-        inner.addRect(QRectF(bw, bw, self._screen_w - 2 * bw, self._screen_h - 2 * bw))
-        return outer - inner
-
-    def _sample_border_points(self) -> list[tuple[float, float]]:
-        """Generate sample points around the border perimeter.
-
-        Returns:
-            List of (x, y) tuples at evenly spaced positions around
-            the screen perimeter.
-        """
-        points: list[tuple[float, float]] = []
+        lights: list[tuple[float, float, float, float, float]] = []
         w = float(self._screen_w)
         h = float(self._screen_h)
-        bw = self._border_width / 2.0  # Sample at mid-border
-
-        # Distribute _SEGMENT_COUNT points around perimeter
         perimeter = 2.0 * (w + h)
-        for i in range(_SEGMENT_COUNT):
-            frac = i / _SEGMENT_COUNT
-            dist_along = frac * perimeter
-            if dist_along < w:
-                # Top edge
-                points.append((dist_along, bw))
-            elif dist_along < w + h:
-                # Right edge
-                points.append((w - bw, dist_along - w))
-            elif dist_along < 2 * w + h:
-                # Bottom edge
-                points.append((2 * w + h - dist_along, h - bw))
+        rng = random.Random(_SIZE_SEED)
+
+        for i in range(_LIGHT_COUNT):
+            frac = i / _LIGHT_COUNT
+            d = frac * perimeter
+
+            # Point on the screen edge and the outward normal direction
+            if d < w:
+                ex, ey = d, 0.0
+                nx, ny = 0.0, -1.0  # points up (off top edge)
+            elif d < w + h:
+                ex, ey = w, d - w
+                nx, ny = 1.0, 0.0   # points right (off right edge)
+            elif d < 2 * w + h:
+                ex, ey = 2 * w + h - d, h
+                nx, ny = 0.0, 1.0   # points down (off bottom edge)
             else:
-                # Left edge
-                points.append((bw, perimeter - dist_along))
-        return points
+                ex, ey = 0.0, perimeter - d
+                nx, ny = -1.0, 0.0  # points left (off left edge)
+
+            # Push center off-screen along the outward normal
+            cx = ex + nx * _OFFSCREEN_DEPTH
+            cy = ey + ny * _OFFSCREEN_DEPTH
+
+            # Vary size: 0.6x to 1.5x base radius
+            size_mult = 0.6 + rng.random() * 0.9
+
+            lights.append((cx, cy, size_mult, ex, ey, frac))
+        return lights
+
+    def _sweep_brightness(self, frac: float) -> float:
+        """Calculate brightness at a perimeter position based on sweep phase.
+
+        Args:
+            frac: Position around perimeter (0.0 to 1.0).
+
+        Returns:
+            Brightness factor 0.0 to 1.0.
+        """
+        delta = abs(frac - self._phase)
+        if delta > 0.5:
+            delta = 1.0 - delta
+
+        if delta > _ACTIVE_SPAN:
+            return 0.0
+        t = delta / _ACTIVE_SPAN
+        return 0.5 * (1.0 + math.cos(t * math.pi))
 
     def paint(
         self,
@@ -195,7 +224,11 @@ class ShimmerLayer(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
-        """Paint the shimmer border with rotating gradient and mouse retreat.
+        """Paint lights shining inward from behind the screen bezel.
+
+        Light centers are off-screen; only the inner spill is visible.
+        CompositionMode_Plus blends overlapping lights additively so
+        they merge rather than stack.
 
         CRITICAL: No self.update() call in this method.
 
@@ -204,58 +237,49 @@ class ShimmerLayer(QGraphicsObject):
             option: Style options (unused).
             widget: Target widget (unused).
         """
-        bw = self._border_width
-        if bw <= 0:
+        glow_r = self._glow_radius
+        if glow_r <= 0:
             return
-
-        rect = QRectF(0, 0, self._screen_w, self._screen_h)
-        cx = rect.center().x()
-        cy = rect.center().y()
-
-        # Build the rotating conical gradient
-        angle = self._phase * 360.0
-        gradient = QConicalGradient(QPointF(cx, cy), angle)
-
-        bright = QColor(self._base_color)
-        bright.setAlpha(220)
-        dim = QColor(self._base_color)
-        dim.setAlpha(40)
-
-        gradient.setColorAt(0.0, bright)
-        gradient.setColorAt(0.25, dim)
-        gradient.setColorAt(0.5, bright)
-        gradient.setColorAt(0.75, dim)
-        gradient.setColorAt(1.0, bright)
-
-        # Clip to border strip
-        border_path = self._build_border_path()
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setClipPath(border_path)
-        painter.fillRect(rect, gradient)
+        painter.setPen(Qt.PenStyle.NoPen)
+        # Additive blending: overlapping lights merge into brighter glow
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
 
-        # Mouse retreat: darken segments near mouse/avoidance rects
-        # Paint semi-transparent black over low-intensity regions
-        points = self._sample_border_points()
-        perimeter = 2.0 * (self._screen_w + self._screen_h)
-        seg_len = perimeter / _SEGMENT_COUNT
-
-        for i, (px, py) in enumerate(points):
-            intensity = self._shimmer_intensity_at(px, py)
-            if intensity >= 0.99:
-                continue  # Full shimmer, no darkening needed
-            # Determine the darkening alpha (higher = more retreat)
-            dark_alpha = int((1.0 - intensity) * 200)
-            if dark_alpha < 5:
+        for cx, cy, size_mult, ex, ey, frac in self._build_lights():
+            brightness = self._sweep_brightness(frac)
+            if brightness < 0.01:
                 continue
 
-            # Build a small rect around this segment point
-            # The rect is aligned to the border edge
-            half_seg = seg_len / 2.0 + 2.0  # slight overlap
-            seg_rect = QRectF(px - half_seg, py - half_seg, half_seg * 2, half_seg * 2)
+            # Retreat check at the on-screen edge point
+            retreat = self._retreat_factor(ex, ey)
+            if retreat < 0.01:
+                continue
 
-            dark = QColor(0, 0, 0, dark_alpha)
-            painter.fillRect(seg_rect, dark)
+            # Effective radius for this light (varied size)
+            r = glow_r * size_mult + _OFFSCREEN_DEPTH
+
+            # Combined intensity — capped lower for additive blending
+            peak_alpha = brightness * retreat * self._alpha_mult
+            if peak_alpha < 0.01:
+                continue
+
+            center = QPointF(cx, cy)
+            gradient = QRadialGradient(center, r)
+
+            core = QColor(self._base_color)
+            core.setAlphaF(min(peak_alpha, 1.0))
+            mid = QColor(self._base_color)
+            mid.setAlphaF(min(peak_alpha * 0.35, 1.0))
+            edge = QColor(self._base_color)
+            edge.setAlphaF(0.0)
+
+            gradient.setColorAt(0.0, core)
+            gradient.setColorAt(0.35, mid)
+            gradient.setColorAt(1.0, edge)
+
+            painter.setBrush(gradient)
+            painter.drawEllipse(center, r, r)
 
         painter.restore()
