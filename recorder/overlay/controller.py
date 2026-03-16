@@ -1,0 +1,203 @@
+"""Overlay controller: state machine, hotkey wiring, and lifecycle.
+
+The ``OverlayController`` is the single public entry point for the
+overlay subsystem.  It owns the state machine, creates/manages the
+``OverlayView`` on demand, and wires global hotkeys for mode toggling
+and save/abort.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from typing import Any, Callable
+
+from recorder.overlay.state import OverlayState, transition
+
+logger = logging.getLogger(__name__)
+
+
+class OverlayController:
+    """Public API for the transparent fullscreen overlay.
+
+    Manages the overlay lifecycle (show/close), state transitions via
+    hotkeys, and delegates visual updates to the underlying
+    ``OverlayView``.  The view is created lazily on first ``show()``
+    to avoid circular imports and premature Qt widget creation.
+
+    Args:
+        on_selection: Called with ``(x, y, w, h)`` when the user
+            completes a drag-to-draw bounding box.
+        on_state_changed: Called with the new ``OverlayState`` after
+            every state transition.
+        on_save: Called when the user presses Ctrl+Q while recording.
+        on_abort: Called when the user presses ESC or Ctrl+Q while
+            in READY/PAUSED state.
+    """
+
+    def __init__(
+        self,
+        *,
+        on_selection: Callable[[int, int, int, int], None] | None = None,
+        on_state_changed: Callable[[OverlayState], None] | None = None,
+        on_save: Callable[[], None] | None = None,
+        on_abort: Callable[[], None] | None = None,
+    ) -> None:
+        self._on_selection = on_selection
+        self._on_state_changed = on_state_changed
+        self._on_save = on_save
+        self._on_abort = on_abort
+
+        self._state: OverlayState = OverlayState.READY
+        self._view: Any = None  # OverlayView, lazy-imported
+        self._hotkey_listener: Any = None
+        self._is_active: bool = False
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def state(self) -> OverlayState:
+        """The current overlay state."""
+        return self._state
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the overlay is currently visible and active."""
+        return self._is_active
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def show(self) -> None:
+        """Create the overlay view, display it, and start hotkey listening.
+
+        The ``OverlayView`` is imported lazily to prevent circular
+        dependencies (the view imports state but not the controller).
+        """
+        # Lazy import to avoid circular dependency
+        from recorder.overlay.view import OverlayView
+
+        self._view = OverlayView(on_selection=self._on_selection)
+
+        # Size to primary screen
+        from PyQt6.QtWidgets import QApplication
+
+        primary = QApplication.primaryScreen()
+        if primary is not None:
+            self._view.setGeometry(primary.geometry())
+
+        self._view.show()
+        self._view.raise_()
+
+        # Apply initial state
+        self._view.apply_state(self._state)
+
+        # Start hotkey listener
+        from recorder.hotkeys import _create_hotkey_listener
+
+        self._hotkey_listener = _create_hotkey_listener(
+            on_toggle=self._handle_toggle,
+            on_close=self._handle_close,
+        )
+        self._hotkey_listener.start()
+
+        self._is_active = True
+        logger.info("Overlay shown in %s state", self._state.name)
+
+    def close(self) -> None:
+        """Tear down the overlay: stop hotkeys, close view, reset state."""
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.stop()
+            self._hotkey_listener = None
+
+        if self._view is not None:
+            self._view.close()
+            self._view = None
+
+        self._is_active = False
+        self._state = OverlayState.READY
+        logger.info("Overlay closed")
+
+    def hide_for_capture(self) -> None:
+        """Hide the overlay window before a screenshot capture."""
+        if self._view is not None:
+            self._view.hide_for_capture()
+
+    def show_after_capture(self) -> None:
+        """Restore the overlay window after a screenshot capture."""
+        if self._view is not None:
+            self._view.show_after_capture()
+
+    def set_bboxes(self, bboxes: list[dict[str, Any]]) -> None:
+        """Render bounding boxes on the overlay.
+
+        Args:
+            bboxes: List of dicts with keys ``x``, ``y``, ``w``, ``h``,
+                ``color``, and optionally ``label`` and ``confidence``.
+        """
+        if self._view is not None:
+            self._view.render_bboxes(bboxes)
+
+    def clear_bboxes(self) -> None:
+        """Remove all bounding boxes from the overlay."""
+        if self._view is not None:
+            self._view.clear_bboxes()
+
+    # ------------------------------------------------------------------
+    # Private: hotkey handlers
+    # ------------------------------------------------------------------
+
+    def _handle_toggle(self) -> None:
+        """Handle F2 / Ctrl+R: transition overlay state."""
+        new_state = transition(self._state, "f2")
+        if new_state is None:
+            logger.debug(
+                "No transition for trigger 'f2' in state %s",
+                self._state.name,
+            )
+            return
+
+        old_name = self._state.name
+        self._state = new_state
+
+        if self._view is not None:
+            self._view.apply_state(new_state)
+
+        self._fire_callback(self._on_state_changed, new_state)
+        logger.info("State: %s -> %s", old_name, new_state.name)
+
+    def _handle_close(self) -> None:
+        """Handle Ctrl+Q / ESC: save if recording, abort otherwise."""
+        if self._state == OverlayState.RECORDING:
+            logger.info("Close requested while RECORDING -> save")
+            self._fire_callback(self._on_save)
+        else:
+            logger.info("Close requested while %s -> abort", self._state.name)
+            self._fire_callback(self._on_abort)
+        self.close()
+
+    def _fire_callback(
+        self,
+        cb: Callable[..., Any] | None,
+        *args: Any,
+    ) -> None:
+        """Invoke a callback safely, logging any errors.
+
+        Args:
+            cb: The callback to invoke, or None.
+            *args: Positional arguments forwarded to the callback.
+        """
+        if cb is None:
+            return
+        try:
+            cb(*args)
+        except Exception as exc:
+            logger.error(
+                "Callback %s raised: %s",
+                getattr(cb, "__name__", cb),
+                exc,
+                exc_info=True,
+            )
