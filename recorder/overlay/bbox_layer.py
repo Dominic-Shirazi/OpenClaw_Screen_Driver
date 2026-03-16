@@ -1,15 +1,19 @@
-"""Bounding box rendering with corner resize handles.
+"""Bounding box rendering with corner resize handles and morph animation.
 
 Each ``BboxLayer`` represents a single detected UI element drawn on
 the overlay scene.  Corner handles are included for future resize
 support (actual drag logic is Phase 2+).
+
+The ``morph_to()`` method smoothly animates the bbox from its current
+position to a new target using InOutCubic easing over 500ms, driven
+by a ``QPropertyAnimation`` on a helper ``QObject``.
 """
 
 from __future__ import annotations
 
 import logging
 
-from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt, pyqtProperty
 from PyQt6.QtGui import QBrush, QColor, QFont, QPen
 from PyQt6.QtWidgets import (
     QGraphicsItem,
@@ -22,6 +26,34 @@ logger = logging.getLogger(__name__)
 
 _HANDLE_SIZE: int = 8
 """Side length of corner handle squares in pixels."""
+
+
+class _MorphHelper(QObject):
+    """Helper QObject that owns the morph progress property.
+
+    ``QPropertyAnimation`` requires a ``QObject`` target, but
+    ``QGraphicsItemGroup`` is not a ``QObject``.  This helper bridges
+    the gap by exposing a ``progress`` property that drives the
+    bbox layer's interpolation.
+
+    Args:
+        bbox_layer: The ``BboxLayer`` to drive.
+    """
+
+    def __init__(self, bbox_layer: BboxLayer) -> None:
+        super().__init__()
+        self._bbox = bbox_layer
+        self._progress = 0.0
+
+    @pyqtProperty(float)  # type: ignore[misc]
+    def progress(self) -> float:
+        """Current morph progress (0.0 to 1.0)."""
+        return self._progress
+
+    @progress.setter  # type: ignore[attr-defined]
+    def progress(self, value: float) -> None:
+        self._progress = value
+        self._bbox._apply_morph_progress(value)
 
 
 class BboxLayer(QGraphicsItemGroup):
@@ -54,6 +86,13 @@ class BboxLayer(QGraphicsItemGroup):
         self._y = y
         self._w = w
         self._h = h
+
+        # Morph animation state
+        self._morph_start: tuple[int, int, int, int] = (x, y, w, h)
+        self._morph_end: tuple[int, int, int, int] = (x, y, w, h)
+        self._is_morphing: bool = False
+        self._morph_helper: _MorphHelper | None = None
+        self._morph_anim: QPropertyAnimation | None = None
 
         r, g, b, a = color_rgba
 
@@ -139,3 +178,117 @@ class BboxLayer(QGraphicsItemGroup):
     def reset_highlight(self) -> None:
         """Restore the bounding box to default (full) opacity."""
         self.setOpacity(1.0)
+
+    # ------------------------------------------------------------------
+    # Morph animation
+    # ------------------------------------------------------------------
+
+    @property
+    def is_morphing(self) -> bool:
+        """Return True if a morph animation is in progress."""
+        return self._is_morphing
+
+    def morph_to(
+        self, x: int, y: int, w: int, h: int, duration_ms: int = 500,
+    ) -> None:
+        """Animate the bbox from its current rect to a new target.
+
+        Uses ``QPropertyAnimation`` with ``InOutCubic`` easing on a
+        helper ``QObject`` that drives interpolation via
+        ``_apply_morph_progress()``.
+
+        Args:
+            x: Target left edge.
+            y: Target top edge.
+            w: Target width.
+            h: Target height.
+            duration_ms: Animation duration in milliseconds (default 500,
+                within the 400--600ms range specified in CONTEXT.md).
+        """
+        self._morph_start = (self._x, self._y, self._w, self._h)
+        self._morph_end = (x, y, w, h)
+
+        if self._morph_helper is None:
+            self._morph_helper = _MorphHelper(self)
+
+        # Reset helper progress
+        self._morph_helper._progress = 0.0
+
+        self._morph_anim = QPropertyAnimation(
+            self._morph_helper, b"progress",
+        )
+        self._morph_anim.setDuration(duration_ms)
+        self._morph_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._morph_anim.setStartValue(0.0)
+        self._morph_anim.setEndValue(1.0)
+        self._morph_anim.finished.connect(self._on_morph_done)
+
+        self._is_morphing = True
+        self._morph_anim.start()
+        logger.debug(
+            "Morph started: (%d,%d,%d,%d) -> (%d,%d,%d,%d) over %dms",
+            *self._morph_start, *self._morph_end, duration_ms,
+        )
+
+    def _apply_morph_progress(self, t: float) -> None:
+        """Interpolate rect and children to morph progress *t*.
+
+        Args:
+            t: Progress value from 0.0 (start) to 1.0 (end).
+        """
+        sx, sy, sw, sh = self._morph_start
+        ex, ey, ew, eh = self._morph_end
+
+        ix = int(round(sx + (ex - sx) * t))
+        iy = int(round(sy + (ey - sy) * t))
+        iw = int(round(sw + (ew - sw) * t))
+        ih = int(round(sh + (eh - sh) * t))
+
+        # Update stored coordinates
+        self._x = ix
+        self._y = iy
+        self._w = iw
+        self._h = ih
+
+        # Update main rect item
+        self._rect.setRect(QRectF(ix, iy, iw, ih))
+
+        # Update handle positions
+        positions = self._corner_positions(ix, iy, iw, ih)
+        for handle, (hx, hy) in zip(self._handles, positions):
+            handle.setRect(QRectF(hx, hy, _HANDLE_SIZE, _HANDLE_SIZE))
+
+        # Update label position if present
+        if self._label is not None:
+            self._label.setPos(ix, max(0, iy - 16))
+
+    def _on_morph_done(self) -> None:
+        """Finalise morph: snap to exact target and update styling.
+
+        Ensures no floating-point drift in final values and applies
+        the post-morph visual style (thin red outline, faint fill).
+        """
+        self._is_morphing = False
+
+        # Snap to exact target values
+        ex, ey, ew, eh = self._morph_end
+        self._x = ex
+        self._y = ey
+        self._w = ew
+        self._h = eh
+        self._rect.setRect(QRectF(ex, ey, ew, eh))
+
+        positions = self._corner_positions(ex, ey, ew, eh)
+        for handle, (hx, hy) in zip(self._handles, positions):
+            handle.setRect(QRectF(hx, hy, _HANDLE_SIZE, _HANDLE_SIZE))
+
+        if self._label is not None:
+            self._label.setPos(ex, max(0, ey - 16))
+
+        # Post-morph styling: thin red outline, glow retreats
+        pen = QPen(QColor(255, 50, 50, 180))
+        pen.setWidth(1)
+        self._rect.setPen(pen)
+        self._rect.setBrush(QBrush(QColor(255, 50, 50, 20)))
+
+        logger.debug("Morph complete: final rect (%d,%d,%d,%d)", ex, ey, ew, eh)
