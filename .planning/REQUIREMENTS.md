@@ -25,7 +25,7 @@
 ### Overlay HUD
 
 - [ ] **HUD-01**: Tag dialog — dark frosted-glass panel slides up from element with thin fonts and glow accents
-- [ ] **HUD-02**: Tag dialog typewriter fill — all VLM fields animate simultaneously on first capture
+- [x] **HUD-02**: Tag dialog typewriter fill — all VLM fields animate simultaneously on first capture
 - [ ] **HUD-03**: Tag dialog pre-fills without animation when editing existing routine steps
 - [ ] **HUD-04**: Tag dialog includes action dropdown with conditional fields per action type
 - [ ] **HUD-05**: Floating toolbar — persistent, draggable, context-sensitive (recording vs dry run vs tag dialog)
@@ -179,7 +179,7 @@
 | ANIM-05 | Phase 2 | Complete |
 | ANIM-06 | Phase 2 | Complete |
 | HUD-01 | Phase 3 | Pending |
-| HUD-02 | Phase 3 | Pending |
+| HUD-02 | Phase 3 | Complete |
 | HUD-03 | Phase 3 | Pending |
 | HUD-04 | Phase 3 | Pending |
 | HUD-05 | Phase 3 | Pending |

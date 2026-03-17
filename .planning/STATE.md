@@ -3,30 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-03-16T22:57:55.797Z"
-last_activity: 2026-03-16 — Completed 02-03-PLAN.md (DonutCloud + Animation Integration)
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-03-17T00:53:33Z"
+last_activity: 2026-03-17 — Completed 03-01-PLAN.md (HUD Foundation)
 progress:
   total_phases: 10
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-03-16T21:40:01Z"
-last_activity: 2026-03-16 — Completed 02-03-PLAN.md (DonutCloud + Animation Integration)
-progress:
-  total_phases: 10
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_plans: 9
+  completed_plans: 7
 ---
 
 # Project State
@@ -36,23 +20,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** A non-technical person can record a multi-step screen routine in under 2 minutes and replay it reliably on any resolution — "Muscle Memory: Show it once, it never forgets."
-**Current focus:** Phase 2 — Overlay Animations
+**Current focus:** Phase 3 — Overlay HUD Panels
 
 ## Current Position
 
-Phase: 2 of 10 (Overlay Animations) -- COMPLETE
-Plan: 3 of 3 in current phase -- COMPLETE
-Status: Phase 02 complete, ready for Phase 03
-Last activity: 2026-03-16 — Completed 02-03-PLAN.md (DonutCloud + Animation Integration)
+Phase: 3 of 10 (Overlay HUD Panels)
+Plan: 1 of 3 in current phase -- COMPLETE
+Status: Executing Phase 03, Plan 01 complete
+Last activity: 2026-03-17 — Completed 03-01-PLAN.md (HUD Foundation)
 
-Progress: [██████████] 100% (6 of 6 plans)
+Progress: [███████░░░] 78% (7 of 9 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: 4min
-- Total execution time: 0.38 hours
+- Total execution time: 0.43 hours
 
 **By Phase:**
 
@@ -65,9 +49,10 @@ Progress: [██████████] 100% (6 of 6 plans)
 
 | Phase 02 P02 | 5min | 2 tasks | 4 files |
 | Phase 02 P03 | 5min | 2 tasks | 7 files |
+| Phase 03 P01 | 3min | 2 tasks | 5 files |
 
 **Recent Trend:**
-- Last 5 plans: 3min, 4min, 3min, 5min, 5min
+- Last 5 plans: 4min, 3min, 5min, 5min, 3min
 - Trend: stable
 
 ## Accumulated Context
@@ -93,6 +78,9 @@ Recent decisions affecting current work:
 - [Phase 02]: ScanLayer WAITING_AI is instant-transition phase (no duration); _MorphHelper QObject bridge for QPropertyAnimation on QGraphicsItemGroup
 - [Phase 02]: BorderLayer replaced by ShimmerLayer in view -- no backward compatibility shim
 - [Phase 02]: DonutCloudLayer z-value 45 (below BboxLayer at 50) for visual layering
+- [Phase 03]: SimpleNamespace for SPACING tokens (lightweight dot-access, no dataclass overhead)
+- [Phase 03]: Card glow uses same _ACTIVE_SPAN=0.35 as ShimmerLayer for visual family consistency
+- [Phase 03]: TypewriterEngine emits per-character signals for glow synchronization
 
 ### Pending Todos
 
@@ -108,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-16T22:57:55.794Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-overlay-hud-panels/03-UI-SPEC.md
+Last session: 2026-03-17T00:53:33Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: .planning/phases/03-overlay-hud-panels/03-02-PLAN.md
