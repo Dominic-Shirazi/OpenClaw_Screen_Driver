@@ -30,6 +30,8 @@ from recorder.overlay.mode_indicator_layer import ModeIndicatorLayer
 from recorder.overlay.scan_layer import ScanLayer
 from recorder.overlay.shimmer_layer import ShimmerLayer
 from recorder.overlay.state import STATE_COLORS, OverlayState
+from recorder.overlay.tag_dialog_panel import TagDialogPanel
+from recorder.overlay.toolbar_panel import ToolbarMode, ToolbarPanel
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,10 @@ class OverlayView(QGraphicsView):
         self._scan_layer: ScanLayer | None = None
         self._donut_cloud: DonutCloudLayer | None = None
         self._active_bbox: BboxLayer | None = None
+
+        # ---- HUD panels ----
+        self._tag_dialog: TagDialogPanel | None = None
+        self._toolbar: ToolbarPanel | None = None
 
         # ---- Mouse tracking ----
         self.setMouseTracking(True)
@@ -183,13 +189,98 @@ class OverlayView(QGraphicsView):
 
     def hide_for_capture(self) -> None:
         """Hide the overlay window before a screenshot capture."""
+        # Force-hide HUD panels (don't rely on animation)
+        if self._tag_dialog is not None:
+            self._tag_dialog.setVisible(False)
+        if self._toolbar is not None:
+            self._toolbar.setVisible(False)
         self._clock.stop()
         self.hide()
 
     def show_after_capture(self) -> None:
         """Restore the overlay window after a screenshot capture."""
         self.show()
+        # Restore HUD panels visibility
+        if self._tag_dialog is not None and self._tag_dialog._opacity > 0:
+            self._tag_dialog.setVisible(True)
+        if self._toolbar is not None and self._toolbar._opacity > 0:
+            self._toolbar.setVisible(True)
         self._clock.start()
+
+    # ------------------------------------------------------------------
+    # HUD panel management
+    # ------------------------------------------------------------------
+
+    def show_tag_dialog(
+        self,
+        element_rect: QRectF,
+        vlm_data: dict | None = None,
+        edit_mode: bool = False,
+    ) -> None:
+        """Show the tag dialog panel near the captured element.
+
+        Args:
+            element_rect: Bounding rect of the captured element in scene coords.
+            vlm_data: Optional VLM analysis results for auto-fill.
+            edit_mode: If True, pre-fill fields without typewriter animation.
+        """
+        if self._tag_dialog is None:
+            self._tag_dialog = TagDialogPanel(self._clock)
+            self.scene().addItem(self._tag_dialog)
+        self._tag_dialog.show_dialog(
+            element_rect, vlm_data=vlm_data, edit_mode=edit_mode,
+        )
+        self._update_avoidance_rects()
+
+    def dismiss_tag_dialog(self) -> None:
+        """Dismiss the tag dialog with fade-out animation."""
+        if self._tag_dialog is not None:
+            self._tag_dialog.dismiss()
+            self._update_avoidance_rects()
+
+    def get_tag_data(self) -> dict | None:
+        """Return current tag dialog form data, or None if not showing.
+
+        Returns:
+            Dict of form field values, or None.
+        """
+        if self._tag_dialog is not None:
+            return self._tag_dialog.get_form_data()
+        return None
+
+    def show_toolbar(self) -> None:
+        """Show the floating toolbar."""
+        if self._toolbar is None:
+            self._toolbar = ToolbarPanel(
+                self._clock, self._screen_w, self._screen_h,
+            )
+            self.scene().addItem(self._toolbar)
+        self._toolbar.show_toolbar()
+        self._update_avoidance_rects()
+
+    def hide_toolbar(self) -> None:
+        """Hide the floating toolbar."""
+        if self._toolbar is not None:
+            self._toolbar.hide_toolbar()
+            self._update_avoidance_rects()
+
+    def set_toolbar_mode(self, mode: ToolbarMode) -> None:
+        """Switch toolbar button set for the current context.
+
+        Args:
+            mode: The toolbar mode to display.
+        """
+        if self._toolbar is not None:
+            self._toolbar.set_mode(mode)
+
+    def _update_avoidance_rects(self) -> None:
+        """Collect avoidance rects from all HUD panels and update shimmer."""
+        rects: list[QRectF] = []
+        if self._tag_dialog is not None and self._tag_dialog.isVisible():
+            rects.append(self._tag_dialog.get_avoidance_rect())
+        if self._toolbar is not None and self._toolbar.isVisible():
+            rects.append(self._toolbar.get_avoidance_rect())
+        self._shimmer.set_avoidance_rects(rects)
 
     # ------------------------------------------------------------------
     # Bounding box management

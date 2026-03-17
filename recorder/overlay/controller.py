@@ -12,8 +12,11 @@ import logging
 import sys
 from typing import Any, Callable
 
+from PyQt6.QtCore import QRectF
+
 from recorder.overlay.bbox_layer import BboxLayer
 from recorder.overlay.state import OverlayState, transition
+from recorder.overlay.toolbar_panel import ToolbarMode
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +149,60 @@ class OverlayController:
         """Remove all bounding boxes from the overlay."""
         if self._view is not None:
             self._view.clear_bboxes()
+
+    # ------------------------------------------------------------------
+    # HUD panel API
+    # ------------------------------------------------------------------
+
+    def show_tag_dialog(
+        self,
+        element_rect: QRectF,
+        vlm_data: dict | None = None,
+        edit_mode: bool = False,
+    ) -> None:
+        """Show the tag dialog panel near the captured element.
+
+        Args:
+            element_rect: Bounding rect of captured element.
+            vlm_data: Optional VLM analysis data.
+            edit_mode: If True, pre-fill without typewriter.
+        """
+        if self._view is not None:
+            self._view.show_tag_dialog(element_rect, vlm_data, edit_mode)
+
+    def dismiss_tag_dialog(self) -> None:
+        """Dismiss the tag dialog."""
+        if self._view is not None:
+            self._view.dismiss_tag_dialog()
+
+    def get_tag_data(self) -> dict | None:
+        """Return current tag dialog form data.
+
+        Returns:
+            Dict of form field values, or None if no dialog is showing.
+        """
+        if self._view is not None:
+            return self._view.get_tag_data()
+        return None
+
+    def show_toolbar(self) -> None:
+        """Show the floating toolbar."""
+        if self._view is not None:
+            self._view.show_toolbar()
+
+    def hide_toolbar(self) -> None:
+        """Hide the floating toolbar."""
+        if self._view is not None:
+            self._view.hide_toolbar()
+
+    def set_toolbar_mode(self, mode: ToolbarMode) -> None:
+        """Switch toolbar context mode.
+
+        Args:
+            mode: The toolbar mode to display.
+        """
+        if self._view is not None:
+            self._view.set_toolbar_mode(mode)
 
     # ------------------------------------------------------------------
     # Scan / Donut cloud API
