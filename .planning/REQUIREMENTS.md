@@ -28,8 +28,8 @@
 - [x] **HUD-02**: Tag dialog typewriter fill — all VLM fields animate simultaneously on first capture
 - [x] **HUD-03**: Tag dialog pre-fills without animation when editing existing routine steps
 - [x] **HUD-04**: Tag dialog includes action dropdown with conditional fields per action type
-- [ ] **HUD-05**: Floating toolbar — persistent, draggable, context-sensitive (recording vs dry run vs tag dialog)
-- [ ] **HUD-06**: Floating toolbar hides during screenshot captures (same as all overlay elements)
+- [x] **HUD-05**: Floating toolbar — persistent, draggable, context-sensitive (recording vs dry run vs tag dialog)
+- [x] **HUD-06**: Floating toolbar hides during screenshot captures (same as all overlay elements)
 
 ### Record Flow
 
@@ -182,8 +182,8 @@
 | HUD-02 | Phase 3 | Complete |
 | HUD-03 | Phase 3 | Complete |
 | HUD-04 | Phase 3 | Complete |
-| HUD-05 | Phase 3 | Pending |
-| HUD-06 | Phase 3 | Pending |
+| HUD-05 | Phase 3 | Complete |
+| HUD-06 | Phase 3 | Complete |
 | REC-01 | Phase 4 | Pending |
 | REC-02 | Phase 4 | Pending |
 | REC-03 | Phase 4 | Pending |
