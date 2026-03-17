@@ -67,7 +67,11 @@ Plans:
   3. Editing an existing routine step shows pre-filled tag dialog fields with no typewriter animation
   4. Tag dialog action dropdown shows conditional fields that change based on the selected action type
   5. Floating toolbar is draggable, context-sensitive (different buttons for recording vs dry-run vs tag-open states), and hides fully before any screenshot
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 03-01-PLAN.md -- HUD shared constants, card glow helper, and typewriter engine
+- [ ] 03-02-PLAN.md -- Tag dialog panel with frosted glass, typewriter fill, and conditional fields
+- [ ] 03-03-PLAN.md -- Floating toolbar panel and full HUD integration into view/controller
 
 ### Phase 4: Record Flow
 **Goal**: A user can press F2, click through a multi-step workflow, dry-run each step, and save a complete routine file
@@ -162,7 +166,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 |-------|----------------|--------|-----------|
 | 1. Overlay Foundation | 3/3 | Complete | 2026-03-16 |
 | 2. Overlay Animations | 0/3 | Not started | - |
-| 3. Overlay HUD Panels | 0/TBD | Not started | - |
+| 3. Overlay HUD Panels | 0/3 | Not started | - |
 | 4. Record Flow | 0/TBD | Not started | - |
 | 5. Routine File Format | 0/TBD | Not started | - |
 | 6. Action Types | 0/TBD | Not started | - |
