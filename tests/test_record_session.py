@@ -374,9 +374,10 @@ class TestVLM:
 class TestTagDialog:
     """REC-10: Tag dialog confirm/dismiss tests."""
 
-    def test_tag_confirmed_stores_step(self, qapp: QApplication) -> None:
-        """on_tag_confirmed adds step to self._steps."""
+    def test_tag_confirmed_transitions_to_countdown(self, qapp: QApplication) -> None:
+        """on_tag_confirmed merges step data and transitions to COUNTDOWN."""
         ctrl = _make_mock_controller()
+        ctrl.show_countdown.return_value = MagicMock()
         session = _make_session(ctrl)
         session._phase = RecordPhase.TAG_DIALOG
         session._current_step = {"click_x": 100, "click_y": 200, "is_drag": False}
@@ -384,9 +385,14 @@ class TestTagDialog:
 
         session.on_tag_confirmed({"label": "Submit", "element_type": "button"})
 
-        assert session.step_count == 1
-        assert session._steps[0]["tag_data"]["label"] == "Submit"
-        assert session._steps[0]["bbox"] == (90, 190, 60, 40)
+        # Step is NOT added to _steps yet (happens after dry-run validation)
+        assert session.step_count == 0
+        # But current_step has merged tag data
+        assert session._current_step["tag_data"]["label"] == "Submit"
+        assert session._current_step["bbox"] == (90, 190, 60, 40)
+        assert session.phase == RecordPhase.COUNTDOWN
+        ctrl.show_countdown.assert_called_once_with(3)
+        ctrl.set_toolbar_mode.assert_called_with(ToolbarMode.DRY_RUN)
 
     def test_tag_dismissed_returns_to_awaiting(self, qapp: QApplication) -> None:
         """on_tag_dismissed returns to AWAITING_CLICK without adding step."""
@@ -417,8 +423,10 @@ class TestDryRunStages:
     """REC-08, REC-09: Dry-run stage transition tests."""
 
     def test_dry_run_stages(self, qapp: QApplication) -> None:
-        """on_tag_confirmed transitions to COUNTDOWN; flow completes back to AWAITING_CLICK."""
+        """on_tag_confirmed transitions to COUNTDOWN; countdown wires signal."""
         ctrl = _make_mock_controller()
+        mock_countdown_widget = MagicMock()
+        ctrl.show_countdown.return_value = mock_countdown_widget
         session = _make_session(ctrl)
         session._phase = RecordPhase.TAG_DIALOG
         session._current_step = {"click_x": 100, "click_y": 200, "is_drag": False}
@@ -436,18 +444,22 @@ class TestDryRunStages:
 
         session.on_tag_confirmed({"label": "OK", "element_type": "button"})
 
-        # Should have transitioned through COUNTDOWN and back to AWAITING_CLICK
+        # Should have transitioned to COUNTDOWN
         assert RecordPhase.COUNTDOWN in phases_seen
-        assert session.phase == RecordPhase.AWAITING_CLICK
-        assert session.step_count == 1
+        assert session.phase == RecordPhase.COUNTDOWN
+        # Countdown widget wired
+        mock_countdown_widget.countdown_finished.connect.assert_called_once()
+        # Step NOT yet added (added after dry-run "yes")
+        assert session.step_count == 0
 
 
 class TestToolbarRouting:
     """Toolbar action routing tests."""
 
     def test_toolbar_routes_confirm(self, qapp: QApplication) -> None:
-        """on_toolbar_action('confirm') calls on_tag_confirmed."""
+        """on_toolbar_action('confirm') calls on_tag_confirmed -> COUNTDOWN."""
         ctrl = _make_mock_controller()
+        ctrl.show_countdown.return_value = MagicMock()
         session = _make_session(ctrl)
         session._phase = RecordPhase.TAG_DIALOG
         session._current_step = {"click_x": 50, "click_y": 50, "is_drag": False}
@@ -455,7 +467,9 @@ class TestToolbarRouting:
 
         session.on_toolbar_action("confirm")
 
-        assert session.step_count == 1
+        # Step goes to countdown, not immediately stored
+        assert session.phase == RecordPhase.COUNTDOWN
+        ctrl.show_countdown.assert_called_once_with(3)
 
     def test_toolbar_routes_dismiss(self, qapp: QApplication) -> None:
         """on_toolbar_action('dismiss') calls on_tag_dismissed."""

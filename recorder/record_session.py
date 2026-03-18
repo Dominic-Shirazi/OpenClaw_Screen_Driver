@@ -1,20 +1,22 @@
 """RecordSession orchestrator for the recording pipeline.
 
 Manages the full recording state machine from AWAITING_CLICK through
-TAG_DIALOG (and eventually through SUCCESS_FLASH).  Receives events
-from the overlay (selection, toolbar buttons, tag dialog) and orchestrates
-detection / VLM analysis in background threads, delivering results back
-to the main Qt thread via PipelineBridge signals.
+SUCCESS_FLASH, including dry-run execution, save/abort flow, and
+loop-back to AWAITING_CLICK for multi-step recording.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
-from typing import Any
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+from uuid import uuid4
 
 import numpy as np
-from PyQt6.QtCore import QRectF
+from PyQt6.QtCore import QRectF, QTimer
 
 from core.config import get_config
 from recorder.overlay.pipeline_bridge import PipelineBridge
@@ -24,12 +26,87 @@ from recorder.overlay.toolbar_panel import ToolbarMode
 logger = logging.getLogger(__name__)
 
 
+def _compute_region_hint(x: int, y: int, screen_w: int, screen_h: int) -> str:
+    """Return a 3x3 grid region hint based on bbox position.
+
+    Args:
+        x: Horizontal position in pixels.
+        y: Vertical position in pixels.
+        screen_w: Screen width in pixels.
+        screen_h: Screen height in pixels.
+
+    Returns:
+        Region hint string like "top_left", "center", "bottom_right".
+    """
+    x_pct = x / screen_w if screen_w > 0 else 0.5
+    y_pct = y / screen_h if screen_h > 0 else 0.5
+
+    if y_pct < 0.33:
+        v = "top"
+    elif y_pct < 0.66:
+        v = "center"
+    else:
+        v = "bottom"
+
+    if x_pct < 0.33:
+        h = "left"
+    elif x_pct < 0.66:
+        h = "center"
+    else:
+        h = "right"
+
+    if v == "center" and h == "center":
+        return "center"
+    return f"{v}_{h}"
+
+
+def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
+    """Convert internal step dict to routine.json step format.
+
+    Args:
+        step: Internal step dictionary with tag_data and bbox.
+        index: Step index in the sequence.
+        screen_w: Screen width for percentage calculations.
+        screen_h: Screen height for percentage calculations.
+
+    Returns:
+        JSON-serializable step dictionary.
+    """
+    tag_data = step.get("tag_data", {})
+    bbox = step.get("bbox")
+    bbox_x, bbox_y, bbox_w, bbox_h = bbox if bbox else (0, 0, 0, 0)
+
+    return {
+        "step_index": index,
+        "node_id": step.get("node_id", str(uuid4())),
+        "element_type": tag_data.get("element_type", "unknown"),
+        "label": tag_data.get("label", ""),
+        "caption": tag_data.get("caption", ""),
+        "action": tag_data.get("action", "click"),
+        "bbox": {"x": bbox_x, "y": bbox_y, "w": bbox_w, "h": bbox_h},
+        "bbox_pct": {
+            "x_pct": bbox_x / screen_w if screen_w > 0 else 0.0,
+            "y_pct": bbox_y / screen_h if screen_h > 0 else 0.0,
+            "w_pct": bbox_w / screen_w if screen_w > 0 else 0.0,
+            "h_pct": bbox_h / screen_h if screen_h > 0 else 0.0,
+        },
+        "region_hint": _compute_region_hint(
+            bbox_x + bbox_w // 2, bbox_y + bbox_h // 2, screen_w, screen_h,
+        ),
+        "snippet_path": f"snippets/step_{index:02d}.png",
+        "embedding_path": f"embeddings/step_{index:02d}.npy",
+        "confidence": tag_data.get("confidence", 0.0),
+        "dry_run_passed": True,
+    }
+
+
 class RecordSession:
-    """Orchestrates the recording pipeline from click through tag dialog.
+    """Orchestrates the recording pipeline from click through save/abort.
 
     RecordSession is the brain of the recording flow.  It receives events
     from the overlay controller (selection, toolbar buttons, tag dialog)
-    and coordinates detection, VLM analysis, and step accumulation.
+    and coordinates detection, VLM analysis, dry-run execution, step
+    accumulation, and save/abort.
 
     Args:
         controller: OverlayController instance (already created).
@@ -51,6 +128,9 @@ class RecordSession:
         self._bridge.detection_ready.connect(self._on_detection_ready)
         self._bridge.vlm_ready.connect(self._on_vlm_ready)
         self._bridge.vlm_failed.connect(self._on_vlm_failed)
+        self._bridge.execution_complete.connect(self._on_execution_complete)
+        self._bridge.save_complete.connect(self._on_save_complete)
+        self._bridge.save_failed.connect(self._on_save_failed)
 
         self._phase: RecordPhase = RecordPhase.AWAITING_CLICK
         self._steps: list[dict] = []
@@ -61,6 +141,7 @@ class RecordSession:
         self._is_drag_capture: bool = False
         self._click_x: int = 0
         self._click_y: int = 0
+        self._on_session_complete: Callable[[bool], None] | None = None
 
         logger.info(
             "RecordSession created: routine=%s, start_from=%s",
@@ -97,6 +178,14 @@ class RecordSession:
         self._set_phase(RecordPhase.AWAITING_CLICK)
 
         logger.info("RecordSession started, awaiting first click")
+
+    def set_on_complete(self, callback: Callable[[bool], None]) -> None:
+        """Register a session completion callback.
+
+        Args:
+            callback: Called with True on save, False on abort.
+        """
+        self._on_session_complete = callback
 
     def on_selection(self, x: int, y: int, w: int, h: int) -> None:
         """Handle overlay click/drag selection.
@@ -172,7 +261,10 @@ class RecordSession:
             logger.debug("Unhandled toolbar action: %s", action)
 
     def on_tag_confirmed(self, data: dict) -> None:
-        """Handle tag dialog confirmation -- store step data.
+        """Handle tag dialog confirmation -- start dry-run countdown.
+
+        Merges tag data with bbox data, dismisses tag dialog, and
+        transitions to COUNTDOWN for dry-run execution.
 
         Args:
             data: Form data dict from the tag dialog.
@@ -181,28 +273,28 @@ class RecordSession:
             logger.warning("Tag confirmed but no current step")
             return
 
-        step = {
+        # Merge step data with tag dialog data
+        self._current_step = {
             **self._current_step,
             "tag_data": data,
             "bbox": self._current_bbox,
         }
-        self._steps.append(step)
-        self._current_step = None
 
         self._controller.dismiss_tag_dialog()
 
         logger.info(
-            "Step %d recorded: label=%s, type=%s",
-            len(self._steps),
+            "Tag confirmed: label=%s, type=%s -- starting countdown",
             data.get("label", "?"),
             data.get("element_type", "?"),
         )
 
-        # Transition to COUNTDOWN (Plan 04 will wire actual countdown)
+        # Transition to COUNTDOWN
         self._set_phase(RecordPhase.COUNTDOWN)
-        # For now, return to AWAITING_CLICK since countdown isn't wired yet
-        self._set_phase(RecordPhase.AWAITING_CLICK)
-        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
+        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+
+        widget = self._controller.show_countdown(3)
+        if widget is not None:
+            widget.countdown_finished.connect(self._on_countdown_finished)
 
     def on_tag_dismissed(self, data: dict) -> None:
         """Handle tag dialog dismissal -- discard step, return to awaiting.
@@ -222,15 +314,35 @@ class RecordSession:
         """Handle Ctrl+Q -- save all accumulated steps."""
         logger.info("Save requested with %d steps", len(self._steps))
 
+        if len(self._steps) == 0:
+            # No steps -- close silently
+            self._controller.close()
+            if self._on_session_complete is not None:
+                self._on_session_complete(False)
+            return
+
+        # Save in background thread
+        thread = threading.Thread(
+            target=self._save_routine,
+            daemon=True,
+        )
+        thread.start()
+
     def on_abort_requested(self) -> None:
         """Handle ESC -- show abort confirm or close silently."""
         if self._steps:
             logger.info(
                 "Abort requested with %d unsaved steps", len(self._steps),
             )
-            # Plan 02 will wire abort confirm panel
+            panel = self._controller.show_abort_confirm(len(self._steps))
+            if panel is not None:
+                panel.discard_clicked.connect(self._on_abort_confirmed)
+                panel.keep_clicked.connect(self._on_abort_cancelled)
         else:
             logger.info("Abort requested (no steps recorded)")
+            self._controller.close()
+            if self._on_session_complete is not None:
+                self._on_session_complete(False)
 
     # ------------------------------------------------------------------
     # Private: pipeline methods
@@ -700,18 +812,107 @@ class RecordSession:
         self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
     # ------------------------------------------------------------------
-    # Private: toolbar action handlers (stubs for Plan 04 wiring)
+    # Private: dry-run execution
+    # ------------------------------------------------------------------
+
+    def _on_countdown_finished(self) -> None:
+        """Handle countdown completion -- execute dry-run action."""
+        self._controller.hide_countdown()
+        self._set_phase(RecordPhase.EXECUTING)
+        self._controller.set_click_through(True)
+
+        # Execute action in background thread
+        thread = threading.Thread(
+            target=self._execute_dry_run,
+            daemon=True,
+        )
+        thread.start()
+
+    def _execute_dry_run(self) -> None:
+        """Background worker: execute the recorded action and emit completion.
+
+        Runs the click action at the bbox center. Emits execution_complete
+        signal via PipelineBridge (thread-safe Qt AutoConnection).
+        """
+        try:
+            if self._current_bbox is not None:
+                bx, by, bw, bh = self._current_bbox
+                center_x = bx + bw // 2
+                center_y = by + bh // 2
+
+                from core.executor import click as exec_click
+
+                exec_click(center_x, center_y)
+                logger.info(
+                    "Dry-run click executed at (%d, %d)", center_x, center_y,
+                )
+            else:
+                logger.warning("No bbox for dry-run execution")
+        except Exception as e:
+            logger.error("Dry-run execution failed: %s", e)
+        finally:
+            # Always emit completion signal (thread-safe via AutoConnection)
+            self._bridge.execution_complete.emit()
+
+    def _on_execution_complete(self) -> None:
+        """Handle dry-run completion on main thread.
+
+        Restores click-through and transitions to VALIDATING.
+        """
+        self._controller.set_click_through(False)
+        self._set_phase(RecordPhase.VALIDATING)
+        self._controller.set_toolbar_mode(ToolbarMode.VALIDATING)
+
+    # ------------------------------------------------------------------
+    # Private: validation toolbar action handlers
     # ------------------------------------------------------------------
 
     def _handle_validate_yes(self) -> None:
-        """Handle 'Yes' from VALIDATING -- lock step, flash success."""
-        logger.info("Validate: Yes")
+        """Handle 'Yes' from VALIDATING -- lock step, flash success, loop back."""
+        if self._current_step is not None:
+            self._current_step["dry_run_passed"] = True
+            self._steps.append(self._current_step)
+            logger.info(
+                "Step %d validated: label=%s",
+                len(self._steps),
+                self._current_step.get("tag_data", {}).get("label", "?"),
+            )
+
+        self._set_phase(RecordPhase.SUCCESS_FLASH)
+
+        # Flash success on the bbox
+        if self._current_bbox is not None:
+            bx, by, bw, bh = self._current_bbox
+            self._controller.flash_success(QRectF(bx, by, bw, bh))
+
+        # Clear current step data
+        self._current_step = None
+        self._current_bbox = None
+
+        # After 500ms, loop back to AWAITING_CLICK (REC-10)
+        QTimer.singleShot(
+            500,
+            self._loop_back_to_awaiting,
+        )
+
+    def _loop_back_to_awaiting(self) -> None:
+        """Return to AWAITING_CLICK after success flash."""
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
     def _handle_edit_tags(self) -> None:
         """Handle 'Edit Tags' from VALIDATING -- reopen tag dialog."""
         logger.info("Edit tags requested")
+
+        if self._current_step is not None and self._current_bbox is not None:
+            bx, by, bw, bh = self._current_bbox
+            element_rect = QRectF(bx, by, bw, bh)
+            vlm_data = self._current_step.get("tag_data", {})
+            self._controller.show_tag_dialog(
+                element_rect, vlm_data=vlm_data, edit_mode=True,
+            )
+            self._set_phase(RecordPhase.TAG_DIALOG)
+            self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
     def _handle_recapture(self) -> None:
         """Handle 'Recapture' -- discard current step, return to awaiting."""
@@ -723,7 +924,13 @@ class RecordSession:
 
     def _handle_retry(self) -> None:
         """Handle 'Retry' from VALIDATING -- re-run countdown + dry-run."""
-        logger.info("Retry requested")
+        logger.info("Retry requested -- restarting countdown")
+        self._set_phase(RecordPhase.COUNTDOWN)
+        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+
+        widget = self._controller.show_countdown(3)
+        if widget is not None:
+            widget.countdown_finished.connect(self._on_countdown_finished)
 
     def _handle_undo_last(self) -> None:
         """Handle 'Undo Last' -- remove last recorded step."""
@@ -735,3 +942,206 @@ class RecordSession:
             )
         else:
             logger.info("Nothing to undo")
+
+    # ------------------------------------------------------------------
+    # Private: save flow
+    # ------------------------------------------------------------------
+
+    def _save_routine(self) -> None:
+        """Background worker: save routine to disk.
+
+        Creates ~/.ocsd/routines/{name}/ with routine.json, snippets/,
+        and embeddings/ directories.
+        """
+        try:
+            import pyautogui
+
+            screen_w, screen_h = pyautogui.size()
+
+            save_dir = Path.home() / ".ocsd" / "routines" / self._routine_name
+            snippets_dir = save_dir / "snippets"
+            embeddings_dir = save_dir / "embeddings"
+
+            save_dir.mkdir(parents=True, exist_ok=True)
+            snippets_dir.mkdir(exist_ok=True)
+            embeddings_dir.mkdir(exist_ok=True)
+
+            # Build OCSDGraph from steps
+            from mapper.graph import OCSDGraph
+
+            graph = OCSDGraph()
+            prev_node_id: str | None = None
+            node_ids: list[str] = []
+
+            for i, step in enumerate(self._steps):
+                tag = step.get("tag_data", {})
+                bbox = step.get("bbox")
+                bx, by, bw, bh = bbox if bbox else (0, 0, 0, 0)
+
+                element_type = tag.get("element_type", "unknown")
+                label = tag.get("label", "")
+
+                x_pct = (bx + bw / 2) / screen_w if screen_w > 0 else 0.5
+                y_pct = (by + bh / 2) / screen_h if screen_h > 0 else 0.5
+                w_pct = bw / screen_w if screen_w > 0 else 0.0
+                h_pct = bh / screen_h if screen_h > 0 else 0.0
+
+                node_id = graph.add_node(
+                    element_type=element_type,
+                    label=label,
+                    x_pct=x_pct,
+                    y_pct=y_pct,
+                    w_pct=w_pct,
+                    h_pct=h_pct,
+                    resolution=(screen_w, screen_h),
+                )
+                node_ids.append(node_id)
+
+                if prev_node_id is not None:
+                    action_type = "button"
+                    if element_type == "textbox":
+                        action_type = "textbox"
+                    elif element_type in ("tab", "dropdown", "toggle"):
+                        action_type = element_type
+                    graph.add_edge(prev_node_id, node_id, action_type=action_type)
+
+                prev_node_id = node_id
+
+            # Save snippets and embeddings
+            self._save_snippets_and_embeddings(
+                save_dir, node_ids, screen_w, screen_h,
+            )
+
+            # Build routine.json
+            routine_data = {
+                "$schema": "ocsd-routine-v0",
+                "name": self._routine_name,
+                "description": f"Recorded routine: {self._routine_name}",
+                "start_from": self._start_from,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "resolution": [screen_w, screen_h],
+                "steps": [
+                    _step_to_json(s, i, screen_w, screen_h)
+                    for i, s in enumerate(self._steps)
+                ],
+                "graph": graph.to_dict(),
+            }
+
+            routine_path = save_dir / "routine.json"
+            with open(routine_path, "w", encoding="utf-8") as f:
+                json.dump(routine_data, f, indent=2, ensure_ascii=False)
+
+            logger.info("Routine saved to %s", save_dir)
+            self._bridge.save_complete.emit(str(save_dir))
+
+        except Exception as e:
+            logger.error("Failed to save routine: %s", e)
+            self._bridge.save_failed.emit(str(e))
+
+    def _save_snippets_and_embeddings(
+        self,
+        save_dir: Path,
+        node_ids: list[str],
+        screen_w: int,
+        screen_h: int,
+    ) -> None:
+        """Save element crops and CLIP embeddings for each step.
+
+        Args:
+            save_dir: Root save directory for the routine.
+            node_ids: Graph node IDs for each step.
+            screen_w: Screen width.
+            screen_h: Screen height.
+        """
+        if self._screenshot is None:
+            logger.debug("No screenshot available for snippets")
+            return
+
+        cfg = get_config()
+        crop_buffer = cfg.get("detection", {}).get("crop_buffer_pct", 0.30)
+
+        for i, (step, node_id) in enumerate(zip(self._steps, node_ids)):
+            bbox = step.get("bbox")
+            if bbox is None:
+                continue
+
+            bx, by, bw, bh = bbox
+            if bw <= 0 or bh <= 0:
+                continue
+
+            # 30% padded crop
+            buf_w = int(bw * crop_buffer)
+            buf_h = int(bh * crop_buffer)
+            x1 = max(0, bx - buf_w)
+            y1 = max(0, by - buf_h)
+            x2 = min(screen_w, bx + bw + buf_w)
+            y2 = min(screen_h, by + bh + buf_h)
+
+            sh, sw = self._screenshot.shape[:2]
+            x2 = min(x2, sw)
+            y2 = min(y2, sh)
+
+            crop = self._screenshot[y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+
+            # Save snippet PNG
+            snippet_path = save_dir / "snippets" / f"step_{i:02d}.png"
+            try:
+                import cv2
+                cv2.imwrite(str(snippet_path), crop)
+            except Exception as e:
+                logger.debug("Could not save snippet %d: %s", i, e)
+
+            # Generate CLIP embedding
+            embedding_path = save_dir / "embeddings" / f"step_{i:02d}.npy"
+            try:
+                import cv2
+                from core.embeddings import generate_embedding
+
+                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                embedding = generate_embedding(rgb_crop)
+                np.save(str(embedding_path), embedding)
+            except ImportError:
+                logger.debug("CLIP not available, skipping embeddings")
+                break
+            except Exception as e:
+                logger.debug("Could not generate embedding %d: %s", i, e)
+
+    def _on_save_complete(self, path: str) -> None:
+        """Handle successful save on main thread.
+
+        Args:
+            path: Directory path where routine was saved.
+        """
+        logger.info("Routine saved successfully to %s", path)
+        self._controller.close()
+        if self._on_session_complete is not None:
+            self._on_session_complete(True)
+
+    def _on_save_failed(self, error: str) -> None:
+        """Handle save failure on main thread.
+
+        Args:
+            error: Error message string.
+        """
+        logger.error("Routine save failed: %s", error)
+        # Don't lose session data -- user can retry
+
+    # ------------------------------------------------------------------
+    # Private: abort flow
+    # ------------------------------------------------------------------
+
+    def _on_abort_confirmed(self) -> None:
+        """Handle abort confirmation -- discard and close."""
+        self._steps.clear()
+        self._controller.close()
+        logger.info("Recording aborted, all steps discarded")
+        if self._on_session_complete is not None:
+            self._on_session_complete(False)
+
+    def _on_abort_cancelled(self) -> None:
+        """Handle abort cancellation -- return to recording."""
+        self._controller.hide_abort_confirm()
+        self._set_phase(RecordPhase.AWAITING_CLICK)
+        logger.info("Abort cancelled, returning to AWAITING_CLICK")
