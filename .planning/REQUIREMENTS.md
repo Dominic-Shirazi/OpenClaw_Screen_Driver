@@ -33,16 +33,16 @@
 
 ### Record Flow
 
-- [ ] **REC-01**: User names routine before recording starts
-- [ ] **REC-02**: System auto-minimizes all windows to desktop as reproducible baseline
+- [x] **REC-01**: User names routine before recording starts
+- [x] **REC-02**: System auto-minimizes all windows to desktop as reproducible baseline
 - [x] **REC-03**: F2 toggles recording on/off (ready↔recording), Ctrl+Q saves and finishes, ESC aborts
-- [ ] **REC-04**: Click capture — overlay hides → clean screenshot → AI bbox fitting → overlay returns with scan animation
-- [ ] **REC-05**: Drag-highlight capture — user drags region → AI tightens bbox to actual element inside highlight
-- [ ] **REC-06**: Smart crop — final bbox + 30% pixel padding → VLM analysis → tag dialog
-- [ ] **REC-07**: VLM auto-fill with manual fallback — if VLM fails or times out, user can manually enter type/label/caption
+- [x] **REC-04**: Click capture — overlay hides → clean screenshot → AI bbox fitting → overlay returns with scan animation
+- [x] **REC-05**: Drag-highlight capture — user drags region → AI tightens bbox to actual element inside highlight
+- [x] **REC-06**: Smart crop — final bbox + 30% pixel padding → VLM analysis → tag dialog
+- [x] **REC-07**: VLM auto-fill with manual fallback — if VLM fails or times out, user can manually enter type/label/caption
 - [x] **REC-08**: Dry run per step — Enter → 3-2-1 countdown → execute action → validate result
 - [x] **REC-09**: Dry run does NOT block/lock the mouse — Enter + countdown is sufficient safety
-- [ ] **REC-10**: After dry run, loop back for next element (still in recording mode) until Ctrl+Q
+- [x] **REC-10**: After dry run, loop back for next element (still in recording mode) until Ctrl+Q
 - [ ] **REC-11**: Save routine file on Ctrl+Q — routine.json + snippets/ + embeddings/
 
 ### Run Flow
@@ -184,16 +184,16 @@
 | HUD-04 | Phase 3 | Complete |
 | HUD-05 | Phase 3 | Complete |
 | HUD-06 | Phase 3 | Complete |
-| REC-01 | Phase 4 | Pending |
-| REC-02 | Phase 4 | Pending |
+| REC-01 | Phase 4 | Complete |
+| REC-02 | Phase 4 | Complete |
 | REC-03 | Phase 4 | Complete |
-| REC-04 | Phase 4 | Pending |
-| REC-05 | Phase 4 | Pending |
-| REC-06 | Phase 4 | Pending |
-| REC-07 | Phase 4 | Pending |
+| REC-04 | Phase 4 | Complete |
+| REC-05 | Phase 4 | Complete |
+| REC-06 | Phase 4 | Complete |
+| REC-07 | Phase 4 | Complete |
 | REC-08 | Phase 4 | Complete |
 | REC-09 | Phase 4 | Complete |
-| REC-10 | Phase 4 | Pending |
+| REC-10 | Phase 4 | Complete |
 | REC-11 | Phase 4 | Pending |
 | FMT-01 | Phase 5 | Pending |
 | FMT-02 | Phase 5 | Pending |

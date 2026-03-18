@@ -3,31 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-03-18T21:21:12.487Z"
-last_activity: 2026-03-17 — Completed 03-02-PLAN.md (Tag Dialog Panel)
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-03-18T21:28:00Z"
+last_activity: 2026-03-18 — Completed 04-03-PLAN.md (RecordSession Orchestrator)
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 13
-  completed_plans: 10
-  percent: 100
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-03-17T00:59:49Z"
-last_activity: 2026-03-17 — Completed 03-02-PLAN.md (Tag Dialog Panel)
-progress:
-  [██████████] 100%
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 8
-  percent: 89
+  completed_plans: 11
+  percent: 85
 ---
 
 # Project State
@@ -42,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Current Position
 
 Phase: 4 of 10 (Record Flow)
-Plan: 1 of 4 in current phase -- COMPLETE
-Status: Executing Phase 04, Plan 01 complete
-Last activity: 2026-03-18 — Completed 04-01-PLAN.md (Record Flow Contracts)
+Plan: 3 of 4 in current phase -- COMPLETE
+Status: Executing Phase 04, Plan 03 complete
+Last activity: 2026-03-18 — Completed 04-03-PLAN.md (RecordSession Orchestrator)
 
-Progress: [████████░░] 77% (10 of 13 plans)
+Progress: [█████████░] 85% (11 of 13 plans)
 
 ## Performance Metrics
 
@@ -109,6 +93,9 @@ Recent decisions affecting current work:
 - [Phase 04]: RecordPhase enum defines all 10 sub-states; transition table deferred to RecordSession
 - [Phase 04]: PipelineBridge uses pyqtSignal AutoConnection for thread-safe background->main delivery
 - [Phase 04]: CountdownWidget uses hybrid timing: QTimer for 1s ticks, AnimationClock for smooth digit fade
+- [Phase 04]: Controller card_glow_pulse/flash_success stubs added ahead of Plan 02 to unblock RecordSession
+- [Phase 04]: Click captures auto-accept AI bbox and skip to VLM; drag captures show BBOX_EDITING toolbar
+- [Phase 04]: Background workers emit via PipelineBridge signals (never QTimer.singleShot from threads)
 
 ### Pending Todos
 
@@ -124,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18T21:21:12.484Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-03-18T21:28:00Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
