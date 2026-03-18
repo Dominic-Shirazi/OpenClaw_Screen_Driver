@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-03-18T21:33:03Z"
-last_activity: 2026-03-18 — Completed 04-02-PLAN.md (Overlay Extensions)
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-03-18T21:42:00Z"
+last_activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 13
-  completed_plans: 12
-  percent: 92
+  completed_plans: 13
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Current Position
 
 Phase: 4 of 10 (Record Flow)
-Plan: 3 of 4 in current phase -- COMPLETE (02 and 03 done, 04 remaining)
-Status: Executing Phase 04, Plan 02 complete
-Last activity: 2026-03-18 — Completed 04-02-PLAN.md (Overlay Extensions)
+Plan: 4 of 4 in current phase -- COMPLETE (Phase 04 done)
+Status: Phase 04 complete
+Last activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
 
-Progress: [█████████░] 92% (12 of 13 plans)
+Progress: [██████████] 100% (13 of 13 plans)
 
 ## Performance Metrics
 
@@ -59,6 +59,8 @@ Progress: [█████████░] 92% (12 of 13 plans)
 | Phase 03 P03 | 3min | 2 tasks | 6 files |
 | Phase 04 P01 | 3min | 2 tasks | 8 files |
 | Phase 04 P02 | 10min | 2 tasks | 4 files |
+| Phase 04 P03 | 5min | 2 tasks | 4 files |
+| Phase 04 P04 | 6min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -101,6 +103,10 @@ Recent decisions affecting current work:
 - [Phase 04]: _handle_close no longer auto-closes on save; RecordSession decides when to close
 - [Phase 04]: Card glow pulse uses sine oscillation on TagDialogPanel for loading indicator
 - [Phase 04]: _corner_positions aliased to _handle_positions for backward compat with morph code
+- [Phase 04]: Dry-run execution emits PipelineBridge.execution_complete from background thread (thread-safe AutoConnection)
+- [Phase 04]: Steps stored only after dry-run validation "yes", not on tag confirm
+- [Phase 04]: Session completion callback (set_on_complete) decouples RecordSession from Qt app lifecycle
+- [Phase 04]: Routine JSON uses ocsd-routine-v0 schema with steps, graph, and resolution metadata
 
 ### Pending Todos
 
@@ -116,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18T21:33:03Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-03-18T21:42:00Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None

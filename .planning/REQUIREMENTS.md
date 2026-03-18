@@ -43,7 +43,7 @@
 - [x] **REC-08**: Dry run per step — Enter → 3-2-1 countdown → execute action → validate result
 - [x] **REC-09**: Dry run does NOT block/lock the mouse — Enter + countdown is sufficient safety
 - [x] **REC-10**: After dry run, loop back for next element (still in recording mode) until Ctrl+Q
-- [ ] **REC-11**: Save routine file on Ctrl+Q — routine.json + snippets/ + embeddings/
+- [x] **REC-11**: Save routine file on Ctrl+Q — routine.json + snippets/ + embeddings/
 
 ### Run Flow
 
@@ -194,7 +194,7 @@
 | REC-08 | Phase 4 | Complete |
 | REC-09 | Phase 4 | Complete |
 | REC-10 | Phase 4 | Complete |
-| REC-11 | Phase 4 | Pending |
+| REC-11 | Phase 4 | Complete |
 | FMT-01 | Phase 5 | Pending |
 | FMT-02 | Phase 5 | Pending |
 | FMT-03 | Phase 5 | Pending |
