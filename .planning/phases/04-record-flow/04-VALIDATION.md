@@ -2,12 +2,12 @@
 phase: 4
 slug: record-flow
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-03-18
 ---
 
-# Phase 4 — Validation Strategy
+# Phase 4 -- Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
 
@@ -36,30 +36,30 @@ created: 2026-03-18
 
 ## Per-Task Verification Map
 
-| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 1 | REC-01 | unit | `pytest tests/test_record_session.py -k "test_naming"` | ❌ W0 | ⬜ pending |
-| 04-01-02 | 01 | 1 | REC-02 | unit | `pytest tests/test_record_session.py -k "test_f2_toggle"` | ❌ W0 | ⬜ pending |
-| 04-02-01 | 02 | 1 | REC-03 | unit | `pytest tests/test_capture_pipeline.py -k "test_hide_overlay"` | ❌ W0 | ⬜ pending |
-| 04-02-02 | 02 | 1 | REC-04 | unit | `pytest tests/test_capture_pipeline.py -k "test_bbox_refinement"` | ❌ W0 | ⬜ pending |
-| 04-03-01 | 03 | 2 | REC-05, REC-06 | unit | `pytest tests/test_tag_dialog.py -k "test_vlm_autofill"` | ❌ W0 | ⬜ pending |
-| 04-03-02 | 03 | 2 | REC-07 | unit | `pytest tests/test_tag_dialog.py -k "test_manual_fallback"` | ❌ W0 | ⬜ pending |
-| 04-04-01 | 04 | 2 | REC-08, REC-09 | unit | `pytest tests/test_dryrun.py -k "test_countdown"` | ❌ W0 | ⬜ pending |
-| 04-04-02 | 04 | 2 | REC-10 | unit | `pytest tests/test_dryrun.py -k "test_validation"` | ❌ W0 | ⬜ pending |
-| 04-05-01 | 05 | 3 | REC-11 | unit | `pytest tests/test_routine_save.py -k "test_save_ctrlq"` | ❌ W0 | ⬜ pending |
-| 04-05-02 | 05 | 3 | REC-11 | unit | `pytest tests/test_routine_save.py -k "test_abort_esc"` | ❌ W0 | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Test File | Status |
+|---------|------|------|-------------|-----------|-------------------|-----------|--------|
+| 04-01-T1 | 01 | 1 | REC-03, REC-08, REC-09 | unit | `pytest tests/test_record_phase.py tests/test_countdown_widget.py -x -q` | tests/test_record_phase.py, tests/test_countdown_widget.py | pending |
+| 04-01-T2 | 01 | 1 | REC-03, REC-08, REC-09 | unit | `pytest tests/test_record_phase.py tests/test_countdown_widget.py -x -q` | tests/test_record_phase.py, tests/test_countdown_widget.py | pending |
+| 04-02-T1 | 02 | 2 | REC-04, REC-05, REC-06, REC-09 | unit | `pytest tests/test_overlay_extensions.py -x -q` | tests/test_overlay_extensions.py | pending |
+| 04-02-T2 | 02 | 2 | REC-04, REC-05, REC-06, REC-09 | unit | `pytest tests/test_overlay_extensions.py -x -q` | tests/test_overlay_extensions.py | pending |
+| 04-03-T1 | 03 | 2 | REC-01 thru REC-07, REC-10 | unit | `pytest tests/test_record_session.py -x -q` | tests/test_record_session.py | pending |
+| 04-03-T2 | 03 | 2 | REC-01 thru REC-07, REC-10 | unit | `pytest tests/test_record_session.py -x -q` | tests/test_record_session.py | pending |
+| 04-04-T1 | 04 | 3 | REC-08, REC-09, REC-10, REC-11 | unit | `pytest tests/test_record_session.py tests/test_record_flow.py -x -q` | tests/test_record_session.py, tests/test_record_flow.py | pending |
+| 04-04-T2 | 04 | 3 | REC-01, REC-02, REC-11 | unit | `pytest tests/test_record_flow.py -x -q` | tests/test_record_flow.py | pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: pending / green / red / flaky*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_record_session.py` — stubs for REC-01, REC-02
-- [ ] `tests/test_capture_pipeline.py` — stubs for REC-03, REC-04
-- [ ] `tests/test_tag_dialog.py` — stubs for REC-05, REC-06, REC-07
-- [ ] `tests/test_dryrun.py` — stubs for REC-08, REC-09, REC-10
-- [ ] `tests/test_routine_save.py` — stubs for REC-11
+Wave 0 test stubs are created inline with each plan's Task 2. No separate Wave 0 plan needed.
+
+- [ ] `tests/test_record_phase.py` -- Plan 01 Task 2 creates (RecordPhase, PipelineBridge)
+- [ ] `tests/test_countdown_widget.py` -- Plan 01 Task 2 creates (CountdownWidget, AbortPanel)
+- [ ] `tests/test_overlay_extensions.py` -- Plan 02 Task 2 creates (controller extensions, bbox editing)
+- [ ] `tests/test_record_session.py` -- Plan 03 Task 2 creates (RecordSession pipeline, card glow, drag reject, dry-run stages)
+- [ ] `tests/test_record_flow.py` -- Plan 04 Task 2 creates (cmd_record, TUI prompt, session completion callback)
 
 ---
 
@@ -70,16 +70,17 @@ created: 2026-03-18
 | Overlay hidden during screenshot | REC-03 | Requires live Win32 overlay | Start recording, click element, verify screenshot has no overlay artifacts |
 | Countdown visual animation | REC-08 | Requires Qt rendering verification | Start dry-run, verify 3-2-1 countdown renders and mouse remains unlocked |
 | Drag-highlight bbox tightening | REC-04 | Requires live screen + AI detection | Drag rough selection, verify AI tightens to element boundary |
+| Card glow pulsing during detection | REC-06 | Requires visual confirmation | Click element, verify card glow pulses during DETECTING and VLM_ANALYZING phases |
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
 - [ ] No watch-mode flags
-- [ ] Feedback latency < 15s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] Feedback latency < 15s
+- [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending
