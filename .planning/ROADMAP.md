@@ -84,7 +84,12 @@ Plans:
   4. VLM auto-fills the tag dialog fields; if VLM times out or fails, user can manually enter type, label, and caption without the recording session aborting
   5. Enter on a captured step triggers 3-2-1 countdown, executes the action, and validates the result — mouse is never locked during countdown
   6. Ctrl+Q saves the completed routine to `~/.ocsd/routines/{name}/` and ESC cleanly aborts without saving
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 04-01-PLAN.md -- RecordPhase enum, PipelineBridge, CountdownWidget, AbortPanel, VALIDATING toolbar mode
+- [ ] 04-02-PLAN.md -- Overlay controller/view extensions (click-through, countdown, abort, flash, bbox editing)
+- [ ] 04-03-PLAN.md -- RecordSession orchestrator with capture-detect-VLM-tag pipeline
+- [ ] 04-04-PLAN.md -- Dry-run loop, save/abort flow, and cmd_record() entry point
 
 ### Phase 5: Routine File Format
 **Goal**: Routine files are portable, human-readable, and carry all data needed for reliable cross-resolution replay
@@ -167,7 +172,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 1. Overlay Foundation | 3/3 | Complete | 2026-03-16 |
 | 2. Overlay Animations | 0/3 | Not started | - |
 | 3. Overlay HUD Panels | 2/3 | In Progress|  |
-| 4. Record Flow | 0/TBD | Not started | - |
+| 4. Record Flow | 0/4 | Not started | - |
 | 5. Routine File Format | 0/TBD | Not started | - |
 | 6. Action Types | 0/TBD | Not started | - |
 | 7. Run Flow | 0/TBD | Not started | - |
