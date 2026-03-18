@@ -84,6 +84,9 @@ FONT_SIZE_LABEL: int = 12
 FONT_SIZE_INPUT: int = 14
 """Input text, section headings font size."""
 
+FONT_SIZE_COUNTDOWN: int = 28
+"""Countdown digit font size."""
+
 FONT_WEIGHT_LIGHT: int = 300
 """Light/thin font weight."""
 
@@ -114,6 +117,12 @@ Z_TAG_DIALOG: int = 100
 
 Z_TOOLBAR: int = 110
 """Toolbar z-value (above tag dialog)."""
+
+Z_ABORT_PANEL: int = 200
+"""Abort confirmation panel z-value."""
+
+Z_COUNTDOWN: int = 300
+"""Countdown widget z-value (above everything)."""
 
 # ---------------------------------------------------------------------------
 # Timing

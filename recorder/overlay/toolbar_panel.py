@@ -40,6 +40,8 @@ class ToolbarMode(Enum):
     RECORDING = auto()   # [Pause] [Undo Last]
     TAG_OPEN = auto()    # [Confirm] [Dismiss] [Skip]
     DRY_RUN = auto()     # [Run Step] [Skip Step] [Finish]
+    VALIDATING = auto()  # [Yes] [Edit Tags] [Re-capture] [Retry]
+    BBOX_EDITING = auto()  # [Keep My Drag]
 
 
 # Button definitions per mode: list of (label, signal_name)
@@ -55,30 +57,44 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
         ("Skip Step", "skip_step"),
         ("Finish", "finish"),
     ],
+    ToolbarMode.VALIDATING: [
+        ("Yes", "yes"),
+        ("Edit Tags", "edit_tags"),
+        ("Re-capture", "recapture"),
+        ("Retry", "retry"),
+    ],
+    ToolbarMode.BBOX_EDITING: [
+        ("Keep My Drag", "keep_drag"),
+    ],
 }
 
-_BUTTON_STYLE: str = (
-    "background: rgba(40, 40, 55, 200); "
-    f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
-    f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
-    f"font-size: {FONT_SIZE_LABEL}px; "
-    f"font-weight: {FONT_WEIGHT_REGULAR}; "
-    "border-radius: 4px; "
-    "padding: 4px 10px;"
-)
-
-_BUTTON_HOVER_STYLE: str = (
+_BUTTON_STYLE_GREEN: str = (
     "QPushButton { "
-    "background: rgba(40, 40, 55, 200); "
-    f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
-    f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
+    "background: rgba(50, 200, 50, 180); "
+    "color: rgba(240, 240, 245, 230); "
     f"font-size: {FONT_SIZE_LABEL}px; "
     f"font-weight: {FONT_WEIGHT_REGULAR}; "
+    "border: none; "
     "border-radius: 4px; "
-    "padding: 4px 10px; "
+    "padding: 4px 14px; "
     "} "
     "QPushButton:hover { "
-    "background: rgba(60, 60, 75, 220); "
+    "background: rgba(50, 200, 50, 220); "
+    "}"
+)
+
+_BUTTON_STYLE: str = (
+    "QPushButton { "
+    "background: transparent; "
+    f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
+    f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
+    f"font-size: {FONT_SIZE_LABEL}px; "
+    f"font-weight: {FONT_WEIGHT_REGULAR}; "
+    "border: none; "
+    "padding: 4px 14px; "
+    "} "
+    "QPushButton:hover { "
+    "color: rgba(50, 200, 50, 230); "
     "}"
 )
 
@@ -162,14 +178,22 @@ class ToolbarPanel(QGraphicsObject):
         """Create all button proxy widgets for every mode."""
         for mode, button_defs in _MODE_BUTTONS.items():
             proxies: list[QGraphicsProxyWidget] = []
-            for label, action_name in button_defs:
+            for btn_idx, (label, action_name) in enumerate(button_defs):
                 btn = QPushButton(label)
-                btn.setStyleSheet(_BUTTON_HOVER_STYLE)
+                # Use green style for first button in VALIDATING mode ("Yes")
+                if mode == ToolbarMode.VALIDATING and btn_idx == 0:
+                    btn.setStyleSheet(_BUTTON_STYLE_GREEN)
+                else:
+                    btn.setStyleSheet(_BUTTON_STYLE)
                 btn.clicked.connect(
                     lambda _checked, name=action_name: self.button_clicked.emit(name),
                 )
                 proxy = QGraphicsProxyWidget(self)
                 proxy.setWidget(btn)
+                proxy.setFlag(
+                    QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
+                )
+                proxy.setZValue(1)  # above parent's paint
                 proxies.append(proxy)
             self._button_proxies[mode] = proxies
 
@@ -261,7 +285,7 @@ class ToolbarPanel(QGraphicsObject):
         Returns:
             QRectF with 20px padding on all sides.
         """
-        return QRectF(-20, -20, self._width + 40, self._height + 40)
+        return QRectF(-60, -60, self._width + 120, self._height + 120)
 
     def itemChange(
         self,
@@ -312,22 +336,32 @@ class ToolbarPanel(QGraphicsObject):
 
         rect = QRectF(0, 0, self._width, self._height)
 
-        # Pill background
-        path = QPainterPath()
-        path.addRoundedRect(rect, self._corner_radius, self._corner_radius)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(FROST_BG)
-        painter.drawPath(path)
+        # Card border glow — clip to OUTSIDE the pill so nothing bleeds through
+        pill_path = QPainterPath()
+        pill_path.addRoundedRect(rect, self._corner_radius, self._corner_radius)
 
-        # Card border glow (fewer lights for smaller widget)
+        outer = QPainterPath()
+        margin = 60.0
+        outer.addRect(rect.adjusted(-margin, -margin, margin, margin))
+        glow_clip = outer - pill_path
+
+        painter.save()
+        painter.setClipPath(glow_clip)
         paint_card_glow(
             painter,
             rect,
             brightness=1.0,
             phase=self._glow_phase,
-            light_count=12,
-            glow_radius=20.0,
+            light_count=10,
+            glow_radius=35.0,
         )
+        painter.restore()
+        painter.setOpacity(self._opacity)
+
+        # Pill background
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(FROST_BG)
+        painter.drawPath(pill_path)
 
         painter.restore()
 
@@ -341,8 +375,8 @@ class ToolbarPanel(QGraphicsObject):
         Args:
             dt: Elapsed seconds since last tick.
         """
-        # Glow sweep (5s period)
-        self._glow_phase = (self._glow_phase + dt / 5.0) % 1.0
+        # Continuous time for organic flicker
+        self._glow_phase += dt * 0.8
 
         # Opacity interpolation
         diff = self._target_opacity - self._opacity
