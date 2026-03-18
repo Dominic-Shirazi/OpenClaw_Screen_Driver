@@ -268,6 +268,49 @@ class OverlayController:
             self._view.accept_donut_cloud()
 
     # ------------------------------------------------------------------
+    # Card glow pulse API (loading indicator)
+    # ------------------------------------------------------------------
+
+    def start_card_glow_pulse(self) -> None:
+        """Start card glow pulsing as a loading indicator.
+
+        Used during DETECTING and VLM_ANALYZING phases to show
+        background work is in progress.
+        """
+        logger.debug("Card glow pulse: start")
+        # View integration will be wired in Plan 02
+
+    def stop_card_glow_pulse(self) -> None:
+        """Stop card glow pulsing.
+
+        Called when detection or VLM analysis completes.
+        """
+        logger.debug("Card glow pulse: stop")
+        # View integration will be wired in Plan 02
+
+    # ------------------------------------------------------------------
+    # Click-through, countdown, and flash API (Plan 02 extensions)
+    # ------------------------------------------------------------------
+
+    def set_click_through(self, enabled: bool) -> None:
+        """Set overlay click-through mode for dry-run execution.
+
+        Args:
+            enabled: True to enable click-through, False to disable.
+        """
+        if self._view is not None:
+            self._view.set_click_through(enabled)
+
+    def flash_success(self, bbox_rect: QRectF) -> None:
+        """Flash green success indicator at the given bbox.
+
+        Args:
+            bbox_rect: Bounding rect to flash around.
+        """
+        logger.debug("Flash success at %s", bbox_rect)
+        # View integration will be wired in Plan 02
+
+    # ------------------------------------------------------------------
     # Private: hotkey handlers
     # ------------------------------------------------------------------
 
