@@ -268,47 +268,77 @@ class OverlayController:
             self._view.accept_donut_cloud()
 
     # ------------------------------------------------------------------
-    # Card glow pulse API (loading indicator)
-    # ------------------------------------------------------------------
-
-    def start_card_glow_pulse(self) -> None:
-        """Start card glow pulsing as a loading indicator.
-
-        Used during DETECTING and VLM_ANALYZING phases to show
-        background work is in progress.
-        """
-        logger.debug("Card glow pulse: start")
-        # View integration will be wired in Plan 02
-
-    def stop_card_glow_pulse(self) -> None:
-        """Stop card glow pulsing.
-
-        Called when detection or VLM analysis completes.
-        """
-        logger.debug("Card glow pulse: stop")
-        # View integration will be wired in Plan 02
-
-    # ------------------------------------------------------------------
-    # Click-through, countdown, and flash API (Plan 02 extensions)
+    # Recording pipeline visual API
     # ------------------------------------------------------------------
 
     def set_click_through(self, enabled: bool) -> None:
-        """Set overlay click-through mode for dry-run execution.
+        """Toggle click-through mode without changing overlay state.
+
+        Used during dry-run execution.
 
         Args:
-            enabled: True to enable click-through, False to disable.
+            enabled: If True, make overlay click-through.
         """
         if self._view is not None:
             self._view.set_click_through(enabled)
 
-    def flash_success(self, bbox_rect: QRectF) -> None:
-        """Flash green success indicator at the given bbox.
+    def show_countdown(self, seconds: int = 3) -> Any:
+        """Show cursor-following countdown widget.
 
         Args:
-            bbox_rect: Bounding rect to flash around.
+            seconds: Number of seconds to count down.
+
+        Returns:
+            The CountdownWidget for signal connection, or None.
         """
-        logger.debug("Flash success at %s", bbox_rect)
-        # View integration will be wired in Plan 02
+        if self._view is not None:
+            return self._view.show_countdown(seconds)
+        return None
+
+    def hide_countdown(self) -> None:
+        """Hide and stop the countdown widget."""
+        if self._view is not None:
+            self._view.hide_countdown()
+
+    def show_abort_confirm(self, step_count: int) -> Any:
+        """Show abort confirmation panel.
+
+        Args:
+            step_count: Number of steps that will be lost.
+
+        Returns:
+            The AbortPanel for signal connection, or None.
+        """
+        if self._view is not None:
+            return self._view.show_abort_confirm(step_count)
+        return None
+
+    def hide_abort_confirm(self) -> None:
+        """Hide the abort confirmation panel."""
+        if self._view is not None:
+            self._view.hide_abort_confirm()
+
+    def flash_success(self, bbox_rect: QRectF) -> None:
+        """Show a brief green flash on the given bbox rect.
+
+        Args:
+            bbox_rect: The rectangle to flash green.
+        """
+        if self._view is not None:
+            self._view.flash_success(bbox_rect)
+
+    def start_card_glow_pulse(self) -> None:
+        """Start card glow pulsing as a loading indicator.
+
+        Call during DETECTING and VLM_ANALYZING phases per CONTEXT.md.
+        """
+        if self._view is not None:
+            self._view.start_card_glow_pulse()
+
+    def stop_card_glow_pulse(self) -> None:
+        """Stop card glow pulsing. Call when detection/VLM completes."""
+        if self._view is not None:
+            self._view.stop_card_glow_pulse()
 
     # ------------------------------------------------------------------
     # Private: hotkey handlers
@@ -334,14 +364,19 @@ class OverlayController:
         logger.info("State: %s -> %s", old_name, new_state.name)
 
     def _handle_close(self) -> None:
-        """Handle Ctrl+Q / ESC: save if recording, abort otherwise."""
+        """Handle Ctrl+Q / ESC: delegate to on_save or on_abort callback.
+
+        The callback (RecordSession) decides whether to close the overlay.
+        Only auto-close on abort (non-recording). Save callback handles
+        closing after save completes.
+        """
         if self._state == OverlayState.RECORDING:
             logger.info("Close requested while RECORDING -> save")
             self._fire_callback(self._on_save)
         else:
             logger.info("Close requested while %s -> abort", self._state.name)
             self._fire_callback(self._on_abort)
-        self.close()
+            self.close()
 
     def _fire_callback(
         self,
