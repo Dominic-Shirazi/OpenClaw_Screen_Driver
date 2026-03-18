@@ -57,6 +57,32 @@ from recorder.overlay.typewriter_engine import TypewriterEngine
 
 logger = logging.getLogger(__name__)
 
+
+class _ProxyComboBox(QComboBox):
+    """QComboBox that raises its proxy z-value when popup is shown."""
+
+    def __init__(self, proxy_key: str, parent: QGraphicsObject | None = None) -> None:
+        super().__init__()
+        self._proxy_key = proxy_key
+        self._dialog_ref = parent
+
+    def showPopup(self) -> None:
+        """Raise proxy z-value so popup renders above all siblings."""
+        if self._dialog_ref is not None:
+            proxy = self._dialog_ref._proxies.get(self._proxy_key)
+            if proxy is not None:
+                proxy.setZValue(50)
+        super().showPopup()
+
+    def hidePopup(self) -> None:
+        """Restore proxy z-value."""
+        super().hidePopup()
+        if self._dialog_ref is not None:
+            proxy = self._dialog_ref._proxies.get(self._proxy_key)
+            if proxy is not None:
+                proxy.setZValue(10)
+
+
 # ---------------------------------------------------------------------------
 # Action type choices for the dropdown
 # ---------------------------------------------------------------------------
@@ -144,6 +170,12 @@ class TagDialogPanel(QGraphicsObject):
         """
         super().__init__(parent)
         self.setZValue(Z_TAG_DIALOG)
+        self.setFlag(
+            QGraphicsObject.GraphicsItemFlag.ItemIsFocusable, True,
+        )
+        self.setAcceptedMouseButtons(
+            Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton,
+        )
 
         self._width: float = 400.0
         self._height: float = 280.0
@@ -155,6 +187,7 @@ class TagDialogPanel(QGraphicsObject):
 
         self._glow_phase: float = 0.0
         self._glow_brightness: float = 1.0
+        self._glow_pulsing: bool = False
 
         self._clock = clock
         self._typewriter = TypewriterEngine(clock, parent=self)
@@ -219,6 +252,12 @@ class TagDialogPanel(QGraphicsObject):
         proxy = QGraphicsProxyWidget(self)
         proxy.setWidget(widget)
         proxy.setPos(x, y)
+        proxy.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
+        )
+        # Combo popups need higher z to render above sibling proxies
+        if isinstance(widget, QComboBox):
+            proxy.setZValue(10)
         return proxy
 
     def _create_label(
@@ -309,7 +348,7 @@ class TagDialogPanel(QGraphicsObject):
             "Action Type", pad, y,
         )
         y += 18
-        action_combo = QComboBox()
+        action_combo = _ProxyComboBox("action_type", self)
         for at in _ACTION_TYPES:
             action_combo.addItem(at, at)
         self._widgets["action_type"] = action_combo
@@ -324,7 +363,7 @@ class TagDialogPanel(QGraphicsObject):
             "Element Type", pad, y,
         )
         y += 18
-        elem_combo = QComboBox()
+        elem_combo = _ProxyComboBox("element_type", self)
         elem_combo.setMaxVisibleItems(20)
         self._populate_element_type_combo(elem_combo)
         self._widgets["element_type"] = elem_combo
@@ -361,6 +400,9 @@ class TagDialogPanel(QGraphicsObject):
         self._widgets["press_enter"] = press_enter
         proxy_enter = QGraphicsProxyWidget(self)
         proxy_enter.setWidget(press_enter)
+        proxy_enter.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
+        )
         self._proxies["press_enter"] = proxy_enter
         self._tips["press_enter"] = self._create_tip(
             _HELPER_TIPS["press_enter"], pad, y + 80, field_w,
@@ -455,6 +497,9 @@ class TagDialogPanel(QGraphicsObject):
         self._widgets["confirm_btn"] = confirm_btn
         proxy_confirm = QGraphicsProxyWidget(self)
         proxy_confirm.setWidget(confirm_btn)
+        proxy_confirm.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
+        )
         self._proxies["confirm_btn"] = proxy_confirm
 
         dismiss_btn = QPushButton("Dismiss")
@@ -471,6 +516,9 @@ class TagDialogPanel(QGraphicsObject):
         self._widgets["dismiss_btn"] = dismiss_btn
         proxy_dismiss = QGraphicsProxyWidget(self)
         proxy_dismiss.setWidget(dismiss_btn)
+        proxy_dismiss.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
+        )
         self._proxies["dismiss_btn"] = proxy_dismiss
 
         # Initial layout: hide all conditional fields, position buttons
@@ -831,7 +879,7 @@ class TagDialogPanel(QGraphicsObject):
         Returns:
             QRectF with 30px padding on all sides.
         """
-        return QRectF(-30, -30, self._width + 60, self._height + 60)
+        return QRectF(-80, -80, self._width + 160, self._height + 160)
 
     def paint(
         self,
@@ -855,27 +903,37 @@ class TagDialogPanel(QGraphicsObject):
 
         rect = QRectF(0, 0, self._width, self._height)
 
-        # Frosted glass background
-        path = QPainterPath()
-        path.addRoundedRect(rect, self._corner_radius, self._corner_radius)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(FROST_BG)
-        painter.drawPath(path)
+        # Card border glow — clip to OUTSIDE the card so nothing bleeds through
+        card_path = QPainterPath()
+        card_path.addRoundedRect(rect, self._corner_radius, self._corner_radius)
 
-        # Inner highlight gradient at top
-        gradient = QLinearGradient(0, 0, 0, self._height * 0.3)
-        gradient.setColorAt(0.0, HIGHLIGHT_TOP)
-        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setBrush(gradient)
-        painter.drawPath(path)
+        outer = QPainterPath()
+        margin = 80.0  # glow reach
+        outer.addRect(rect.adjusted(-margin, -margin, margin, margin))
+        glow_clip = outer - card_path
 
-        # Card border glow
+        painter.save()
+        painter.setClipPath(glow_clip)
         paint_card_glow(
             painter,
             rect,
             brightness=self._glow_brightness,
             phase=self._glow_phase,
         )
+        painter.restore()
+        painter.setOpacity(self._opacity)
+
+        # Frosted glass background
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(FROST_BG)
+        painter.drawPath(card_path)
+
+        # Inner highlight gradient at top
+        gradient = QLinearGradient(0, 0, 0, self._height * 0.3)
+        gradient.setColorAt(0.0, HIGHLIGHT_TOP)
+        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setBrush(gradient)
+        painter.drawPath(card_path)
 
         painter.restore()
 
@@ -883,19 +941,38 @@ class TagDialogPanel(QGraphicsObject):
     # Animation tick
     # ------------------------------------------------------------------
 
+    def set_glow_pulsing(self, enabled: bool) -> None:
+        """Enable or disable glow pulsing as a loading indicator.
+
+        When enabled, the glow brightness oscillates between 0.5 and 2.0
+        to indicate background processing (detection, VLM analysis).
+
+        Args:
+            enabled: Whether to pulse the glow.
+        """
+        self._glow_pulsing = enabled
+        if not enabled:
+            self._glow_brightness = 1.0
+        logger.debug("TagDialogPanel glow pulsing: %s", enabled)
+
     def _tick(self, dt: float) -> None:
         """Advance animations by delta-time.
 
         Args:
             dt: Elapsed seconds since last tick.
         """
-        # Glow sweep (5s period)
-        self._glow_phase = (self._glow_phase + dt / 5.0) % 1.0
+        # Continuous time for organic flicker (sine waves handle periodicity)
+        self._glow_phase += dt * 0.8
 
-        # Glow brightness decay
-        self._glow_brightness += (
-            (1.0 - self._glow_brightness) * min(1.0, dt * 8.0)
-        )
+        # Glow brightness: pulse mode or decay mode
+        if getattr(self, "_glow_pulsing", False):
+            import math
+            self._glow_brightness = 1.25 + 0.75 * math.sin(self._glow_phase * 3.0)
+        else:
+            # Glow brightness decay
+            self._glow_brightness += (
+                (1.0 - self._glow_brightness) * min(1.0, dt * 8.0)
+            )
 
         # Opacity interpolation
         speed = 1000.0 / FADE_IN_MS if self._target_opacity > 0.5 else 1000.0 / FADE_OUT_MS

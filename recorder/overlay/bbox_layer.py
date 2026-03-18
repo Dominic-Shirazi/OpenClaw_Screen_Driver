@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, QRectF, Qt, pyqtProperty
-from PyQt6.QtGui import QBrush, QColor, QFont, QPen
+from PyQt6.QtGui import QBrush, QColor, QCursor, QFont, QPen
 from PyQt6.QtWidgets import (
     QGraphicsItem,
     QGraphicsItemGroup,
@@ -115,29 +115,49 @@ class BboxLayer(QGraphicsItemGroup):
             font.setBold(True)
             self._label.setFont(font)
 
-        # Corner handles (small white squares at each corner)
+        # Resize handles (small white squares at corners and edge midpoints)
         self._handles: list[QGraphicsRectItem] = []
+        self._editing: bool = False
         handle_brush = QBrush(QColor(255, 255, 255, 200))
         handle_pen = QPen(QColor(r, g, b, 220))
         handle_pen.setWidth(1)
 
-        for hx, hy in self._corner_positions(x, y, w, h):
+        # Cursor hints for each handle position
+        # Order: TL, TC, TR, RC, BR, BC, BL, LC
+        _handle_cursors = [
+            Qt.CursorShape.SizeFDiagCursor,   # top-left
+            Qt.CursorShape.SizeVerCursor,      # top-center
+            Qt.CursorShape.SizeBDiagCursor,    # top-right
+            Qt.CursorShape.SizeHorCursor,      # right-center
+            Qt.CursorShape.SizeFDiagCursor,    # bottom-right
+            Qt.CursorShape.SizeVerCursor,      # bottom-center
+            Qt.CursorShape.SizeBDiagCursor,    # bottom-left
+            Qt.CursorShape.SizeHorCursor,      # left-center
+        ]
+
+        for (hx, hy), cursor_shape in zip(
+            self._handle_positions(x, y, w, h), _handle_cursors,
+        ):
             handle = QGraphicsRectItem(
                 QRectF(hx, hy, _HANDLE_SIZE, _HANDLE_SIZE),
                 self,
             )
             handle.setPen(handle_pen)
             handle.setBrush(handle_brush)
+            handle.setCursor(QCursor(cursor_shape))
+            # Handles start non-movable; enable_editing() activates them
             handle.setFlag(
-                QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True
+                QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False,
             )
             self._handles.append(handle)
 
     @staticmethod
-    def _corner_positions(
+    def _handle_positions(
         x: int, y: int, w: int, h: int,
     ) -> list[tuple[float, float]]:
-        """Return top-left positions for corner handle rects.
+        """Return top-left positions for all 8 handle rects.
+
+        Order: TL, TC, TR, RC, BR, BC, BL, LC (clockwise from top-left).
 
         Args:
             x: Box left edge.
@@ -146,16 +166,23 @@ class BboxLayer(QGraphicsItemGroup):
             h: Box height.
 
         Returns:
-            Four ``(hx, hy)`` tuples for TL, TR, BL, BR handles.
+            Eight ``(hx, hy)`` tuples for corners and edge midpoints.
         """
         hs = _HANDLE_SIZE
         half = hs / 2
         return [
-            (x - half, y - half),               # top-left
+            (x - half, y - half),                # top-left
+            (x + w / 2 - half, y - half),        # top-center
             (x + w - half, y - half),            # top-right
-            (x - half, y + h - half),            # bottom-left
+            (x + w - half, y + h / 2 - half),   # right-center
             (x + w - half, y + h - half),        # bottom-right
+            (x + w / 2 - half, y + h - half),   # bottom-center
+            (x - half, y + h - half),            # bottom-left
+            (x - half, y + h / 2 - half),       # left-center
         ]
+
+    # Backward-compatible alias
+    _corner_positions = _handle_positions
 
     def get_rect(self) -> tuple[int, int, int, int]:
         """Return the current bounding box as ``(x, y, w, h)``.
@@ -178,6 +205,102 @@ class BboxLayer(QGraphicsItemGroup):
     def reset_highlight(self) -> None:
         """Restore the bounding box to default (full) opacity."""
         self.setOpacity(1.0)
+
+    # ------------------------------------------------------------------
+    # Interactive editing
+    # ------------------------------------------------------------------
+
+    _MIN_BBOX_SIZE: int = 20
+    """Minimum bbox width/height during interactive editing."""
+
+    def enable_editing(self, enabled: bool = True) -> None:
+        """Toggle interactive drag-editing on all handles.
+
+        Args:
+            enabled: If True, handles become movable. If False, locked.
+        """
+        self._editing = enabled
+        for handle in self._handles:
+            handle.setFlag(
+                QGraphicsItem.GraphicsItemFlag.ItemIsMovable, enabled,
+            )
+            handle.setFlag(
+                QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges,
+                enabled,
+            )
+        logger.debug("BboxLayer editing %s", "enabled" if enabled else "disabled")
+
+    def get_edited_rect(self) -> tuple[int, int, int, int]:
+        """Compute the bbox rect from current handle positions.
+
+        Uses the top-left (handle 0) and bottom-right (handle 4) to
+        determine the edited rectangle, clamped to minimum size.
+
+        Returns:
+            Tuple of ``(x, y, w, h)`` in scene coordinates.
+        """
+        if len(self._handles) < 8:
+            return (self._x, self._y, self._w, self._h)
+
+        half = _HANDLE_SIZE / 2
+
+        # Read corner positions from TL and BR handles
+        tl_rect = self._handles[0].rect()
+        br_rect = self._handles[4].rect()
+
+        x1 = tl_rect.x() + half
+        y1 = tl_rect.y() + half
+        x2 = br_rect.x() + half
+        y2 = br_rect.y() + half
+
+        # Ensure correct ordering
+        x = int(round(min(x1, x2)))
+        y = int(round(min(y1, y2)))
+        w = int(round(abs(x2 - x1)))
+        h = int(round(abs(y2 - y1)))
+
+        # Clamp to minimum size
+        w = max(w, self._MIN_BBOX_SIZE)
+        h = max(h, self._MIN_BBOX_SIZE)
+
+        return (x, y, w, h)
+
+    def accept_edit(self) -> None:
+        """Finalize the edited bbox and disable editing mode.
+
+        Updates internal coordinates to match the current handle positions.
+        """
+        self._x, self._y, self._w, self._h = self.get_edited_rect()
+        self._rect.setRect(QRectF(self._x, self._y, self._w, self._h))
+        self._sync_handles_to_rect()
+        self.enable_editing(False)
+        logger.debug(
+            "BboxLayer edit accepted: (%d,%d,%d,%d)",
+            self._x, self._y, self._w, self._h,
+        )
+
+    def reject_edit(self, original: tuple[int, int, int, int]) -> None:
+        """Revert handles to the given original rect and disable editing.
+
+        Args:
+            original: The ``(x, y, w, h)`` to revert to.
+        """
+        self._x, self._y, self._w, self._h = original
+        self._rect.setRect(QRectF(self._x, self._y, self._w, self._h))
+        self._sync_handles_to_rect()
+        self.enable_editing(False)
+        logger.debug(
+            "BboxLayer edit rejected, reverted to: (%d,%d,%d,%d)",
+            *original,
+        )
+
+    def _sync_handles_to_rect(self) -> None:
+        """Reposition all handles to match current _x, _y, _w, _h."""
+        positions = self._handle_positions(self._x, self._y, self._w, self._h)
+        for handle, (hx, hy) in zip(self._handles, positions):
+            handle.setRect(QRectF(hx, hy, _HANDLE_SIZE, _HANDLE_SIZE))
+        if self._label is not None:
+            self._label.setPos(self._x, max(0, self._y - 16))
 
     # ------------------------------------------------------------------
     # Morph animation

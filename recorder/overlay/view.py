@@ -22,9 +22,11 @@ from PyQt6.QtWidgets import (
     QGraphicsView,
 )
 
+from recorder.overlay.abort_panel import AbortPanel
 from recorder.overlay.animation_clock import AnimationClock
 from recorder.overlay.bbox_layer import BboxLayer
 from recorder.overlay.click_catcher_layer import ClickCatcherLayer
+from recorder.overlay.countdown_widget import CountdownWidget
 from recorder.overlay.donut_cloud_layer import DonutCloudLayer
 from recorder.overlay.mode_indicator_layer import ModeIndicatorLayer
 from recorder.overlay.scan_layer import ScanLayer
@@ -109,6 +111,11 @@ class OverlayView(QGraphicsView):
         # ---- HUD panels ----
         self._tag_dialog: TagDialogPanel | None = None
         self._toolbar: ToolbarPanel | None = None
+        self._countdown: CountdownWidget | None = None
+        self._abort_panel: AbortPanel | None = None
+        self._flash_timer: QTimer | None = None
+        self._flash_bbox_rect: QGraphicsRectItem | None = None
+        self._card_glow_pulsing: bool = False
 
         # ---- Mouse tracking ----
         self.setMouseTracking(True)
@@ -194,6 +201,10 @@ class OverlayView(QGraphicsView):
             self._tag_dialog.setVisible(False)
         if self._toolbar is not None:
             self._toolbar.setVisible(False)
+        if self._countdown is not None:
+            self._countdown.setVisible(False)
+        if self._abort_panel is not None:
+            self._abort_panel.setVisible(False)
         self._clock.stop()
         self.hide()
 
@@ -205,6 +216,9 @@ class OverlayView(QGraphicsView):
             self._tag_dialog.setVisible(True)
         if self._toolbar is not None and self._toolbar._opacity > 0:
             self._toolbar.setVisible(True)
+        if self._countdown is not None and self._countdown._remaining > 0:
+            self._countdown.setVisible(True)
+        # abort panel stays hidden after capture (user must re-trigger)
         self._clock.start()
 
     # ------------------------------------------------------------------
@@ -338,6 +352,10 @@ class OverlayView(QGraphicsView):
         pos = self.mapToScene(event.pos())
         self._shimmer.set_mouse_pos(pos.x(), pos.y())
 
+        # Update countdown widget position when visible
+        if self._countdown is not None and self._countdown.isVisible():
+            self._countdown.set_position(pos.x(), pos.y())
+
         if (
             self._drag_start is not None
             and self._rubber_band is not None
@@ -466,6 +484,128 @@ class OverlayView(QGraphicsView):
             self._clock.unregister(self._donut_cloud.tick)
             self.scene().removeItem(self._donut_cloud)
             self._donut_cloud = None
+
+    # ------------------------------------------------------------------
+    # Countdown / Abort / Flash / Click-through / Card glow pulse
+    # ------------------------------------------------------------------
+
+    def show_countdown(self, seconds: int = 3) -> CountdownWidget:
+        """Create and start a cursor-following countdown widget.
+
+        Args:
+            seconds: Number of seconds to count down.
+
+        Returns:
+            The widget so caller can connect to countdown_finished signal.
+        """
+        if self._countdown is None:
+            self._countdown = CountdownWidget(self._clock, seconds)
+            self.scene().addItem(self._countdown)
+        self._countdown.start()
+        return self._countdown
+
+    def hide_countdown(self) -> None:
+        """Stop and hide the countdown widget."""
+        if self._countdown is not None:
+            self._countdown.stop()
+
+    def show_abort_confirm(self, step_count: int) -> AbortPanel:
+        """Show the abort confirmation panel.
+
+        Args:
+            step_count: Number of recorded steps that will be lost.
+
+        Returns:
+            The panel for signal connection.
+        """
+        if self._abort_panel is None:
+            self._abort_panel = AbortPanel()
+            self._abort_panel.set_screen_size(self._screen_w, self._screen_h)
+            self.scene().addItem(self._abort_panel)
+        self._abort_panel.show_panel(step_count)
+        return self._abort_panel
+
+    def hide_abort_confirm(self) -> None:
+        """Hide the abort confirmation panel."""
+        if self._abort_panel is not None:
+            self._abort_panel.hide_panel()
+
+    def flash_success(self, bbox_rect: QRectF) -> None:
+        """Show a 500ms green flash on the given bbox rect, then auto-clear.
+
+        Uses a QGraphicsRectItem with ACCENT_GREEN at alpha 120.
+
+        Args:
+            bbox_rect: The rectangle to flash green.
+        """
+        from recorder.overlay.hud_common import ACCENT_GREEN
+
+        if self._flash_bbox_rect is not None:
+            self.scene().removeItem(self._flash_bbox_rect)
+        pen = QPen(Qt.PenStyle.NoPen)
+        brush = QBrush(
+            QColor(
+                ACCENT_GREEN.red(),
+                ACCENT_GREEN.green(),
+                ACCENT_GREEN.blue(),
+                120,
+            )
+        )
+        self._flash_bbox_rect = self.scene().addRect(bbox_rect, pen, brush)
+        self._flash_bbox_rect.setZValue(55)  # just above bbox layer at 50
+        # Timer to remove flash after 500ms
+        self._flash_timer = QTimer()
+        self._flash_timer.setSingleShot(True)
+        self._flash_timer.setInterval(500)
+        self._flash_timer.timeout.connect(self._clear_flash)
+        self._flash_timer.start()
+
+    def _clear_flash(self) -> None:
+        """Remove the success flash rect."""
+        if self._flash_bbox_rect is not None:
+            self.scene().removeItem(self._flash_bbox_rect)
+            self._flash_bbox_rect = None
+
+    def set_click_through(self, enabled: bool) -> None:
+        """Toggle click-through mode independently of overlay state.
+
+        Used during dry-run execution (overlay visible but non-interactive).
+
+        Args:
+            enabled: If True, make overlay click-through. If False, restore.
+        """
+        if sys.platform == "win32":
+            from recorder.overlay.platform_win32 import set_click_through_win32
+
+            try:
+                set_click_through_win32(int(self.winId()), enabled)
+            except RuntimeError:
+                logger.debug("Window not realised for click-through toggle")
+        else:
+            from recorder.overlay.platform_linux import set_click_through_linux
+
+            set_click_through_linux(self, enabled)
+        # Update cursor: system default when click-through, crosshair when not
+        if enabled:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def start_card_glow_pulse(self) -> None:
+        """Start card glow pulsing as a loading indicator.
+
+        Per CONTEXT.md locked decision: card glow pulses as loading
+        indicator during DETECTING and VLM_ANALYZING phases.
+        """
+        self._card_glow_pulsing = True
+        if self._tag_dialog is not None:
+            self._tag_dialog.set_glow_pulsing(True)
+
+    def stop_card_glow_pulse(self) -> None:
+        """Stop card glow pulsing. Called when detection/VLM completes."""
+        self._card_glow_pulsing = False
+        if self._tag_dialog is not None:
+            self._tag_dialog.set_glow_pulsing(False)
 
     # ------------------------------------------------------------------
     # Keyboard fallback
