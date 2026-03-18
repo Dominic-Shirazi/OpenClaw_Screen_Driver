@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-03-18T21:28:00Z"
-last_activity: 2026-03-18 — Completed 04-03-PLAN.md (RecordSession Orchestrator)
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-03-18T21:33:03Z"
+last_activity: 2026-03-18 — Completed 04-02-PLAN.md (Overlay Extensions)
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Current Position
 
 Phase: 4 of 10 (Record Flow)
-Plan: 3 of 4 in current phase -- COMPLETE
-Status: Executing Phase 04, Plan 03 complete
-Last activity: 2026-03-18 — Completed 04-03-PLAN.md (RecordSession Orchestrator)
+Plan: 3 of 4 in current phase -- COMPLETE (02 and 03 done, 04 remaining)
+Status: Executing Phase 04, Plan 02 complete
+Last activity: 2026-03-18 — Completed 04-02-PLAN.md (Overlay Extensions)
 
-Progress: [█████████░] 85% (11 of 13 plans)
+Progress: [█████████░] 92% (12 of 13 plans)
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [█████████░] 85% (11 of 13 plans)
 - Trend: stable
 | Phase 03 P03 | 3min | 2 tasks | 6 files |
 | Phase 04 P01 | 3min | 2 tasks | 8 files |
+| Phase 04 P02 | 10min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,10 @@ Recent decisions affecting current work:
 - [Phase 04]: Controller card_glow_pulse/flash_success stubs added ahead of Plan 02 to unblock RecordSession
 - [Phase 04]: Click captures auto-accept AI bbox and skip to VLM; drag captures show BBOX_EDITING toolbar
 - [Phase 04]: Background workers emit via PipelineBridge signals (never QTimer.singleShot from threads)
+- [Phase 04]: BboxLayer handles start non-movable; enable_editing() activates them
+- [Phase 04]: _handle_close no longer auto-closes on save; RecordSession decides when to close
+- [Phase 04]: Card glow pulse uses sine oscillation on TagDialogPanel for loading indicator
+- [Phase 04]: _corner_positions aliased to _handle_positions for backward compat with morph code
 
 ### Pending Todos
 
@@ -111,6 +116,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18T21:28:00Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-03-18T21:33:03Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
