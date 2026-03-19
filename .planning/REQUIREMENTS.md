@@ -76,10 +76,10 @@
 
 - [x] **FMT-01**: Routine stored as human-readable JSON (routine.json) with steps, bbox, region_hint, snippet/embedding paths
 - [x] **FMT-02**: Each step includes VLM metadata (element_type, label, caption, confidence)
-- [ ] **FMT-03**: Snippets stored as +30% padded PNGs in snippets/ directory
-- [ ] **FMT-04**: CLIP embeddings stored as .npy files in embeddings/ directory
+- [x] **FMT-03**: Snippets stored as +30% padded PNGs in snippets/ directory
+- [x] **FMT-04**: CLIP embeddings stored as .npy files in embeddings/ directory
 - [x] **FMT-05**: NetworkX graph serializes to/from routine.json format (graph stays under the hood)
-- [ ] **FMT-06**: Storage layout: `~/.ocsd/routines/{name}/routine.json` + `snippets/` + `embeddings/`
+- [x] **FMT-06**: Storage layout: `~/.ocsd/routines/{name}/routine.json` + `snippets/` + `embeddings/`
 - [x] **FMT-07**: Routine file includes metadata: name, version, created, author, description, tags
 
 ### Routine Management
@@ -197,10 +197,10 @@
 | REC-11 | Phase 4 | Complete |
 | FMT-01 | Phase 5 | Complete |
 | FMT-02 | Phase 5 | Complete |
-| FMT-03 | Phase 5 | Pending |
-| FMT-04 | Phase 5 | Pending |
+| FMT-03 | Phase 5 | Complete |
+| FMT-04 | Phase 5 | Complete |
 | FMT-05 | Phase 5 | Complete |
-| FMT-06 | Phase 5 | Pending |
+| FMT-06 | Phase 5 | Complete |
 | FMT-07 | Phase 5 | Complete |
 | ACT-01 | Phase 6 | Pending |
 | ACT-02 | Phase 6 | Pending |

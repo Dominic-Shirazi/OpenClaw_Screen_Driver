@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 2: Overlay Animations** - 60fps border shimmer glow, element scan animation, bbox morph, and donut cloud probability visualizer
 - [ ] **Phase 3: Overlay HUD Panels** - Frosted-glass tag dialog with typewriter VLM fill and floating draggable toolbar
 - [ ] **Phase 4: Record Flow** - End-to-end F2->click->bbox->VLM->tag->dry-run->save wiring
-- [ ] **Phase 5: Routine File Format** - Human-readable routine.json with NetworkX serialization, snippet storage, and embedding paths
+- [x] **Phase 5: Routine File Format** - Human-readable routine.json with NetworkX serialization, snippet storage, and embedding paths (completed 2026-03-19)
 - [ ] **Phase 6: Action Types** - All 12 action types implemented and capturable during recording
 - [ ] **Phase 7: Run Flow** - 5-stage cascade replay, human-like execution, failure cascade, and step-visible progress
 - [ ] **Phase 8: Routine Management** - Update, fork, delete, and inspect operations on saved routines
@@ -176,7 +176,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 2. Overlay Animations | 0/3 | Not started | - |
 | 3. Overlay HUD Panels | 2/3 | In Progress|  |
 | 4. Record Flow | 0/4 | Not started | - |
-| 5. Routine File Format | 0/2 | Not started | - |
+| 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
 | 6. Action Types | 0/TBD | Not started | - |
 | 7. Run Flow | 0/TBD | Not started | - |
 | 8. Routine Management | 0/TBD | Not started | - |
