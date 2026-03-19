@@ -38,26 +38,26 @@ created: 2026-03-19
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 06-01-01 | 01 | 1 | ACT-01 | unit | `pytest tests/test_action_click.py` | ❌ W0 | ⬜ pending |
-| 06-01-02 | 01 | 1 | ACT-02 | unit | `pytest tests/test_action_double_click.py` | ❌ W0 | ⬜ pending |
-| 06-01-03 | 01 | 1 | ACT-03 | unit | `pytest tests/test_action_right_click.py` | ❌ W0 | ⬜ pending |
-| 06-01-04 | 01 | 1 | ACT-04 | unit | `pytest tests/test_action_drag.py` | ❌ W0 | ⬜ pending |
-| 06-02-01 | 02 | 1 | ACT-05 | unit | `pytest tests/test_action_type.py` | ❌ W0 | ⬜ pending |
-| 06-03-01 | 03 | 2 | ACT-06 | unit | `pytest tests/test_action_read.py` | ❌ W0 | ⬜ pending |
-| 06-03-02 | 03 | 2 | ACT-07 | unit | `pytest tests/test_action_snip.py` | ❌ W0 | ⬜ pending |
-| 06-03-03 | 03 | 2 | ACT-08 | unit | `pytest tests/test_action_select_all.py` | ❌ W0 | ⬜ pending |
-| 06-04-01 | 04 | 2 | ACT-09 | unit | `pytest tests/test_action_scroll.py` | ❌ W0 | ⬜ pending |
-| 06-04-02 | 04 | 2 | ACT-10 | unit | `pytest tests/test_action_wait.py` | ❌ W0 | ⬜ pending |
-| 06-04-03 | 04 | 2 | ACT-11 | unit | `pytest tests/test_action_loop.py` | ❌ W0 | ⬜ pending |
-| 06-04-04 | 04 | 2 | ACT-12 | unit | `pytest tests/test_action_prompt.py` | ❌ W0 | ⬜ pending |
+| 06-01-01 | 01 | 1 | ACT-01,02,03 | unit | `pytest tests/test_action_types.py -k "click"` | Created by Plan 01 | pending |
+| 06-01-02 | 01 | 1 | ACT-05 | unit | `pytest tests/test_action_types.py -k "type_step"` | Created by Plan 01 | pending |
+| 06-01-03 | 01 | 1 | ACT-09 | unit | `pytest tests/test_action_types.py -k "scroll"` | Created by Plan 01 | pending |
+| 06-02-01 | 02 | 1 | ACT-08 | unit | `pytest tests/test_condition_engine.py -k "select_all"` | Created by Plan 02 | pending |
+| 06-02-02 | 02 | 1 | ACT-10 (engine) | unit | `pytest tests/test_condition_engine.py -k "timer or screen_change"` | Created by Plan 02 | pending |
+| 06-03-01 | 03 | 2 | ACT-04 | unit | `pytest tests/test_action_types.py -k "click_drag"` | Created by Plan 03 | pending |
+| 06-03-02 | 03 | 2 | ACT-06,07 | unit | `pytest tests/test_action_types.py -k "read"` | Created by Plan 03 | pending |
+| 06-04-01 | 04 | 2 | ACT-10 (dialog) | unit | `pytest tests/test_condition_engine.py -k "dialog or wait_step"` | Created by Plan 04 | pending |
+| 06-04-02 | 04 | 2 | ACT-12 | unit | `pytest tests/test_condition_engine.py -k "prompt_user"` | Created by Plan 04 | pending |
+| 06-05-01 | 05 | 3 | ACT-11 | unit | `pytest tests/test_action_types.py -k "loop"` | Created by Plan 05 | pending |
+| 06-05-02 | 05 | 3 | ACT-11 (resolve) | unit | `pytest tests/test_action_types.py -k "resolve_loop"` | Created by Plan 05 | pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: pending / green / red / flaky*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_action_types.py` — stubs for ACT-01 through ACT-12
+- [ ] `tests/test_action_types.py` — created by Plan 01 Task 1 (step format + dry-run dispatch tests)
+- [ ] `tests/test_condition_engine.py` — created by Plan 02 Task 1 (condition engine + select_all_extract tests)
 - [ ] `tests/conftest.py` — shared fixtures (mock executor, mock pipeline bridge)
 - [ ] pytest already installed in venv
 
