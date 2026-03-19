@@ -3,30 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-03-19T21:51:09.729Z"
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-03-19T21:51:39.222Z"
 last_activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 20
   completed_plans: 17
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-03-18T21:42:00Z"
-last_activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
-progress:
-  total_phases: 10
-  completed_phases: 3
-  total_plans: 13
-  completed_plans: 13
-  percent: 100
 ---
 
 # Project State
@@ -36,16 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** A non-technical person can record a multi-step screen routine in under 2 minutes and replay it reliably on any resolution — "Muscle Memory: Show it once, it never forgets."
-**Current focus:** Phase 4 — Record Flow
+**Current focus:** Phase 6 — Action Types
 
 ## Current Position
 
-Phase: 4 of 10 (Record Flow)
-Plan: 4 of 4 in current phase -- COMPLETE (Phase 04 done)
-Status: Phase 04 complete
-Last activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
+Phase: 6 of 10 (Action Types)
+Plan: 1 of 5 in current phase -- COMPLETE
+Status: Executing Phase 06
+Last activity: 2026-03-19 — Completed 06-01-PLAN.md (Action Type Step Format)
 
-Progress: [██████████] 100% (13 of 13 plans)
+Progress: [█████████░] 85% (17 of 20 plans)
 
 ## Performance Metrics
 
@@ -79,6 +63,7 @@ Progress: [██████████] 100% (13 of 13 plans)
 | Phase 05 P01 | 3min | 1 tasks | 4 files |
 | Phase 05 P02 | 4min | 2 tasks | 4 files |
 | Phase 06 P02 | 2min | 1 tasks | 4 files |
+| Phase 06 P01 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -130,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase 05]: Auto-detect theme from screenshot luminance and foreground program on Windows
 - [Phase 06]: n_iterations uses internal counter for met=True resolution instead of max_iterations overflow
 - [Phase 06]: element_appears and text_matches stubs pending Phase 7 locate cascade
+- [Phase 06]: Scroll parsing uses _parse_direction_amount with direction/amount/unit triple
+- [Phase 06]: Type dry-run clicks target first, then types, then optionally presses enter
+- [Phase 06]: Observation actions (read, snip_and_search) skip dry-run execution entirely
 
 ### Pending Todos
 
@@ -145,6 +133,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T21:51:09.725Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-03-19T21:51:39.218Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None
