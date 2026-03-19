@@ -367,6 +367,65 @@ def hotkey(*keys: str, dry_run: bool = False) -> None:
     _hsleep(random.uniform(0.05, 0.1))
 
 
+# ---------------------------------------------------------------------------
+# Prompt-user blocking mechanism
+# ---------------------------------------------------------------------------
+
+_prompt_response_event = threading.Event()
+_prompt_response_text: str = ""
+
+
+def prompt_user_blocking(
+    question_text: str,
+    screenshot_path: str | None = None,
+    dry_run: bool = False,
+) -> str:
+    """Pause routine execution and wait for user/agent response via API.
+
+    During replay, this blocks the executor thread until respond_to_prompt()
+    is called (triggered by POST /respond endpoint).
+
+    Args:
+        question_text: The question to surface to the user/agent.
+        screenshot_path: Optional screenshot path to include with the prompt.
+        dry_run: If True, return empty string without blocking.
+
+    Returns:
+        The user/agent response text.
+    """
+    global _prompt_response_text
+    logger.info("prompt_user_blocking: %s", question_text[:80])
+    if dry_run:
+        logger.info("prompt_user dry-run: would block waiting for /respond")
+        return ""
+
+    # Clear any previous response
+    _prompt_response_event.clear()
+    _prompt_response_text = ""
+
+    # Block until respond_to_prompt is called
+    logger.info("Routine paused. Waiting for API /respond...")
+    _prompt_response_event.wait()
+
+    response = _prompt_response_text
+    logger.info("Prompt response received: %s", response[:80])
+    return response
+
+
+def respond_to_prompt(response_text: str) -> None:
+    """Unblock a waiting prompt_user step with the given response.
+
+    Called by the API /respond endpoint handler.
+
+    Args:
+        response_text: The user/agent response text.
+    """
+    global _prompt_response_text
+    _prompt_response_text = response_text
+    _prompt_response_event.set()
+    logger.info("Prompt responded: %s", response_text[:80])
+
+
 def select_all_extract(dry_run: bool = False) -> str:
     """Select all text and extract via clipboard, with VLM fallback.
 

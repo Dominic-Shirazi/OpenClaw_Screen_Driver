@@ -383,16 +383,100 @@ class RecordSession:
         logger.info("Look Here: waiting for region drag")
 
     def _handle_add_wait(self) -> None:
-        """Create a wait step -- stub, implemented in Plan 04."""
-        logger.info("Add Wait: not yet implemented (Plan 04)")
+        """Open wait condition mini-dialog from toolbar."""
+        if self._phase != RecordPhase.AWAITING_CLICK:
+            return
+        self._set_phase(RecordPhase.WAIT_CONFIGURING)
+
+        dialog = self._controller.show_wait_dialog()
+        if dialog is not None:
+            dialog.confirmed.connect(self._on_wait_configured)
+            dialog.dismissed.connect(self._on_wait_dismissed)
+        logger.info("Add Wait: showing configuration dialog")
+
+    def _on_wait_configured(self, config: dict) -> None:
+        """Handle wait dialog confirmation -- create wait step.
+
+        Args:
+            config: Wait configuration dict from WaitDialog.
+        """
+        self._controller.hide_wait_dialog()
+        self._current_step = {
+            "click_x": 0, "click_y": 0,
+            "is_drag": False, "is_wait": True,
+            "tag_data": {
+                "action": "wait",
+                "element_type": "unknown",
+                "label": f"Wait: {config.get('condition_type', 'timer')}",
+                "caption": f"Timeout: {config.get('timeout', 30)}s",
+                "confidence": 1.0,
+            },
+            "wait_definition": config,
+            "bbox": (0, 0, 0, 0),
+            "dry_run_passed": True,
+        }
+        self._current_bbox = (0, 0, 0, 0)
+        self._steps.append(self._current_step)
+        logger.info("Wait step added: %s", config)
+        self._current_step = None
+        self._set_phase(RecordPhase.SUCCESS_FLASH)
+        QTimer.singleShot(500, self._loop_back_to_awaiting)
+
+    def _on_wait_dismissed(self) -> None:
+        """Handle wait dialog cancellation."""
+        self._controller.hide_wait_dialog()
+        self._set_phase(RecordPhase.AWAITING_CLICK)
+        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
     def _handle_add_loop(self) -> None:
         """Create a loop step -- stub, implemented in Plan 05."""
         logger.info("Add Loop: not yet implemented (Plan 05)")
 
     def _handle_add_prompt(self) -> None:
-        """Create a prompt_user step -- stub, implemented in Plan 04."""
-        logger.info("Add Prompt: not yet implemented (Plan 04)")
+        """Open prompt question mini-dialog from toolbar."""
+        if self._phase != RecordPhase.AWAITING_CLICK:
+            return
+        self._set_phase(RecordPhase.PROMPT_CONFIGURING)
+
+        dialog = self._controller.show_prompt_dialog()
+        if dialog is not None:
+            dialog.confirmed.connect(self._on_prompt_configured)
+            dialog.dismissed.connect(self._on_prompt_dismissed)
+        logger.info("Add Prompt: showing question dialog")
+
+    def _on_prompt_configured(self, config: dict) -> None:
+        """Handle prompt dialog confirmation -- create prompt_user step.
+
+        Args:
+            config: Config dict with question_text from PromptDialog.
+        """
+        self._controller.hide_prompt_dialog()
+        question = config.get("question_text", "")
+        self._current_step = {
+            "click_x": 0, "click_y": 0,
+            "is_drag": False,
+            "tag_data": {
+                "action": "prompt_user",
+                "element_type": "unknown",
+                "label": "Prompt User",
+                "caption": question[:50],
+                "confidence": 1.0,
+                "question_text": question,
+            },
+            "bbox": (0, 0, 0, 0),
+            "dry_run_passed": True,
+        }
+        self._steps.append(self._current_step)
+        logger.info("Prompt user step added: %s", question[:50])
+        self._current_step = None
+        self._set_phase(RecordPhase.SUCCESS_FLASH)
+        QTimer.singleShot(500, self._loop_back_to_awaiting)
+
+    def _on_prompt_dismissed(self) -> None:
+        """Handle prompt dialog cancellation."""
+        self._controller.hide_prompt_dialog()
+        self._set_phase(RecordPhase.AWAITING_CLICK)
+        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
     def _run_capture_pipeline_for_region(
         self, x: int, y: int, w: int, h: int,
@@ -1025,11 +1109,19 @@ class RecordSession:
                     from core.executor import select_all_extract
 
                     select_all_extract()
-                case "wait" | "loop" | "prompt_user":
+                case "wait" | "loop":
                     logger.info(
                         "Dry-run %s: skipped (no dry-run for flow actions)",
                         action,
                     )
+                case "prompt_user":
+                    from core.executor import prompt_user_blocking
+
+                    prompt_user_blocking(
+                        tag_data.get("question_text", ""),
+                        dry_run=True,
+                    )
+                    logger.info("Dry-run prompt_user: would pause and wait for /respond")
                 case _:
                     logger.warning(
                         "Unknown action type for dry-run: %s", action,

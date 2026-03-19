@@ -116,6 +116,7 @@ class OverlayView(QGraphicsView):
         self._flash_timer: QTimer | None = None
         self._flash_bbox_rect: QGraphicsRectItem | None = None
         self._card_glow_pulsing: bool = False
+        self._mini_dialog: Any = None  # WaitDialog or PromptDialog
 
         # ---- Mouse tracking ----
         self.setMouseTracking(True)
@@ -529,6 +530,35 @@ class OverlayView(QGraphicsView):
         """Hide the abort confirmation panel."""
         if self._abort_panel is not None:
             self._abort_panel.hide_panel()
+
+    def show_mini_dialog(self, dialog_cls: type) -> Any:
+        """Create and display a mini-dialog (WaitDialog or PromptDialog).
+
+        Args:
+            dialog_cls: The dialog class to instantiate.
+
+        Returns:
+            The dialog instance for signal connection.
+        """
+        self.hide_mini_dialog("")
+        dialog = dialog_cls(self._clock, self._screen_w, self._screen_h)
+        self.scene().addItem(dialog)
+        dialog.setPos(
+            self._screen_w / 2 - dialog._width / 2,
+            self._screen_h / 2 - dialog._height / 2,
+        )
+        self._mini_dialog = dialog
+        return dialog
+
+    def hide_mini_dialog(self, kind: str) -> None:
+        """Remove the current mini-dialog from the scene.
+
+        Args:
+            kind: Dialog kind hint (unused -- only one at a time).
+        """
+        if self._mini_dialog is not None:
+            self.scene().removeItem(self._mini_dialog)
+            self._mini_dialog = None
 
     def flash_success(self, bbox_rect: QRectF) -> None:
         """Show a 500ms green flash on the given bbox rect, then auto-clear.

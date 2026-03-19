@@ -318,6 +318,40 @@ class OverlayController:
         if self._view is not None:
             self._view.hide_abort_confirm()
 
+    def show_wait_dialog(self) -> Any:
+        """Create and show the wait condition configuration dialog.
+
+        Returns:
+            The WaitDialog instance for signal connection, or None.
+        """
+        if self._view is not None:
+            from recorder.overlay.mini_dialogs import WaitDialog
+
+            return self._view.show_mini_dialog(WaitDialog)
+        return None
+
+    def hide_wait_dialog(self) -> None:
+        """Remove the wait dialog from the scene."""
+        if self._view is not None:
+            self._view.hide_mini_dialog("wait")
+
+    def show_prompt_dialog(self) -> Any:
+        """Create and show the prompt question dialog.
+
+        Returns:
+            The PromptDialog instance for signal connection, or None.
+        """
+        if self._view is not None:
+            from recorder.overlay.mini_dialogs import PromptDialog
+
+            return self._view.show_mini_dialog(PromptDialog)
+        return None
+
+    def hide_prompt_dialog(self) -> None:
+        """Remove the prompt dialog from the scene."""
+        if self._view is not None:
+            self._view.hide_mini_dialog("prompt")
+
     def flash_success(self, bbox_rect: QRectF) -> None:
         """Show a brief green flash on the given bbox rect.
 
