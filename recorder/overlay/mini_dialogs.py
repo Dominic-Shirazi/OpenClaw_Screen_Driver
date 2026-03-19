@@ -1,8 +1,9 @@
-"""Mini-dialog panels for Wait and Prompt toolbar actions.
+"""Mini-dialog panels for Wait, Prompt, and Loop toolbar actions.
 
 Lightweight frosted-glass QGraphicsObject dialogs for configuring wait
-conditions and prompt-user questions during recording.  Follows the same
-visual language as TagDialogPanel (frosted glass, card glow, proxy widgets).
+conditions, prompt-user questions, and loop definitions during recording.
+Follows the same visual language as TagDialogPanel (frosted glass, card
+glow, proxy widgets).
 """
 from __future__ import annotations
 
@@ -498,4 +499,332 @@ class PromptDialog(QGraphicsObject):
     def _on_cancel(self) -> None:
         """Emit dismissed signal."""
         logger.info("Prompt dialog cancelled")
+        self.dismissed.emit()
+
+
+# ============================================================================
+# LoopDialog
+# ============================================================================
+
+# Exit condition display labels -> internal type strings
+_LOOP_CONDITION_MAP: dict[str, str] = {
+    "N Iterations": "n_iterations",
+    "Element Appears": "element_appears",
+    "Text Matches": "text_matches",
+    "Prompt User": "prompt_user",
+}
+
+
+class LoopDialog(QGraphicsObject):
+    """Mini-dialog for defining a loop step during recording.
+
+    Presents a step range selector (from/to dropdowns) populated with
+    previously recorded steps, and an exit condition section with four
+    condition types.  Emits ``confirmed(dict)`` with the loop config
+    or ``dismissed()`` on cancel.
+    """
+
+    confirmed = pyqtSignal(dict)
+    dismissed = pyqtSignal()
+
+    # Class-level for testability
+    CONDITION_MAP = _LOOP_CONDITION_MAP
+
+    def __init__(
+        self,
+        clock: AnimationClock,
+        steps: list[dict[str, Any]],
+        screen_w: int,
+        screen_h: int,
+        parent: QGraphicsObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._clock = clock
+        self._steps = steps
+        self._screen_w = screen_w
+        self._screen_h = screen_h
+        self._width: float = 380.0
+        self._height: float = 300.0
+        self._glow_phase: float = 0.0
+
+        self.setZValue(Z_TAG_DIALOG)
+
+        pad = SPACING.md
+        field_w = self._width - 2 * pad
+        y_cursor = pad
+
+        # Title
+        title_lbl = _make_label("Define Loop")
+        title_lbl.setStyleSheet(
+            f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
+            f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
+            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 400; "
+            f"background: transparent;"
+        )
+        _make_proxy(title_lbl, self, pad, y_cursor, field_w)
+        y_cursor += 22
+
+        # ---- Section 1: Step Range Selector ----
+        _make_proxy(_make_label("From step"), self, pad, y_cursor, field_w / 2 - 4)
+        _make_proxy(
+            _make_label("To step"), self, pad + field_w / 2 + 4, y_cursor,
+            field_w / 2 - 4,
+        )
+        y_cursor += 18
+
+        step_labels = [
+            f"{i + 1}. {s.get('tag_data', {}).get('label', f'Step {i + 1}')}"
+            for i, s in enumerate(steps)
+        ]
+
+        half_w = field_w / 2 - 4
+
+        self._from_combo = QComboBox()
+        self._from_combo.setStyleSheet(FIELD_STYLESHEET)
+        for lbl in step_labels:
+            self._from_combo.addItem(lbl)
+        _make_proxy(self._from_combo, self, pad, y_cursor, half_w)
+
+        self._to_combo = QComboBox()
+        self._to_combo.setStyleSheet(FIELD_STYLESHEET)
+        for lbl in step_labels:
+            self._to_combo.addItem(lbl)
+        if step_labels:
+            self._to_combo.setCurrentIndex(len(step_labels) - 1)
+        _make_proxy(self._to_combo, self, pad + half_w + 8, y_cursor, half_w)
+        y_cursor += 30
+
+        # ---- Section 2: Exit Condition ----
+        _make_proxy(_make_label("Exit condition"), self, pad, y_cursor, field_w)
+        y_cursor += 18
+
+        self._condition_combo = QComboBox()
+        self._condition_combo.setStyleSheet(FIELD_STYLESHEET)
+        for display_text in _LOOP_CONDITION_MAP:
+            self._condition_combo.addItem(display_text)
+        _make_proxy(self._condition_combo, self, pad, y_cursor, field_w)
+        self._condition_combo.currentTextChanged.connect(self._on_condition_changed)
+        y_cursor += 30
+
+        # Primary param field (count / description / target text / question)
+        self._param_label = _make_label("Count")
+        self._param_label_proxy = _make_proxy(
+            self._param_label, self, pad, y_cursor, field_w,
+        )
+        y_cursor += 18
+        self._param_input = QLineEdit("5")
+        self._param_input.setStyleSheet(FIELD_STYLESHEET)
+        self._param_proxy = _make_proxy(
+            self._param_input, self, pad, y_cursor, field_w,
+        )
+        y_cursor += 30
+
+        # Max iterations field (hidden for N Iterations)
+        self._max_label = _make_label("Max iterations (safety limit)")
+        self._max_label_proxy = _make_proxy(
+            self._max_label, self, pad, y_cursor, field_w,
+        )
+        y_cursor += 18
+        self._max_input = QLineEdit("20")
+        self._max_input.setStyleSheet(FIELD_STYLESHEET)
+        self._max_proxy = _make_proxy(
+            self._max_input, self, pad, y_cursor, field_w,
+        )
+        y_cursor += 30
+
+        # Apply initial condition state (N Iterations hides max)
+        self._on_condition_changed(self._condition_combo.currentText())
+
+        # Buttons
+        btn_w = (field_w - SPACING.sm) / 2
+
+        self._confirm_btn = QPushButton("Confirm")
+        self._confirm_btn.setStyleSheet(_CONFIRM_BTN_STYLE)
+        self._confirm_btn.clicked.connect(self._on_confirm)
+        _make_proxy(self._confirm_btn, self, pad, y_cursor, btn_w)
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setStyleSheet(_DISMISS_BTN_STYLE)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        _make_proxy(
+            self._cancel_btn, self, pad + btn_w + SPACING.sm, y_cursor, btn_w,
+        )
+
+        # Register for glow animation
+        self._clock.register(self._tick)
+
+    def boundingRect(self) -> QRectF:
+        """Return bounding rectangle with glow margin.
+
+        Returns:
+            Bounding rect including glow overshoot.
+        """
+        margin = 50.0
+        return QRectF(
+            -margin, -margin,
+            self._width + 2 * margin,
+            self._height + 2 * margin,
+        )
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        """Paint frosted glass background with card glow.
+
+        Args:
+            painter: The QPainter to draw with.
+            option: Style options (unused).
+            widget: Target widget (unused).
+        """
+        card = QRectF(0, 0, self._width, self._height)
+
+        # Card glow
+        outer = self.boundingRect()
+        clip = QPainterPath()
+        clip.addRect(outer)
+        inner = QPainterPath()
+        inner.addRoundedRect(card, CORNER_RADIUS, CORNER_RADIUS)
+        clip = clip - inner
+        painter.setClipPath(clip)
+        paint_card_glow(painter, card, brightness=0.7, phase=self._glow_phase)
+        painter.setClipping(False)
+
+        # Frosted glass body
+        path = QPainterPath()
+        path.addRoundedRect(card, CORNER_RADIUS, CORNER_RADIUS)
+        painter.fillPath(path, FROST_BG)
+
+        # Top highlight
+        painter.setPen(Qt.PenStyle.NoPen)
+        highlight = QRectF(2, 2, self._width - 4, 6)
+        painter.setBrush(HIGHLIGHT_TOP)
+        painter.drawRoundedRect(highlight, 3, 3)
+
+    def _tick(self, dt: float) -> None:
+        """Advance glow phase animation.
+
+        Args:
+            dt: Time delta in seconds.
+        """
+        self._glow_phase += dt * 0.5
+        self.update()
+
+    def _on_condition_changed(self, text: str) -> None:
+        """Show/hide fields based on exit condition type selection.
+
+        Args:
+            text: Display text from the condition combo box.
+        """
+        ctype = _LOOP_CONDITION_MAP.get(text, "n_iterations")
+
+        if ctype == "n_iterations":
+            self._param_label.setText("Count")
+            self._param_input.setText("5")
+            self._param_label_proxy.setVisible(True)
+            self._param_proxy.setVisible(True)
+            self._max_label_proxy.setVisible(False)
+            self._max_proxy.setVisible(False)
+        elif ctype == "element_appears":
+            self._param_label.setText("Element description")
+            self._param_input.setText("")
+            self._param_label_proxy.setVisible(True)
+            self._param_proxy.setVisible(True)
+            self._max_label_proxy.setVisible(True)
+            self._max_proxy.setVisible(True)
+            self._max_input.setText("20")
+        elif ctype == "text_matches":
+            self._param_label.setText("Target text")
+            self._param_input.setText("")
+            self._param_label_proxy.setVisible(True)
+            self._param_proxy.setVisible(True)
+            self._max_label_proxy.setVisible(True)
+            self._max_proxy.setVisible(True)
+            self._max_input.setText("20")
+        elif ctype == "prompt_user":
+            self._param_label.setText("Question")
+            self._param_input.setText("")
+            self._param_label_proxy.setVisible(True)
+            self._param_proxy.setVisible(True)
+            self._max_label_proxy.setVisible(True)
+            self._max_proxy.setVisible(True)
+            self._max_input.setText("10")
+
+    def _on_confirm(self) -> None:
+        """Validate inputs and emit confirmed signal with loop config dict."""
+        # Validate step range
+        start_idx = self._from_combo.currentIndex()
+        end_idx = self._to_combo.currentIndex()
+
+        if not self._steps:
+            logger.warning("Loop dialog: no steps to loop over")
+            return
+
+        if start_idx > end_idx:
+            logger.warning(
+                "Loop dialog: invalid range (%d > %d)", start_idx, end_idx,
+            )
+            return
+
+        display_text = self._condition_combo.currentText()
+        ctype = _LOOP_CONDITION_MAP.get(display_text, "n_iterations")
+
+        exit_condition: dict[str, Any] = {"type": ctype}
+
+        if ctype == "n_iterations":
+            try:
+                count = int(self._param_input.text())
+                if count <= 0:
+                    raise ValueError("Count must be positive")
+            except (ValueError, TypeError):
+                logger.warning("Loop dialog: invalid count: %s", self._param_input.text())
+                return
+            exit_condition["count"] = count
+        elif ctype == "element_appears":
+            exit_condition["element_description"] = self._param_input.text()
+            try:
+                max_iter = int(self._max_input.text())
+                if max_iter <= 0:
+                    raise ValueError("Max iterations must be positive")
+            except (ValueError, TypeError):
+                logger.warning("Loop dialog: invalid max_iterations")
+                return
+            exit_condition["max_iterations"] = max_iter
+        elif ctype == "text_matches":
+            exit_condition["target_text"] = self._param_input.text()
+            try:
+                max_iter = int(self._max_input.text())
+                if max_iter <= 0:
+                    raise ValueError("Max iterations must be positive")
+            except (ValueError, TypeError):
+                logger.warning("Loop dialog: invalid max_iterations")
+                return
+            exit_condition["max_iterations"] = max_iter
+        elif ctype == "prompt_user":
+            exit_condition["question_text"] = self._param_input.text()
+            try:
+                max_iter = int(self._max_input.text())
+                if max_iter <= 0:
+                    raise ValueError("Max iterations must be positive")
+            except (ValueError, TypeError):
+                logger.warning("Loop dialog: invalid max_iterations")
+                return
+            exit_condition["max_iterations"] = max_iter
+
+        config = {
+            "body_step_range": (start_idx, end_idx),
+            "exit_condition": exit_condition,
+        }
+
+        logger.info(
+            "Loop dialog confirmed: steps %d-%d, exit=%s",
+            start_idx + 1, end_idx + 1, ctype,
+        )
+        self.confirmed.emit(config)
+
+    def _on_cancel(self) -> None:
+        """Emit dismissed signal."""
+        logger.info("Loop dialog cancelled")
         self.dismissed.emit()

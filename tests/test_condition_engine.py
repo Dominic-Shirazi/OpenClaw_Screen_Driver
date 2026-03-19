@@ -239,6 +239,28 @@ class TestPromptDialogSignals:
         assert hasattr(PromptDialog, "dismissed")
 
 
+class TestLoopDialogSignals:
+    """LoopDialog has confirmed and dismissed signal attributes."""
+
+    def test_loop_dialog_signals(self) -> None:
+        from recorder.overlay.mini_dialogs import LoopDialog
+
+        assert hasattr(LoopDialog, "confirmed")
+        assert hasattr(LoopDialog, "dismissed")
+
+    def test_loop_dialog_condition_types(self) -> None:
+        """LoopDialog maps combo text to correct condition_type strings."""
+        from recorder.overlay.mini_dialogs import LoopDialog
+
+        expected = {
+            "N Iterations": "n_iterations",
+            "Element Appears": "element_appears",
+            "Text Matches": "text_matches",
+            "Prompt User": "prompt_user",
+        }
+        assert LoopDialog.CONDITION_MAP == expected
+
+
 # ---------------------------------------------------------------------------
 # Wait step format test
 # ---------------------------------------------------------------------------
