@@ -80,6 +80,30 @@ def _compute_region_hint(cx: int, cy: int, screen_w: int, screen_h: int) -> str:
     return f"{v}_{h}"
 
 
+def _parse_direction_amount(raw: str) -> dict[str, Any]:
+    """Parse a direction+amount string into a structured scroll dict.
+
+    Accepts strings like ``"down 5"``, ``"left 10"``, ``"up 3 pages"``.
+
+    Args:
+        raw: Raw direction/amount string from tag dialog.
+
+    Returns:
+        Dict with ``direction`` (str), ``amount`` (int), and ``unit`` (str).
+        Defaults: direction='down', amount=3, unit='lines'.
+    """
+    parts = raw.strip().split() if raw and raw.strip() else []
+    direction = parts[0] if len(parts) >= 1 else "down"
+    try:
+        amount = int(parts[1]) if len(parts) >= 2 else 3
+    except (ValueError, IndexError):
+        amount = 3
+    unit = parts[2] if len(parts) >= 3 else "lines"
+    if unit not in ("lines", "pages", "pixels"):
+        unit = "lines"
+    return {"direction": direction, "amount": amount, "unit": unit}
+
+
 def build_v1_step(
     step: dict[str, Any],
     index: int,
@@ -118,14 +142,16 @@ def build_v1_step(
         "region_hint": region,
     }
 
-    return {
+    action = tag_data.get("action", "click")
+
+    result = {
         "step_index": index,
         "node_id": node_id,
         "element_type": tag_data.get("element_type", "unknown"),
         "label": tag_data.get("label", ""),
         "caption": tag_data.get("caption", ""),
         "confidence": tag_data.get("confidence", 0.0),
-        "action": tag_data.get("action", "click"),
+        "action": action,
         "bbox": {"x": bbox_x, "y": bbox_y, "w": bbox_w, "h": bbox_h},
         "bbox_pct": {
             "x_pct": bbox_x / screen_w if screen_w > 0 else 0.0,
@@ -139,6 +165,17 @@ def build_v1_step(
         "embedding_path": f"embeddings/{node_id}.npy",
         "dry_run_passed": True,
     }
+
+    # Action-specific fields
+    if action == "type":
+        result["text_to_type"] = tag_data.get("text_to_type", "")
+        result["press_enter"] = tag_data.get("press_enter", False)
+    elif action == "scroll":
+        result["scroll"] = _parse_direction_amount(
+            tag_data.get("direction_amount", "down 3")
+        )
+
+    return result
 
 
 @dataclass

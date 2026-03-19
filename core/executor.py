@@ -337,6 +337,20 @@ def scroll(
     _hsleep(random.uniform(0.08, 0.15))
 
 
+def press_enter(dry_run: bool = False) -> None:
+    """Press the Enter key with human-like timing.
+
+    Args:
+        dry_run: Log the action without executing.
+    """
+    logger.debug("press_enter()")
+    if dry_run:
+        return
+    with _lock:
+        pyautogui.press("enter")
+    _hsleep(random.uniform(0.05, 0.1))
+
+
 def hotkey(*keys: str, dry_run: bool = False) -> None:
     """Presses a keyboard shortcut with small inter-key pauses.
 
