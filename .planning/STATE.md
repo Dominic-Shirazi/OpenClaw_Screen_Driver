@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-03-18T23:45:06.277Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-19T00:29:25.280Z"
 last_activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
 progress:
   total_phases: 10
   completed_phases: 4
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 15
+  completed_plans: 14
 ---
 
 ---
@@ -76,6 +76,7 @@ Progress: [██████████] 100% (13 of 13 plans)
 | Phase 04 P02 | 10min | 2 tasks | 4 files |
 | Phase 04 P03 | 5min | 2 tasks | 4 files |
 | Phase 04 P04 | 6min | 2 tasks | 4 files |
+| Phase 05 P01 | 3min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Steps stored only after dry-run validation "yes", not on tag confirm
 - [Phase 04]: Session completion callback (set_on_complete) decouples RecordSession from Qt app lifecycle
 - [Phase 04]: Routine JSON uses ocsd-routine-v0 schema with steps, graph, and resolution metadata
+- [Phase 05]: Checksum covers steps+graph only (not mutable metadata) for stable routine identity
 
 ### Pending Todos
 
@@ -137,6 +139,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18T23:45:06.274Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-routine-file-format/05-CONTEXT.md
+Last session: 2026-03-19T00:29:25.276Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
