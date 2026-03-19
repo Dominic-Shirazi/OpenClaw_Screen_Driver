@@ -61,7 +61,10 @@ def _compute_region_hint(x: int, y: int, screen_w: int, screen_h: int) -> str:
 
 
 def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
-    """Convert internal step dict to routine.json step format.
+    """Convert internal step dict to routine.json v1 step format.
+
+    Delegates to :func:`routine.format.build_v1_step` for the actual
+    step construction, ensuring consistency with the ocsd-routine-v1 schema.
 
     Args:
         step: Internal step dictionary with tag_data and bbox.
@@ -70,34 +73,12 @@ def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
         screen_h: Screen height for percentage calculations.
 
     Returns:
-        JSON-serializable step dictionary.
+        JSON-serializable step dictionary matching ocsd-routine-v1 schema.
     """
-    tag_data = step.get("tag_data", {})
-    bbox = step.get("bbox")
-    bbox_x, bbox_y, bbox_w, bbox_h = bbox if bbox else (0, 0, 0, 0)
+    from routine.format import build_v1_step
 
-    return {
-        "step_index": index,
-        "node_id": step.get("node_id", str(uuid4())),
-        "element_type": tag_data.get("element_type", "unknown"),
-        "label": tag_data.get("label", ""),
-        "caption": tag_data.get("caption", ""),
-        "action": tag_data.get("action", "click"),
-        "bbox": {"x": bbox_x, "y": bbox_y, "w": bbox_w, "h": bbox_h},
-        "bbox_pct": {
-            "x_pct": bbox_x / screen_w if screen_w > 0 else 0.0,
-            "y_pct": bbox_y / screen_h if screen_h > 0 else 0.0,
-            "w_pct": bbox_w / screen_w if screen_w > 0 else 0.0,
-            "h_pct": bbox_h / screen_h if screen_h > 0 else 0.0,
-        },
-        "region_hint": _compute_region_hint(
-            bbox_x + bbox_w // 2, bbox_y + bbox_h // 2, screen_w, screen_h,
-        ),
-        "snippet_path": f"snippets/step_{index:02d}.png",
-        "embedding_path": f"embeddings/step_{index:02d}.npy",
-        "confidence": tag_data.get("confidence", 0.0),
-        "dry_run_passed": True,
-    }
+    node_id = step.get("node_id", str(uuid4()))
+    return build_v1_step(step, index, node_id, screen_w, screen_h)
 
 
 class RecordSession:
@@ -1012,25 +993,45 @@ class RecordSession:
                 save_dir, node_ids, screen_w, screen_h,
             )
 
-            # Build routine.json
-            routine_data = {
-                "$schema": "ocsd-routine-v0",
-                "name": self._routine_name,
-                "description": f"Recorded routine: {self._routine_name}",
-                "start_from": self._start_from,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "resolution": [screen_w, screen_h],
-                "steps": [
+            # Build and save routine using v1 Routine model
+            from routine.format import Routine
+
+            routine = Routine(
+                name=self._routine_name,
+                description=f"Recorded routine: {self._routine_name}",
+                start_from=self._start_from,
+                resolution=[screen_w, screen_h],
+                steps=[
                     _step_to_json(s, i, screen_w, screen_h)
                     for i, s in enumerate(self._steps)
                 ],
-                "graph": graph.to_dict(),
-            }
+                graph=graph,
+            )
 
-            routine_path = save_dir / "routine.json"
-            with open(routine_path, "w", encoding="utf-8") as f:
-                json.dump(routine_data, f, indent=2, ensure_ascii=False)
+            # Auto-detect theme from screenshot luminance
+            if self._screenshot is not None:
+                try:
+                    import cv2
 
+                    gray = cv2.cvtColor(self._screenshot, cv2.COLOR_BGR2GRAY)
+                    routine.theme = (
+                        "dark" if float(np.mean(gray)) < 128 else "light"
+                    )
+                except Exception:
+                    logger.debug("Could not auto-detect theme")
+
+            # Auto-detect foreground program
+            try:
+                if __import__("sys").platform == "win32":
+                    from core.capture import get_window_title
+
+                    title = get_window_title()
+                    if title:
+                        routine.programs = [title]
+            except Exception:
+                logger.debug("Could not auto-detect foreground program")
+
+            routine.save(save_dir)
             logger.info("Routine saved to %s", save_dir)
             self._bridge.save_complete.emit(str(save_dir))
 
@@ -1086,7 +1087,7 @@ class RecordSession:
                 continue
 
             # Save snippet PNG
-            snippet_path = save_dir / "snippets" / f"step_{i:02d}.png"
+            snippet_path = save_dir / "snippets" / f"{node_id}.png"
             try:
                 import cv2
                 cv2.imwrite(str(snippet_path), crop)
@@ -1094,7 +1095,7 @@ class RecordSession:
                 logger.debug("Could not save snippet %d: %s", i, e)
 
             # Generate CLIP embedding
-            embedding_path = save_dir / "embeddings" / f"step_{i:02d}.npy"
+            embedding_path = save_dir / "embeddings" / f"{node_id}.npy"
             try:
                 import cv2
                 from core.embeddings import generate_embedding
