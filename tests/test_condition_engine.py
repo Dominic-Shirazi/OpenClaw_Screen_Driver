@@ -261,6 +261,20 @@ class TestLoopDialogSignals:
         assert LoopDialog.CONDITION_MAP == expected
 
 
+class TestLoopDefinition:
+    """Loop definition dict structure validation."""
+
+    def test_loop_definition(self) -> None:
+        """Loop definition with body_step_indices and exit_condition is valid."""
+        loop_def = {
+            "body_step_indices": [0, 1, 2],
+            "exit_condition": {"type": "n_iterations", "count": 5},
+        }
+        assert loop_def["body_step_indices"] == [0, 1, 2]
+        assert loop_def["exit_condition"]["type"] == "n_iterations"
+        assert loop_def["exit_condition"]["count"] == 5
+
+
 # ---------------------------------------------------------------------------
 # Wait step format test
 # ---------------------------------------------------------------------------

@@ -429,8 +429,75 @@ class RecordSession:
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
     def _handle_add_loop(self) -> None:
-        """Create a loop step -- stub, implemented in Plan 05."""
-        logger.info("Add Loop: not yet implemented (Plan 05)")
+        """Open loop definition dialog from toolbar."""
+        if self._phase != RecordPhase.AWAITING_CLICK:
+            return
+        if not self._steps:
+            logger.info("Add Loop: no steps recorded yet, nothing to loop")
+            return
+
+        self._set_phase(RecordPhase.LOOP_DEFINING)
+
+        dialog = self._controller.show_loop_dialog(self._steps)
+        if dialog is not None:
+            dialog.confirmed.connect(self._on_loop_configured)
+            dialog.dismissed.connect(self._on_loop_dismissed)
+        logger.info(
+            "Add Loop: showing definition dialog with %d steps",
+            len(self._steps),
+        )
+
+    def _on_loop_configured(self, config: dict) -> None:
+        """Handle loop dialog confirmation -- create loop step.
+
+        Uses node_id references (not step indices) for body steps.
+        This ensures stability across future editing (Phase 8).
+        Indices are stored temporarily and resolved to node_ids at save time.
+
+        Args:
+            config: Loop config dict from LoopDialog.confirmed signal.
+        """
+        self._controller.hide_loop_dialog()
+
+        start_idx, end_idx = config.get("body_step_range", (0, 0))
+
+        # Store step indices temporarily; resolve to node_ids at save time
+        body_step_indices = list(range(start_idx, end_idx + 1))
+
+        exit_condition = config.get("exit_condition", {})
+
+        self._current_step = {
+            "click_x": 0, "click_y": 0,
+            "is_drag": False, "is_loop": True,
+            "tag_data": {
+                "action": "loop",
+                "element_type": "unknown",
+                "label": f"Loop steps {start_idx + 1}-{end_idx + 1}",
+                "caption": f"Until: {exit_condition.get('type', 'n_iterations')}",
+                "confidence": 1.0,
+            },
+            "loop_definition": {
+                "body_step_indices": body_step_indices,
+                "exit_condition": exit_condition,
+            },
+            "bbox": (0, 0, 0, 0),
+            "dry_run_passed": True,  # No loop-level dry-run per user decision
+        }
+        self._steps.append(self._current_step)
+        logger.info(
+            "Loop step added: steps %d-%d, exit=%s",
+            start_idx + 1, end_idx + 1,
+            exit_condition.get("type", "?"),
+        )
+        self._current_step = None
+        self._set_phase(RecordPhase.SUCCESS_FLASH)
+        QTimer.singleShot(500, self._loop_back_to_awaiting)
+
+    def _on_loop_dismissed(self) -> None:
+        """Handle loop dialog cancellation."""
+        self._controller.hide_loop_dialog()
+        self._set_phase(RecordPhase.AWAITING_CLICK)
+        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
     def _handle_add_prompt(self) -> None:
         """Open prompt question mini-dialog from toolbar."""
@@ -1295,7 +1362,7 @@ class RecordSession:
             )
 
             # Build and save routine using v1 Routine model
-            from routine.format import Routine
+            from routine.format import Routine, resolve_loop_node_ids
 
             routine = Routine(
                 name=self._routine_name,
@@ -1308,6 +1375,9 @@ class RecordSession:
                 ],
                 graph=graph,
             )
+
+            # Resolve loop body step indices to stable node_id references
+            resolve_loop_node_ids(routine.steps, node_ids)
 
             # Auto-detect theme from screenshot luminance
             if self._screenshot is not None:

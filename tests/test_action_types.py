@@ -260,17 +260,77 @@ def test_loop_step_format() -> None:
     """build_v1_step with action='loop' and loop_definition produces step with loop field."""
     step = {
         "tag_data": {"action": "loop"},
-        "bbox": (100, 200, 50, 30),
+        "bbox": (0, 0, 0, 0),
         "loop_definition": {
-            "start_step": 0,
-            "end_step": 3,
-            "exit_condition": "n_iterations",
-            "n_iterations": 5,
+            "body_step_indices": [0, 1],
+            "exit_condition": {"type": "n_iterations", "count": 3},
         },
     }
     result = build_v1_step(step, index=0, node_id="node-test", screen_w=1920, screen_h=1080)
     assert result["action"] == "loop"
-    assert result["loop"]["n_iterations"] == 5
+    assert result["loop"]["exit_condition"]["type"] == "n_iterations"
+    assert result["loop"]["exit_condition"]["count"] == 3
+    assert result["loop"]["body_step_indices"] == [0, 1]
+
+
+def test_resolve_loop_node_ids() -> None:
+    """resolve_loop_node_ids converts body_step_indices to body_step_node_ids."""
+    from routine.format import resolve_loop_node_ids
+
+    node_ids = ["node-a", "node-b", "node-c"]
+    steps = [
+        {"action": "click", "node_id": "node-a"},
+        {"action": "click", "node_id": "node-b"},
+        {
+            "action": "loop",
+            "node_id": "node-c",
+            "loop": {
+                "body_step_indices": [0, 1],
+                "exit_condition": {"type": "n_iterations", "count": 3},
+            },
+        },
+    ]
+    resolve_loop_node_ids(steps, node_ids)
+
+    loop_def = steps[2]["loop"]
+    assert "body_step_indices" not in loop_def
+    assert loop_def["body_step_node_ids"] == ["node-a", "node-b"]
+
+
+def test_nested_loop_format() -> None:
+    """Nested loop (loop body containing another loop) serializes correctly."""
+    from routine.format import resolve_loop_node_ids
+
+    node_ids = ["node-a", "node-b", "node-inner-loop", "node-outer-loop"]
+    steps = [
+        {"action": "click", "node_id": "node-a"},
+        {"action": "click", "node_id": "node-b"},
+        {
+            "action": "loop",
+            "node_id": "node-inner-loop",
+            "loop": {
+                "body_step_indices": [0, 1],
+                "exit_condition": {"type": "n_iterations", "count": 2},
+            },
+        },
+        {
+            "action": "loop",
+            "node_id": "node-outer-loop",
+            "loop": {
+                "body_step_indices": [0, 1, 2],
+                "exit_condition": {"type": "element_appears", "element_description": "Done", "max_iterations": 10},
+            },
+        },
+    ]
+    resolve_loop_node_ids(steps, node_ids)
+
+    inner = steps[2]["loop"]
+    assert inner["body_step_node_ids"] == ["node-a", "node-b"]
+
+    outer = steps[3]["loop"]
+    assert outer["body_step_node_ids"] == ["node-a", "node-b", "node-inner-loop"]
+    assert outer["exit_condition"]["type"] == "element_appears"
+    assert outer["exit_condition"]["max_iterations"] == 10
 
 
 # ---------------------------------------------------------------------------

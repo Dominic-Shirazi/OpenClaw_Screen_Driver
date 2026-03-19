@@ -195,6 +195,33 @@ def build_v1_step(
     return result
 
 
+def resolve_loop_node_ids(
+    steps: list[dict[str, Any]],
+    node_ids: list[str],
+) -> None:
+    """Resolve loop body step indices to node_ids in-place.
+
+    Must be called after all steps have been assigned node_ids,
+    before saving to routine.json.  Converts ``body_step_indices``
+    (temporary integer list) into ``body_step_node_ids`` (stable
+    string references) for each loop step.
+
+    Args:
+        steps: List of v1 step dicts (already built by build_v1_step).
+        node_ids: Ordered list of node_ids corresponding to step indices.
+    """
+    for step in steps:
+        if step.get("action") != "loop":
+            continue
+        loop_def = step.get("loop")
+        if loop_def is None:
+            continue
+        indices = loop_def.pop("body_step_indices", [])
+        loop_def["body_step_node_ids"] = [
+            node_ids[i] for i in indices if i < len(node_ids)
+        ]
+
+
 @dataclass
 class Routine:
     """Routine model following the ocsd-routine-v1 schema.

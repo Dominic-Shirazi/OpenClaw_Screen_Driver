@@ -352,6 +352,38 @@ class OverlayController:
         if self._view is not None:
             self._view.hide_mini_dialog("prompt")
 
+    def show_loop_dialog(self, steps: list[dict[str, Any]]) -> Any:
+        """Create and show the loop definition dialog.
+
+        Args:
+            steps: List of recorded step dicts to populate the range selector.
+
+        Returns:
+            The LoopDialog instance for signal connection, or None.
+        """
+        if self._view is not None:
+            from recorder.overlay.mini_dialogs import LoopDialog
+
+            # LoopDialog needs extra 'steps' arg, so instantiate directly
+            self._view.hide_mini_dialog("")
+            dialog = LoopDialog(
+                self._view._clock, steps,
+                self._view._screen_w, self._view._screen_h,
+            )
+            self._view.scene().addItem(dialog)
+            dialog.setPos(
+                self._view._screen_w / 2 - dialog._width / 2,
+                self._view._screen_h / 2 - dialog._height / 2,
+            )
+            self._view._mini_dialog = dialog
+            return dialog
+        return None
+
+    def hide_loop_dialog(self) -> None:
+        """Remove the loop dialog from the scene."""
+        if self._view is not None:
+            self._view.hide_mini_dialog("loop")
+
     def flash_success(self, bbox_rect: QRectF) -> None:
         """Show a brief green flash on the given bbox rect.
 
