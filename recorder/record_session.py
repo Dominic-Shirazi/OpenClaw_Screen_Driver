@@ -120,6 +120,7 @@ class RecordSession:
         self._original_drag_rect: tuple[int, int, int, int] | None = None
         self._screenshot: np.ndarray | None = None
         self._is_drag_capture: bool = False
+        self._is_look_here: bool = False
         self._click_x: int = 0
         self._click_y: int = 0
         self._on_session_complete: Callable[[bool], None] | None = None
@@ -180,6 +181,28 @@ class RecordSession:
             w: Width of selection (0 for clicks).
             h: Height of selection (0 for clicks).
         """
+        if self._phase == RecordPhase.AWAITING_REGION_DRAG:
+            # "Look Here" region drag -- skip detection, go straight to VLM
+            if w <= 0 or h <= 0:
+                logger.info("Look Here requires drag, not click -- ignoring")
+                return
+            self._is_drag_capture = True
+            self._is_look_here = True
+            self._current_step = {
+                "click_x": x, "click_y": y,
+                "is_drag": True, "is_look_here": True,
+            }
+            self._original_drag_rect = (x, y, w, h)
+            self._current_bbox = (x, y, w, h)
+            # Skip detection, go directly to VLM (Look Here doesn't need AI bbox)
+            self._run_capture_pipeline_for_region(x, y, w, h)
+            return
+
+        if self._phase == RecordPhase.AWAITING_DRAG_TARGET:
+            # Second click/drag for click_drag target
+            self._handle_drag_target_selection(x, y, w, h)
+            return
+
         if self._phase != RecordPhase.AWAITING_CLICK:
             logger.debug(
                 "Ignoring selection in phase %s (gate: AWAITING_CLICK only)",
@@ -238,6 +261,14 @@ class RecordSession:
             logger.info("Pause requested")
         elif action == "undo_last":
             self._handle_undo_last()
+        elif action == "look_here":
+            self._handle_look_here()
+        elif action == "add_wait":
+            self._handle_add_wait()
+        elif action == "add_loop":
+            self._handle_add_loop()
+        elif action == "add_prompt":
+            self._handle_add_prompt()
         else:
             logger.debug("Unhandled toolbar action: %s", action)
 
@@ -264,10 +295,22 @@ class RecordSession:
         self._controller.dismiss_tag_dialog()
 
         logger.info(
-            "Tag confirmed: label=%s, type=%s -- starting countdown",
+            "Tag confirmed: label=%s, type=%s, action=%s",
             data.get("label", "?"),
             data.get("element_type", "?"),
+            data.get("action", "click"),
         )
+
+        # click_drag needs a second bbox capture for the drag target
+        action = data.get("action", "click")
+        if action == "click_drag":
+            self._set_phase(RecordPhase.AWAITING_DRAG_TARGET)
+            self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
+            logger.info("click_drag: awaiting drag target click")
+            return
+
+        # Reset look_here flag after tag confirm
+        self._is_look_here = False
 
         # Transition to COUNTDOWN
         self._set_phase(RecordPhase.COUNTDOWN)
@@ -324,6 +367,116 @@ class RecordSession:
             self._controller.close()
             if self._on_session_complete is not None:
                 self._on_session_complete(False)
+
+    # ------------------------------------------------------------------
+    # Private: toolbar quick-add handlers
+    # ------------------------------------------------------------------
+
+    def _handle_look_here(self) -> None:
+        """Enter region-drag mode for observation actions (read, snip_and_search)."""
+        if self._phase != RecordPhase.AWAITING_CLICK:
+            logger.debug("Look Here only available in AWAITING_CLICK")
+            return
+        self._set_phase(RecordPhase.AWAITING_REGION_DRAG)
+        if hasattr(self._controller, "set_cursor_crosshair"):
+            self._controller.set_cursor_crosshair()
+        logger.info("Look Here: waiting for region drag")
+
+    def _handle_add_wait(self) -> None:
+        """Create a wait step -- stub, implemented in Plan 04."""
+        logger.info("Add Wait: not yet implemented (Plan 04)")
+
+    def _handle_add_loop(self) -> None:
+        """Create a loop step -- stub, implemented in Plan 05."""
+        logger.info("Add Loop: not yet implemented (Plan 05)")
+
+    def _handle_add_prompt(self) -> None:
+        """Create a prompt_user step -- stub, implemented in Plan 04."""
+        logger.info("Add Prompt: not yet implemented (Plan 04)")
+
+    def _run_capture_pipeline_for_region(
+        self, x: int, y: int, w: int, h: int,
+    ) -> None:
+        """Run capture for a pre-selected region (Look Here flow).
+
+        Args:
+            x: Left edge of the region.
+            y: Top edge of the region.
+            w: Width of the region.
+            h: Height of the region.
+        """
+        self._set_phase(RecordPhase.CAPTURING)
+        self._controller.hide_for_capture()
+        cfg = get_config()
+        delay_ms = cfg.get("overlay", {}).get("capture_delay_ms", 80)
+        time.sleep(delay_ms / 1000)
+        try:
+            from core.capture import screenshot_full
+
+            self._screenshot = screenshot_full()
+        except Exception as e:
+            logger.error("Screenshot failed: %s", e)
+            self._screenshot = None
+            self._controller.show_after_capture()
+            self._set_phase(RecordPhase.AWAITING_CLICK)
+            return
+        self._controller.show_after_capture()
+        self._set_phase(RecordPhase.VLM_ANALYZING)
+        if hasattr(self._controller, "start_card_glow_pulse"):
+            self._controller.start_card_glow_pulse()
+        if self._screenshot is not None:
+            self._start_vlm(self._screenshot, (x, y, w, h))
+
+    def _handle_drag_target_selection(
+        self, x: int, y: int, w: int, h: int,
+    ) -> None:
+        """Capture drag target bbox for click_drag step.
+
+        Args:
+            x: Left edge (or click X).
+            y: Top edge (or click Y).
+            w: Width of selection (0 for clicks).
+            h: Height of selection (0 for clicks).
+        """
+        self._set_phase(RecordPhase.CAPTURING)
+        self._controller.hide_for_capture()
+        cfg = get_config()
+        delay_ms = cfg.get("overlay", {}).get("capture_delay_ms", 80)
+        time.sleep(delay_ms / 1000)
+        try:
+            from core.capture import screenshot_full
+
+            screenshot_full()  # take screenshot for visual record
+        except Exception as e:
+            logger.error("Target screenshot failed: %s", e)
+            self._controller.show_after_capture()
+            self._set_phase(RecordPhase.AWAITING_CLICK)
+            return
+        self._controller.show_after_capture()
+
+        # Use click position or drag center as target bbox
+        if w > 0 and h > 0:
+            target_bbox = {"x": x, "y": y, "w": w, "h": h}
+        else:
+            target_bbox = {"x": x - 30, "y": y - 30, "w": 60, "h": 60}
+
+        # Store drag target in current step
+        if self._current_step is not None:
+            node_id = self._current_step.get("node_id", str(uuid4()))
+            self._current_step["drag_target"] = {
+                "bbox": target_bbox,
+                "anchors": {
+                    "visual_match": f"snippets/{node_id}_target.png",
+                },
+            }
+            logger.info("Drag target captured: %s", target_bbox)
+
+        # Now proceed to countdown/dry-run
+        self._set_phase(RecordPhase.COUNTDOWN)
+        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+        widget = self._controller.show_countdown(3)
+        if widget is not None:
+            widget.countdown_finished.connect(self._on_countdown_finished)
 
     # ------------------------------------------------------------------
     # Private: pipeline methods
@@ -856,14 +1009,22 @@ class RecordSession:
                     direction = parts[0] if parts else "down"
                     amount = int(parts[1]) if len(parts) > 1 else 3
                     exec_scroll(center_x, center_y, direction, amount)
+                case "click_drag":
+                    from core.executor import drag as exec_drag
+
+                    drag_target = self._current_step.get("drag_target", {})
+                    target_bbox = drag_target.get("bbox", {})
+                    tx = target_bbox.get("x", 0) + target_bbox.get("w", 0) // 2
+                    ty = target_bbox.get("y", 0) + target_bbox.get("h", 0) // 2
+                    exec_drag(center_x, center_y, tx, ty)
                 case "read" | "snip_and_search":
                     logger.info(
                         "Dry-run %s: observation step, no action", action,
                     )
                 case "select_all_extract":
-                    logger.info(
-                        "Dry-run select_all_extract: no action during dry-run",
-                    )
+                    from core.executor import select_all_extract
+
+                    select_all_extract()
                 case "wait" | "loop" | "prompt_user":
                     logger.info(
                         "Dry-run %s: skipped (no dry-run for flow actions)",

@@ -179,3 +179,117 @@ def test_parse_direction_amount_defaults() -> None:
     from routine.format import _parse_direction_amount
     result = _parse_direction_amount("")
     assert result == {"direction": "down", "amount": 3, "unit": "lines"}
+
+
+# ---------------------------------------------------------------------------
+# ACT-04: click_drag step format
+# ---------------------------------------------------------------------------
+
+
+def test_click_drag_step_format() -> None:
+    """build_v1_step with action='click_drag' and drag_target produces step with drag_target field."""
+    step = {
+        "tag_data": {"action": "click_drag"},
+        "bbox": (100, 200, 50, 30),
+        "drag_target": {
+            "bbox": {"x": 400, "y": 300, "w": 60, "h": 40},
+            "anchors": {"visual_match": "snippets/node-test_target.png"},
+        },
+    }
+    result = build_v1_step(step, index=0, node_id="node-test", screen_w=1920, screen_h=1080)
+    assert result["action"] == "click_drag"
+    assert result["drag_target"]["bbox"]["x"] == 400
+    assert result["drag_target"]["anchors"]["visual_match"] == "snippets/node-test_target.png"
+
+
+# ---------------------------------------------------------------------------
+# ACT-12: prompt_user step format
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_user_step_format() -> None:
+    """build_v1_step with action='prompt_user' and question_text produces step with question_text."""
+    result = _build({"action": "prompt_user", "question_text": "Are you done?"})
+    assert result["action"] == "prompt_user"
+    assert result["question_text"] == "Are you done?"
+
+
+# ---------------------------------------------------------------------------
+# ACT-06: read step format
+# ---------------------------------------------------------------------------
+
+
+def test_read_step_format() -> None:
+    """build_v1_step with action='read' and vlm_prompt produces step with vlm_prompt."""
+    result = _build({"action": "read", "vlm_prompt": "Extract text"})
+    assert result["action"] == "read"
+    assert result["vlm_prompt"] == "Extract text"
+
+
+# ---------------------------------------------------------------------------
+# ACT-07: snip_and_search step format
+# ---------------------------------------------------------------------------
+
+
+def test_snip_and_search_step_format() -> None:
+    """build_v1_step with action='snip_and_search' includes vlm_prompt."""
+    result = _build({"action": "snip_and_search", "vlm_prompt": "Find price"})
+    assert result["action"] == "snip_and_search"
+    assert result["vlm_prompt"] == "Find price"
+
+
+# ---------------------------------------------------------------------------
+# ACT-10: wait step format
+# ---------------------------------------------------------------------------
+
+
+def test_wait_step_format_defaults() -> None:
+    """build_v1_step with action='wait' uses default wait definition."""
+    result = _build({"action": "wait"})
+    assert result["action"] == "wait"
+    assert result["wait"]["condition_type"] == "fixed_timer"
+    assert result["wait"]["timeout"] == 30.0
+
+
+# ---------------------------------------------------------------------------
+# ACT-11: loop step format
+# ---------------------------------------------------------------------------
+
+
+def test_loop_step_format() -> None:
+    """build_v1_step with action='loop' and loop_definition produces step with loop field."""
+    step = {
+        "tag_data": {"action": "loop"},
+        "bbox": (100, 200, 50, 30),
+        "loop_definition": {
+            "start_step": 0,
+            "end_step": 3,
+            "exit_condition": "n_iterations",
+            "n_iterations": 5,
+        },
+    }
+    result = build_v1_step(step, index=0, node_id="node-test", screen_w=1920, screen_h=1080)
+    assert result["action"] == "loop"
+    assert result["loop"]["n_iterations"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Look Here flow: region drag only
+# ---------------------------------------------------------------------------
+
+
+def test_look_here_requires_drag() -> None:
+    """RecordSession in AWAITING_REGION_DRAG phase ignores clicks (w=0, h=0)."""
+    from unittest.mock import MagicMock, PropertyMock
+
+    from recorder.overlay.record_phase import RecordPhase
+    from recorder.record_session import RecordSession
+
+    controller = MagicMock()
+    session = RecordSession(controller, "test-routine")
+    session._phase = RecordPhase.AWAITING_REGION_DRAG
+
+    # Click (w=0, h=0) should be ignored
+    session.on_selection(100, 200, 0, 0)
+    assert session._phase == RecordPhase.AWAITING_REGION_DRAG
+    assert session._is_look_here is False  # not set because click was ignored
