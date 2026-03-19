@@ -365,3 +365,57 @@ def hotkey(*keys: str, dry_run: bool = False) -> None:
     with _lock:
         pyautogui.hotkey(*keys, interval=_jitter(0.02))
     _hsleep(random.uniform(0.05, 0.1))
+
+
+def select_all_extract(dry_run: bool = False) -> str:
+    """Select all text and extract via clipboard, with VLM fallback.
+
+    Sends Ctrl+A, Ctrl+C, reads clipboard. If clipboard unchanged,
+    falls back to VLM screenshot analysis.
+
+    Args:
+        dry_run: Log without executing.
+
+    Returns:
+        Extracted text content (empty string on dry_run).
+    """
+    logger.debug("select_all_extract(dry_run=%s)", dry_run)
+    if dry_run:
+        return ""
+
+    import pyperclip
+
+    old_clipboard = ""
+    try:
+        old_clipboard = pyperclip.paste()
+    except Exception:
+        pass
+
+    hotkey("ctrl", "a")
+    _hsleep(0.15)
+    hotkey("ctrl", "c")
+    _hsleep(0.3)  # Wait for clipboard update
+
+    new_clipboard = ""
+    try:
+        new_clipboard = pyperclip.paste()
+    except Exception:
+        pass
+
+    if new_clipboard and new_clipboard != old_clipboard:
+        return new_clipboard
+
+    # Fallback: VLM screenshot analysis
+    logger.info("Clipboard empty/unchanged, falling back to VLM")
+    try:
+        from core.capture import screenshot_full
+        from core.vision import analyze_crop_array
+
+        screenshot = screenshot_full()
+        result = analyze_crop_array(
+            screenshot, "Extract all visible text from this screen"
+        )
+        return result.get("text", "") if isinstance(result, dict) else ""
+    except Exception as e:
+        logger.warning("VLM fallback failed: %s", e)
+        return ""
