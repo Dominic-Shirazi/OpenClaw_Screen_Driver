@@ -62,10 +62,10 @@
 - [x] **ACT-01**: `click` — left click with donut distribution targeting
 - [x] **ACT-02**: `double_click` — double left click
 - [x] **ACT-03**: `right_click` — right click (context menu)
-- [ ] **ACT-04**: `click_drag` — click source, drag to target (second bbox captured during recording)
+- [x] **ACT-04**: `click_drag` — click source, drag to target (second bbox captured during recording)
 - [x] **ACT-05**: `type` — keyboard input with human-like timing and typo simulation
-- [ ] **ACT-06**: `read` — OCR/VLM extract text from element, return to caller
-- [ ] **ACT-07**: `snip_and_search` — crop region → VLM analysis → return structured result
+- [x] **ACT-06**: `read` — OCR/VLM extract text from element, return to caller
+- [x] **ACT-07**: `snip_and_search` — crop region → VLM analysis → return structured result
 - [x] **ACT-08**: `select_all_extract` — Ctrl+A → feed to local AI → summarize/extract
 - [x] **ACT-09**: `scroll` — scroll within element or page
 - [x] **ACT-10**: `wait` — wait for screen change / element appear / timer / custom condition
@@ -205,10 +205,10 @@
 | ACT-01 | Phase 6 | Complete |
 | ACT-02 | Phase 6 | Complete |
 | ACT-03 | Phase 6 | Complete |
-| ACT-04 | Phase 6 | Pending |
+| ACT-04 | Phase 6 | Complete |
 | ACT-05 | Phase 6 | Complete |
-| ACT-06 | Phase 6 | Pending |
-| ACT-07 | Phase 6 | Pending |
+| ACT-06 | Phase 6 | Complete |
+| ACT-07 | Phase 6 | Complete |
 | ACT-08 | Phase 6 | Complete |
 | ACT-09 | Phase 6 | Complete |
 | ACT-10 | Phase 6 | Complete |

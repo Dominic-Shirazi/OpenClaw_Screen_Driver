@@ -10,7 +10,7 @@ progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 20
-  completed_plans: 17
+  completed_plans: 19
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Current Position
 
 Phase: 6 of 10 (Action Types)
-Plan: 1 of 5 in current phase -- COMPLETE
+Plan: 3 of 5 in current phase -- COMPLETE
 Status: Executing Phase 06
-Last activity: 2026-03-19 — Completed 06-01-PLAN.md (Action Type Step Format)
+Last activity: 2026-03-19 — Completed 06-03-PLAN.md (Toolbar Quick-Add & Action Flow Extensions)
 
-Progress: [█████████░] 85% (17 of 20 plans)
+Progress: [█████████░] 95% (19 of 20 plans)
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [█████████░] 85% (17 of 20 plans)
 | Phase 05 P02 | 4min | 2 tasks | 4 files |
 | Phase 06 P02 | 2min | 1 tasks | 4 files |
 | Phase 06 P01 | 4min | 2 tasks | 5 files |
+| Phase 06 P03 | 4min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,9 @@ Recent decisions affecting current work:
 - [Phase 06]: Scroll parsing uses _parse_direction_amount with direction/amount/unit triple
 - [Phase 06]: Type dry-run clicks target first, then types, then optionally presses enter
 - [Phase 06]: Observation actions (read, snip_and_search) skip dry-run execution entirely
+- [Phase 06]: Dynamic toolbar width per mode (max(250, 70*buttons+40)) for variable button counts
+- [Phase 06]: Look Here skips detection entirely -- user-drawn regions don't need AI bbox
+- [Phase 06]: click_drag routes to AWAITING_DRAG_TARGET after tag confirm, separate from countdown
 
 ### Pending Todos
 
@@ -133,6 +137,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T21:51:39.218Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-03-19T21:57:07Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
