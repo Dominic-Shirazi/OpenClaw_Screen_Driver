@@ -101,7 +101,10 @@ Plans:
   3. Snippet PNGs (30% padded) exist in `snippets/` and embedding .npy files exist in `embeddings/` alongside routine.json
   4. The NetworkX graph round-trips through routine.json with no data loss — load->serialize->load produces identical graphs
   5. Routine files include top-level metadata: name, version, created, author, description, and tags
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 05-01-PLAN.md -- Routine dataclass model, checksum, ordered JSON serialization, graph round-trip tests
+- [ ] 05-02-PLAN.md -- v0-to-v1 migration, routine discovery, RecordSession integration with node_id naming
 
 ### Phase 6: Action Types
 **Goal**: All 12 action types are capturable during recording and executable during replay
@@ -173,7 +176,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 2. Overlay Animations | 0/3 | Not started | - |
 | 3. Overlay HUD Panels | 2/3 | In Progress|  |
 | 4. Record Flow | 0/4 | Not started | - |
-| 5. Routine File Format | 0/TBD | Not started | - |
+| 5. Routine File Format | 0/2 | Not started | - |
 | 6. Action Types | 0/TBD | Not started | - |
 | 7. Run Flow | 0/TBD | Not started | - |
 | 8. Routine Management | 0/TBD | Not started | - |
