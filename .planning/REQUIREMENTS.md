@@ -66,9 +66,9 @@
 - [ ] **ACT-05**: `type` — keyboard input with human-like timing and typo simulation
 - [ ] **ACT-06**: `read` — OCR/VLM extract text from element, return to caller
 - [ ] **ACT-07**: `snip_and_search` — crop region → VLM analysis → return structured result
-- [ ] **ACT-08**: `select_all_extract` — Ctrl+A → feed to local AI → summarize/extract
+- [x] **ACT-08**: `select_all_extract` — Ctrl+A → feed to local AI → summarize/extract
 - [ ] **ACT-09**: `scroll` — scroll within element or page
-- [ ] **ACT-10**: `wait` — wait for screen change / element appear / timer / custom condition
+- [x] **ACT-10**: `wait` — wait for screen change / element appear / timer / custom condition
 - [ ] **ACT-11**: `loop` — repeat previous N steps until condition met (element appears / text matches / N iterations / prompt_user)
 - [ ] **ACT-12**: `prompt_user` — pause routine, send screenshot + question via API, wait for human or agent response
 
@@ -209,9 +209,9 @@
 | ACT-05 | Phase 6 | Pending |
 | ACT-06 | Phase 6 | Pending |
 | ACT-07 | Phase 6 | Pending |
-| ACT-08 | Phase 6 | Pending |
+| ACT-08 | Phase 6 | Complete |
 | ACT-09 | Phase 6 | Pending |
-| ACT-10 | Phase 6 | Pending |
+| ACT-10 | Phase 6 | Complete |
 | ACT-11 | Phase 6 | Pending |
 | ACT-12 | Phase 6 | Pending |
 | RUN-01 | Phase 7 | Pending |
