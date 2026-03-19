@@ -23,11 +23,11 @@ class TestRecordPhase:
     """Tests for RecordPhase enum members."""
 
     def test_member_count(self) -> None:
-        """RecordPhase has exactly 10 members."""
-        assert len(RecordPhase) == 10
+        """RecordPhase has exactly 15 members."""
+        assert len(RecordPhase) == 15
 
     def test_member_names(self) -> None:
-        """All 10 expected member names exist."""
+        """All 15 expected member names exist."""
         expected = [
             "AWAITING_CLICK",
             "CAPTURING",
@@ -39,6 +39,11 @@ class TestRecordPhase:
             "EXECUTING",
             "VALIDATING",
             "SUCCESS_FLASH",
+            "AWAITING_REGION_DRAG",
+            "AWAITING_DRAG_TARGET",
+            "WAIT_CONFIGURING",
+            "PROMPT_CONFIGURING",
+            "LOOP_DEFINING",
         ]
         actual = [m.name for m in RecordPhase]
         assert actual == expected
@@ -58,7 +63,7 @@ class TestPipelineBridge:
         assert bridge is not None
 
     def test_has_all_signals(self, qapp: QApplication) -> None:
-        """PipelineBridge has all 6 expected signals."""
+        """PipelineBridge has all 7 expected signals."""
         expected_signals = [
             "detection_ready",
             "vlm_ready",
@@ -66,6 +71,7 @@ class TestPipelineBridge:
             "execution_complete",
             "save_complete",
             "save_failed",
+            "drag_target_ready",
         ]
         for sig_name in expected_signals:
             assert hasattr(PipelineBridge, sig_name), (

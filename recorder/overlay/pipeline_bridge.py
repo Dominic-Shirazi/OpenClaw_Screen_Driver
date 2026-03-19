@@ -52,6 +52,9 @@ class PipelineBridge(QObject):
     save_failed = pyqtSignal(str)
     """Routine save failed: error message string."""
 
+    drag_target_ready = pyqtSignal(dict)
+    """Second bbox captured for click_drag step: {bbox: {x,y,w,h}}."""
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        logger.debug("PipelineBridge created with 6 signals")
+        logger.debug("PipelineBridge created with 7 signals")

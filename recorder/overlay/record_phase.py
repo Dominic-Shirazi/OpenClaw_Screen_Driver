@@ -45,3 +45,18 @@ class RecordPhase(Enum):
 
     SUCCESS_FLASH = auto()
     """Brief green flash, then back to AWAITING_CLICK."""
+
+    AWAITING_REGION_DRAG = auto()
+    """After 'Look Here' button, waiting for user to drag a region."""
+
+    AWAITING_DRAG_TARGET = auto()
+    """After click_drag tag confirm, waiting for second click on drag target."""
+
+    WAIT_CONFIGURING = auto()
+    """Wait condition mini-dialog open."""
+
+    PROMPT_CONFIGURING = auto()
+    """Prompt question mini-dialog open."""
+
+    LOOP_DEFINING = auto()
+    """Loop definition dialog open, user selecting step range and condition."""

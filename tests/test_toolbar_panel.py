@@ -38,8 +38,9 @@ class TestInstantiation:
         assert toolbar.zValue() == 110
 
     def test_dimensions(self, toolbar: ToolbarPanel) -> None:
-        """Toolbar has expected width and height."""
-        assert toolbar._width == 250.0
+        """Toolbar has expected width and height (dynamic for RECORDING mode)."""
+        # RECORDING mode has 6 buttons: 70*6 + 40 = 460
+        assert toolbar._width == 460.0
         assert toolbar._height == 40.0
 
     def test_movable_flag(self, toolbar: ToolbarPanel) -> None:
@@ -94,7 +95,7 @@ class TestAvoidanceRect:
         """get_avoidance_rect returns a QRectF."""
         rect = toolbar.get_avoidance_rect()
         assert isinstance(rect, QRectF)
-        assert rect.width() >= 250
+        assert rect.width() >= 250  # dynamic width, at least 250
 
 
 class TestHideForCapture:

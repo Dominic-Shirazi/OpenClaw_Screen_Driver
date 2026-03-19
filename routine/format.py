@@ -174,6 +174,23 @@ def build_v1_step(
         result["scroll"] = _parse_direction_amount(
             tag_data.get("direction_amount", "down 3")
         )
+    elif action == "click_drag":
+        drag_target = step.get("drag_target")
+        if drag_target is not None:
+            result["drag_target"] = drag_target
+    elif action in ("read", "snip_and_search"):
+        result["vlm_prompt"] = tag_data.get("vlm_prompt", "")
+    elif action == "select_all_extract":
+        result["vlm_prompt"] = tag_data.get("vlm_prompt", "")
+    elif action == "prompt_user":
+        result["question_text"] = tag_data.get("question_text", "")
+    elif action == "wait":
+        result["wait"] = step.get("wait_definition", {
+            "condition_type": "fixed_timer",
+            "timeout": 30.0,
+        })
+    elif action == "loop":
+        result["loop"] = step.get("loop_definition")
 
     return result
 

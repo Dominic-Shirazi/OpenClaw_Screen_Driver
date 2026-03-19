@@ -46,7 +46,14 @@ class ToolbarMode(Enum):
 
 # Button definitions per mode: list of (label, signal_name)
 _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
-    ToolbarMode.RECORDING: [("Pause", "pause"), ("Undo Last", "undo_last")],
+    ToolbarMode.RECORDING: [
+        ("Pause", "pause"),
+        ("Undo Last", "undo_last"),
+        ("Look Here", "look_here"),
+        ("Add Wait", "add_wait"),
+        ("Add Loop", "add_loop"),
+        ("Add Prompt", "add_prompt"),
+    ],
     ToolbarMode.TAG_OPEN: [
         ("Confirm", "confirm"),
         ("Dismiss", "dismiss"),
@@ -127,7 +134,7 @@ class ToolbarPanel(QGraphicsObject):
     ) -> None:
         super().__init__(parent)
 
-        self._width: float = 250.0
+        self._width: float = self._compute_width_for_mode(ToolbarMode.RECORDING)
         self._height: float = 40.0
         self._corner_radius: float = TOOLBAR_CORNER_RADIUS
 
@@ -235,6 +242,19 @@ class ToolbarPanel(QGraphicsObject):
     # Mode switching
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _compute_width_for_mode(mode: ToolbarMode) -> float:
+        """Compute pill width based on number of buttons in a mode.
+
+        Args:
+            mode: The toolbar mode to measure.
+
+        Returns:
+            Dynamic width in pixels, minimum 250.0.
+        """
+        btn_count = len(_MODE_BUTTONS.get(mode, []))
+        return max(250.0, 70.0 * btn_count + 40.0)
+
     def set_mode(self, mode: ToolbarMode) -> None:
         """Switch toolbar to a new context mode with button swap.
 
@@ -245,6 +265,7 @@ class ToolbarPanel(QGraphicsObject):
             return
 
         self._mode = mode
+        self._width = self._compute_width_for_mode(mode)
         self._update_button_visibility()
         self._relayout_buttons()
 
