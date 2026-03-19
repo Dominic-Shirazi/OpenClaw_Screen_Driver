@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-03-19T21:51:39.222Z"
-last_activity: 2026-03-18 — Completed 04-04-PLAN.md (Record Flow Integration)
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-03-19T22:06:11.337Z"
+last_activity: 2026-03-19 — Completed 06-04-PLAN.md (Wait & Prompt Dialog Flows)
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Current Position
 
 Phase: 6 of 10 (Action Types)
-Plan: 3 of 5 in current phase -- COMPLETE
+Plan: 4 of 5 in current phase -- COMPLETE
 Status: Executing Phase 06
-Last activity: 2026-03-19 — Completed 06-03-PLAN.md (Toolbar Quick-Add & Action Flow Extensions)
+Last activity: 2026-03-19 — Completed 06-04-PLAN.md (Wait & Prompt Dialog Flows)
 
-Progress: [█████████░] 95% (19 of 20 plans)
+Progress: [██████████] 100% (20 of 20 plans)
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [█████████░] 95% (19 of 20 plans)
 | Phase 06 P02 | 2min | 1 tasks | 4 files |
 | Phase 06 P01 | 4min | 2 tasks | 5 files |
 | Phase 06 P03 | 4min | 2 tasks | 8 files |
+| Phase 06 P04 | 4min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,8 @@ Recent decisions affecting current work:
 - [Phase 06]: Dynamic toolbar width per mode (max(250, 70*buttons+40)) for variable button counts
 - [Phase 06]: Look Here skips detection entirely -- user-drawn regions don't need AI bbox
 - [Phase 06]: click_drag routes to AWAITING_DRAG_TARGET after tag confirm, separate from countdown
+- [Phase 06]: Generic show_mini_dialog on View for extensible mini-dialog lifecycle
+- [Phase 06]: prompt_user_blocking uses module-level threading.Event for API /respond unblock
 
 ### Pending Todos
 
@@ -137,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T21:57:07Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-03-19T22:06:11.333Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None

@@ -70,7 +70,7 @@
 - [x] **ACT-09**: `scroll` — scroll within element or page
 - [x] **ACT-10**: `wait` — wait for screen change / element appear / timer / custom condition
 - [ ] **ACT-11**: `loop` — repeat previous N steps until condition met (element appears / text matches / N iterations / prompt_user)
-- [ ] **ACT-12**: `prompt_user` — pause routine, send screenshot + question via API, wait for human or agent response
+- [x] **ACT-12**: `prompt_user` — pause routine, send screenshot + question via API, wait for human or agent response
 
 ### Routine Format
 
@@ -213,7 +213,7 @@
 | ACT-09 | Phase 6 | Complete |
 | ACT-10 | Phase 6 | Complete |
 | ACT-11 | Phase 6 | Pending |
-| ACT-12 | Phase 6 | Pending |
+| ACT-12 | Phase 6 | Complete |
 | RUN-01 | Phase 7 | Pending |
 | RUN-02 | Phase 7 | Pending |
 | RUN-03 | Phase 7 | Pending |
