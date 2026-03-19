@@ -201,3 +201,39 @@ class TestSelectAllExtract:
 
         result = select_all_extract(dry_run=True)
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Mini-dialog signal/attribute tests
+# ---------------------------------------------------------------------------
+
+class TestWaitDialogSignals:
+    """WaitDialog has confirmed and dismissed signal attributes."""
+
+    def test_wait_dialog_signals(self) -> None:
+        from recorder.overlay.mini_dialogs import WaitDialog
+
+        assert hasattr(WaitDialog, "confirmed")
+        assert hasattr(WaitDialog, "dismissed")
+
+    def test_wait_dialog_condition_types(self) -> None:
+        """WaitDialog maps combo text to correct condition_type strings."""
+        from recorder.overlay.mini_dialogs import WaitDialog
+
+        expected = {
+            "Fixed Timer": "fixed_timer",
+            "Element Appears": "element_appears",
+            "Screen Change": "screen_change",
+            "VLM Check": "vlm_check",
+        }
+        assert WaitDialog.CONDITION_MAP == expected
+
+
+class TestPromptDialogSignals:
+    """PromptDialog has confirmed and dismissed signal attributes."""
+
+    def test_prompt_dialog_signals(self) -> None:
+        from recorder.overlay.mini_dialogs import PromptDialog
+
+        assert hasattr(PromptDialog, "confirmed")
+        assert hasattr(PromptDialog, "dismissed")
