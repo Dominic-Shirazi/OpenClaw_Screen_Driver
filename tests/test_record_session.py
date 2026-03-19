@@ -453,6 +453,109 @@ class TestDryRunStages:
         assert session.step_count == 0
 
 
+class TestDryRunDispatch:
+    """ACT-05: Dry-run dispatch tests for action types."""
+
+    def test_dry_run_double_click(self, qapp: QApplication) -> None:
+        """_execute_dry_run with action='double_click' calls exec_double_click."""
+        session = _make_session()
+        session._current_bbox = (100, 200, 50, 30)
+        session._current_step = {
+            "tag_data": {"action": "double_click"},
+            "bbox": (100, 200, 50, 30),
+        }
+
+        with patch("core.executor.double_click") as mock_dc, \
+             patch("core.executor._bezier_move"), \
+             patch("core.executor._hsleep"), \
+             patch("core.executor.pyautogui"):
+            session._execute_dry_run()
+            mock_dc.assert_called_once_with(125, 215)
+
+    def test_dry_run_type_calls_click_then_type(self, qapp: QApplication) -> None:
+        """_execute_dry_run with action='type' calls click then type_text."""
+        session = _make_session()
+        session._current_bbox = (100, 200, 50, 30)
+        session._current_step = {
+            "tag_data": {
+                "action": "type",
+                "text_to_type": "hello world",
+                "press_enter": False,
+            },
+            "bbox": (100, 200, 50, 30),
+        }
+
+        with patch("core.executor.click") as mock_click, \
+             patch("core.executor.type_text") as mock_type, \
+             patch("core.executor._bezier_move"), \
+             patch("core.executor._hsleep"), \
+             patch("core.executor.pyautogui"):
+            session._execute_dry_run()
+            mock_click.assert_called_once_with(125, 215)
+            mock_type.assert_called_once_with("hello world")
+
+    def test_dry_run_type_with_enter(self, qapp: QApplication) -> None:
+        """_execute_dry_run with press_enter=True calls press_enter."""
+        session = _make_session()
+        session._current_bbox = (100, 200, 50, 30)
+        session._current_step = {
+            "tag_data": {
+                "action": "type",
+                "text_to_type": "query",
+                "press_enter": True,
+            },
+            "bbox": (100, 200, 50, 30),
+        }
+
+        with patch("core.executor.click"), \
+             patch("core.executor.type_text"), \
+             patch("core.executor.press_enter") as mock_enter, \
+             patch("core.executor._bezier_move"), \
+             patch("core.executor._hsleep"), \
+             patch("core.executor.pyautogui"):
+            session._execute_dry_run()
+            mock_enter.assert_called_once()
+
+    def test_dry_run_scroll(self, qapp: QApplication) -> None:
+        """_execute_dry_run with action='scroll' calls exec_scroll."""
+        session = _make_session()
+        session._current_bbox = (100, 200, 50, 30)
+        session._current_step = {
+            "tag_data": {
+                "action": "scroll",
+                "direction_amount": "down 5",
+            },
+            "bbox": (100, 200, 50, 30),
+        }
+
+        with patch("core.executor.scroll") as mock_scroll, \
+             patch("core.executor._bezier_move"), \
+             patch("core.executor._hsleep"), \
+             patch("core.executor.pyautogui"):
+            session._execute_dry_run()
+            mock_scroll.assert_called_once_with(125, 215, "down", 5)
+
+    def test_dry_run_read_no_action(self, qapp: QApplication) -> None:
+        """_execute_dry_run with action='read' does NOT call any executor."""
+        session = _make_session()
+        session._current_bbox = (100, 200, 50, 30)
+        session._current_step = {
+            "tag_data": {"action": "read"},
+            "bbox": (100, 200, 50, 30),
+        }
+
+        with patch("core.executor.click") as mock_click, \
+             patch("core.executor.double_click") as mock_dc, \
+             patch("core.executor.right_click") as mock_rc, \
+             patch("core.executor._bezier_move"), \
+             patch("core.executor._hsleep"), \
+             patch("core.executor.pyautogui"):
+            session._execute_dry_run()
+            mock_click.assert_not_called()
+            mock_dc.assert_not_called()
+            mock_rc.assert_not_called()
+
+
 class TestToolbarRouting:
     """Toolbar action routing tests."""
 

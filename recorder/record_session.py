@@ -810,29 +810,77 @@ class RecordSession:
         thread.start()
 
     def _execute_dry_run(self) -> None:
-        """Background worker: execute the recorded action and emit completion.
+        """Background worker: execute the recorded action based on action type.
 
-        Runs the click action at the bbox center. Emits execution_complete
-        signal via PipelineBridge (thread-safe Qt AutoConnection).
+        Dispatches to the correct executor function based on tag_data["action"].
+        Emits execution_complete signal via PipelineBridge (thread-safe
+        Qt AutoConnection).
         """
         try:
-            if self._current_bbox is not None:
-                bx, by, bw, bh = self._current_bbox
-                center_x = bx + bw // 2
-                center_y = by + bh // 2
+            if self._current_bbox is None or self._current_step is None:
+                logger.warning("No bbox/step for dry-run execution")
+                return
 
-                from core.executor import click as exec_click
+            bx, by, bw, bh = self._current_bbox
+            center_x = bx + bw // 2
+            center_y = by + bh // 2
+            tag_data = self._current_step.get("tag_data", {})
+            action = tag_data.get("action", "click")
 
-                exec_click(center_x, center_y)
-                logger.info(
-                    "Dry-run click executed at (%d, %d)", center_x, center_y,
-                )
-            else:
-                logger.warning("No bbox for dry-run execution")
+            from core.executor import (
+                click as exec_click,
+                double_click as exec_double_click,
+                right_click as exec_right_click,
+                type_text as exec_type_text,
+                scroll as exec_scroll,
+                press_enter as exec_press_enter,
+            )
+
+            match action:
+                case "click":
+                    exec_click(center_x, center_y)
+                case "double_click":
+                    exec_double_click(center_x, center_y)
+                case "right_click":
+                    exec_right_click(center_x, center_y)
+                case "type":
+                    exec_click(center_x, center_y)
+                    text = tag_data.get("text_to_type", "")
+                    if text:
+                        exec_type_text(text)
+                    if tag_data.get("press_enter", False):
+                        exec_press_enter()
+                case "scroll":
+                    direction_raw = tag_data.get("direction_amount", "down 3")
+                    parts = direction_raw.strip().split()
+                    direction = parts[0] if parts else "down"
+                    amount = int(parts[1]) if len(parts) > 1 else 3
+                    exec_scroll(center_x, center_y, direction, amount)
+                case "read" | "snip_and_search":
+                    logger.info(
+                        "Dry-run %s: observation step, no action", action,
+                    )
+                case "select_all_extract":
+                    logger.info(
+                        "Dry-run select_all_extract: no action during dry-run",
+                    )
+                case "wait" | "loop" | "prompt_user":
+                    logger.info(
+                        "Dry-run %s: skipped (no dry-run for flow actions)",
+                        action,
+                    )
+                case _:
+                    logger.warning(
+                        "Unknown action type for dry-run: %s", action,
+                    )
+                    exec_click(center_x, center_y)
+
+            logger.info(
+                "Dry-run %s executed at (%d, %d)", action, center_x, center_y,
+            )
         except Exception as e:
             logger.error("Dry-run execution failed: %s", e)
         finally:
-            # Always emit completion signal (thread-safe via AutoConnection)
             self._bridge.execution_complete.emit()
 
     def _on_execution_complete(self) -> None:
