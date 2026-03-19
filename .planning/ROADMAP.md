@@ -107,7 +107,7 @@ Plans:
 - [ ] 05-02-PLAN.md -- v0-to-v1 migration, routine discovery, RecordSession integration with node_id naming
 
 ### Phase 6: Action Types
-**Goal**: All 12 action types are capturable during recording and executable during replay
+**Goal**: All 12 action types are capturable during recording and executable during dry-run
 **Depends on**: Phase 5
 **Requirements**: ACT-01, ACT-02, ACT-03, ACT-04, ACT-05, ACT-06, ACT-07, ACT-08, ACT-09, ACT-10, ACT-11, ACT-12
 **Success Criteria** (what must be TRUE):
@@ -116,7 +116,13 @@ Plans:
   3. Read, snip-and-search, and select-all-extract actions are capturable as distinct steps and return structured text results during replay
   4. Scroll, wait, loop, and prompt_user actions are capturable with their parameters (direction/amount, condition, iteration count, question text)
   5. A prompt_user step pauses the routine and surfaces its question via the API `/respond` endpoint — the routine does not resume until a response arrives
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 06-01-PLAN.md -- Step format + dry-run dispatch for click variants, type, scroll
+- [ ] 06-02-PLAN.md -- Condition engine + select_all_extract executor
+- [ ] 06-03-PLAN.md -- Toolbar quick-add buttons, Look Here flow, click_drag two-bbox, prompt_user format
+- [ ] 06-04-PLAN.md -- Wait mini-dialog and prompt_user mini-dialog
+- [ ] 06-05-PLAN.md -- Loop definition dialog and loop step format
 
 ### Phase 7: Run Flow
 **Goal**: A saved routine executes reliably with human-like motion, visible step progress, and graceful failure handling
@@ -177,7 +183,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 3. Overlay HUD Panels | 2/3 | In Progress|  |
 | 4. Record Flow | 0/4 | Not started | - |
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
-| 6. Action Types | 0/TBD | Not started | - |
+| 6. Action Types | 0/5 | Not started | - |
 | 7. Run Flow | 0/TBD | Not started | - |
 | 8. Routine Management | 0/TBD | Not started | - |
 | 9. TUI and CLI | 0/TBD | Not started | - |
