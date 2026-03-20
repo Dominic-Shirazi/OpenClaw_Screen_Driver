@@ -134,7 +134,12 @@ Plans:
   3. Mouse moves to targets via Bezier curves with overshoot-and-correct; typing uses per-letter delays with occasional typo and self-correction
   4. Execution speed is configurable via human_delay multiplier — setting 0 runs instantly, 1.0 is natural, 5.0 is slow
   5. When a step fails: auto-retries 2x, widens search to full screen, then surfaces the failure to the user or agent via API — never blind-clicks when uncertain
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 07-01-PLAN.md -- Locate adapter for v1 steps, condition engine completion (element_appears, text_matches), rapidfuzz dependency
+- [ ] 07-02-PLAN.md -- REPLAYING overlay state with purple shimmer, StatusBadge and TargetHighlight widgets, replay config defaults
+- [ ] 07-03-PLAN.md -- Core routine runner (run_routine, failure cascade, action dispatch, loop replay) and run logging
+- [ ] 07-04-PLAN.md -- ReplayOverlayAdapter wiring runner events to overlay controller
 
 ### Phase 8: Routine Management
 **Goal**: Users can update, fork, delete, and inspect saved routines without re-recording from scratch
@@ -184,7 +189,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 4. Record Flow | 0/4 | Not started | - |
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
 | 6. Action Types | 4/5 | In Progress|  |
-| 7. Run Flow | 0/TBD | Not started | - |
+| 7. Run Flow | 0/4 | Not started | - |
 | 8. Routine Management | 0/TBD | Not started | - |
 | 9. TUI and CLI | 0/TBD | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |
