@@ -20,7 +20,7 @@ created: 2026-03-19
 | **Framework** | pytest 7.x |
 | **Config file** | pyproject.toml |
 | **Quick run command** | `python -m pytest tests/test_routine_runner.py -x -q` |
-| **Full suite command** | `python -m pytest tests/test_routine_runner.py tests/test_condition_engine.py tests/test_run_logs.py -x -q` |
+| **Full suite command** | `python -m pytest tests/test_routine_runner.py tests/test_condition_engine.py tests/test_locate_adapter.py tests/test_replay_overlay.py -x -q` |
 | **Estimated runtime** | ~15 seconds |
 
 ---
@@ -28,7 +28,7 @@ created: 2026-03-19
 ## Sampling Rate
 
 - **After every task commit:** Run `python -m pytest tests/test_routine_runner.py -x -q`
-- **After every plan wave:** Run `python -m pytest tests/test_routine_runner.py tests/test_condition_engine.py tests/test_run_logs.py -x -q`
+- **After every plan wave:** Run `python -m pytest tests/test_routine_runner.py tests/test_condition_engine.py tests/test_locate_adapter.py tests/test_replay_overlay.py -x -q`
 - **Before `/gsd:verify-work`:** Full suite must be green
 - **Max feedback latency:** 15 seconds
 
@@ -38,27 +38,26 @@ created: 2026-03-19
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 07-01-01 | 01 | 1 | RUN-01 | unit | `pytest tests/test_routine_runner.py -k test_load_and_preflight` | ❌ W0 | ⬜ pending |
-| 07-01-02 | 01 | 1 | RUN-02 | unit | `pytest tests/test_routine_runner.py -k test_locate_from_step` | ❌ W0 | ⬜ pending |
-| 07-02-01 | 02 | 1 | RUN-03, RUN-04 | unit | `pytest tests/test_routine_runner.py -k test_action_dispatch` | ❌ W0 | ⬜ pending |
-| 07-02-02 | 02 | 1 | RUN-05 | unit | `pytest tests/test_routine_runner.py -k test_human_delay` | ❌ W0 | ⬜ pending |
-| 07-03-01 | 03 | 2 | RUN-06 | unit | `pytest tests/test_routine_runner.py -k test_post_action_validation` | ❌ W0 | ⬜ pending |
-| 07-03-02 | 03 | 2 | RUN-07, RUN-08 | unit | `pytest tests/test_routine_runner.py -k test_failure_cascade` | ❌ W0 | ⬜ pending |
-| 07-04-01 | 04 | 2 | RUN-09 | unit | `pytest tests/test_routine_runner.py -k test_overlay_replay` | ❌ W0 | ⬜ pending |
-| 07-05-01 | 05 | 3 | RUN-02 | unit | `pytest tests/test_condition_engine.py -k test_element_appears` | ❌ W0 | ⬜ pending |
-| 07-05-02 | 05 | 3 | RUN-02 | unit | `pytest tests/test_condition_engine.py -k test_text_matches` | ❌ W0 | ⬜ pending |
-| 07-06-01 | 06 | 3 | RUN-07 | unit | `pytest tests/test_run_logs.py -k test_run_log_creation` | ❌ W0 | ⬜ pending |
-| 07-06-02 | 06 | 3 | RUN-07 | unit | `pytest tests/test_run_logs.py -k test_self_cleaning` | ❌ W0 | ⬜ pending |
+| 07-01-01 | 01 | 1 | RUN-02 | unit | `pytest tests/test_locate_adapter.py tests/test_condition_engine.py -x -q` | W0 | pending |
+| 07-01-02 | 01 | 1 | RUN-02 | unit | `pytest tests/test_locate_adapter.py tests/test_condition_engine.py -x -q` | W0 | pending |
+| 07-02-01 | 02 | 1 | RUN-09 | unit | `pytest tests/test_replay_overlay.py -k "replaying or shimmer or config" -x -q` | W0 | pending |
+| 07-02-02 | 02 | 1 | RUN-09 | unit | `pytest tests/test_replay_overlay.py -k "badge or highlight or flash" -x -q` | W0 | pending |
+| 07-03-01 | 03 | 2 | RUN-01, RUN-07 | unit | `pytest tests/test_routine_runner.py -k "run_log or prune" -x -q` | W0 | pending |
+| 07-03-02 | 03 | 2 | RUN-03, RUN-04, RUN-05, RUN-06, RUN-07, RUN-08 | unit | `pytest tests/test_routine_runner.py -k "run_routine or dispatch or cascade or blind" -x -q` | W0 | pending |
+| 07-03-03 | 03 | 2 | RUN-03, RUN-08 | unit | `pytest tests/test_routine_runner.py -k "callback or screenshot_taken" -x -q` | W0 | pending |
+| 07-04-01 | 04 | 3 | RUN-09 | unit | `pytest tests/test_replay_overlay.py -x -q` | W0 | pending |
+| 07-04-02 | 04 | 3 | RUN-09 | unit | `python -c "from routine.replay_overlay import ReplayOverlayAdapter; print('OK')"` | W0 | pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: pending / green / red / flaky*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_routine_runner.py` — stubs for RUN-01 through RUN-09
+- [ ] `tests/test_routine_runner.py` — stubs for RUN-01 through RUN-08
 - [ ] `tests/test_condition_engine.py` — extend existing with element_appears and text_matches tests
-- [ ] `tests/test_run_logs.py` — stubs for run log creation and self-cleaning
+- [ ] `tests/test_locate_adapter.py` — stubs for locate_element_from_step tests
+- [ ] `tests/test_replay_overlay.py` — stubs for overlay state, widgets, and camera flash
 - [ ] `rapidfuzz` — add to pyproject.toml dependencies
 
 *Existing test infrastructure (pytest, conftest) covers framework needs.*
