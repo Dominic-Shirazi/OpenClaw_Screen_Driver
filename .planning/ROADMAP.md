@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Record Flow** - End-to-end F2->click->bbox->VLM->tag->dry-run->save wiring
 - [x] **Phase 5: Routine File Format** - Human-readable routine.json with NetworkX serialization, snippet storage, and embedding paths (completed 2026-03-19)
 - [ ] **Phase 6: Action Types** - All 12 action types implemented and capturable during recording
-- [ ] **Phase 7: Run Flow** - 5-stage cascade replay, human-like execution, failure cascade, and step-visible progress
+- [x] **Phase 7: Run Flow** - 5-stage cascade replay, human-like execution, failure cascade, and step-visible progress (completed 2026-03-20)
 - [ ] **Phase 8: Routine Management** - Update, fork, delete, and inspect operations on saved routines
 - [ ] **Phase 9: TUI and CLI** - Rich pre-launch launcher with loading screen and full `ocsd` CLI entry point
 - [ ] **Phase 10: API and MCP** - FastAPI REST endpoints, MCP tool mapping via fastapi-mcp, and security scanning
@@ -189,7 +189,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 4. Record Flow | 0/4 | Not started | - |
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
 | 6. Action Types | 5/5 | Complete | 2026-03-19 |
-| 7. Run Flow | 2/4 | In Progress |  |
+| 7. Run Flow | 4/4 | Complete   | 2026-03-20 |
 | 8. Routine Management | 0/TBD | Not started | - |
 | 9. TUI and CLI | 0/TBD | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |
