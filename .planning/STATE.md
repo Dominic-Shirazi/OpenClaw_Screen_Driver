@@ -51,16 +51,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** A non-technical person can record a multi-step screen routine in under 2 minutes and replay it reliably on any resolution — "Muscle Memory: Show it once, it never forgets."
-**Current focus:** Phase 6 — Action Types
+**Current focus:** Phase 7 — Run Flow
 
 ## Current Position
 
-Phase: 6 of 10 (Action Types)
-Plan: 5 of 5 in current phase -- COMPLETE
-Status: Phase 06 Complete
-Last activity: 2026-03-19 — Completed 06-05-PLAN.md (Add Loop Action)
+Phase: 7 of 10 (Run Flow)
+Plan: 2 of 4 in current phase
+Status: Executing
+Last activity: 2026-03-20 — Completed 07-02-PLAN.md (Replay Overlay Widgets)
 
-Progress: [██████████] 100% (20 of 20 plans)
+Progress: [██████████] 100% (22 of 22 plans)
 
 ## Performance Metrics
 
@@ -98,6 +98,7 @@ Progress: [██████████] 100% (20 of 20 plans)
 | Phase 06 P03 | 4min | 2 tasks | 8 files |
 | Phase 06 P04 | 4min | 2 tasks | 6 files |
 | Phase 06 P05 | 5min | 2 tasks | 6 files |
+| Phase 07 P02 | 2min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,8 @@ Recent decisions affecting current work:
 - [Phase 06]: prompt_user_blocking uses module-level threading.Event for API /respond unblock
 - [Phase 06]: Loop body stored as body_step_indices temporarily, resolved to body_step_node_ids at save time via resolve_loop_node_ids
 - [Phase 06]: LoopDialog instantiated directly in controller due to extra steps parameter (not via generic show_mini_dialog)
+- [Phase 07]: Replay overlay z-ordering: CameraFlash(280) < TargetHighlight(290) < StatusBadge(300)
+- [Phase 07]: TargetHighlight and CameraFlash self-register with AnimationClock in constructor
 
 ### Pending Todos
 
@@ -174,6 +177,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T01:48:26.181Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-run-flow/07-CONTEXT.md
+Last session: 2026-03-20T02:43:21Z
+Stopped at: Completed 07-02-PLAN.md
+Resume file: .planning/phases/07-run-flow/07-03-PLAN.md

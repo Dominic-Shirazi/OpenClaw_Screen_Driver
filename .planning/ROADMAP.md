@@ -188,8 +188,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 3. Overlay HUD Panels | 2/3 | In Progress|  |
 | 4. Record Flow | 0/4 | Not started | - |
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
-| 6. Action Types | 4/5 | In Progress|  |
-| 7. Run Flow | 0/4 | Not started | - |
+| 6. Action Types | 5/5 | Complete | 2026-03-19 |
+| 7. Run Flow | 2/4 | In Progress |  |
 | 8. Routine Management | 0/TBD | Not started | - |
 | 9. TUI and CLI | 0/TBD | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |
