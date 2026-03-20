@@ -165,7 +165,11 @@ Plans:
   3. `ocsd record "Name"`, `ocsd run "Name"`, `ocsd list`, `ocsd inspect`, `ocsd update`, `ocsd fork`, and `ocsd hub search` all work from the command line
   4. All commands output clean human-formatted tables by default and switch to machine-readable JSON with `--json`
   5. TUI exits completely before `QApplication()` is created — the Rich event loop and Qt event loop never run concurrently
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 09-01-PLAN.md -- Typer CLI app with all subcommands, output helpers, features data, and entry point
+- [ ] 09-02-PLAN.md -- TUI loading screen with model progress, feature ticker, arrow-key menu, and routine browser
+- [ ] 09-03-PLAN.md -- TUI-to-Qt sequential handoff, variable collection, and main.py redirect
 
 ### Phase 10: API and MCP
 **Goal**: Agents and external tools can discover, run, and control routines via a local REST API with MCP-compatible tool names
@@ -194,5 +198,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 6. Action Types | 5/5 | Complete | 2026-03-19 |
 | 7. Run Flow | 4/4 | Complete   | 2026-03-20 |
 | 8. Routine Management | 1/2 | In Progress|  |
-| 9. TUI and CLI | 0/TBD | Not started | - |
+| 9. TUI and CLI | 0/3 | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |
