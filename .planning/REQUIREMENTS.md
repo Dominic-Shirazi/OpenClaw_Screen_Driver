@@ -47,14 +47,14 @@
 
 ### Run Flow
 
-- [ ] **RUN-01**: User selects routine from TUI or triggers via CLI/API
+- [x] **RUN-01**: User selects routine from TUI or triggers via CLI/API
 - [x] **RUN-02**: Per-step element location using 5-stage cascade (pixel → CLIP → OCR → VLM → position)
-- [ ] **RUN-03**: Human-like mouse execution via Bézier curves with overshoot-and-correct
-- [ ] **RUN-04**: Human-like typing with per-letter delays, variance, occasional typo + correction
-- [ ] **RUN-05**: Configurable execution speed — human_delay multiplier (0=instant, 1.0=normal, 5.0=slow)
-- [ ] **RUN-06**: Post-action validation via pixel-diff + optional VLM confirmation
-- [ ] **RUN-07**: Failure cascade — auto-retry (2x) → widen search to full screen → prompt user/agent → log
-- [ ] **RUN-08**: Never silently fail or blind-click when unsure — always surface uncertainty
+- [x] **RUN-03**: Human-like mouse execution via Bézier curves with overshoot-and-correct
+- [x] **RUN-04**: Human-like typing with per-letter delays, variance, occasional typo + correction
+- [x] **RUN-05**: Configurable execution speed — human_delay multiplier (0=instant, 1.0=normal, 5.0=slow)
+- [x] **RUN-06**: Post-action validation via pixel-diff + optional VLM confirmation
+- [x] **RUN-07**: Failure cascade — auto-retry (2x) → widen search to full screen → prompt user/agent → log
+- [x] **RUN-08**: Never silently fail or blind-click when unsure — always surface uncertainty
 - [x] **RUN-09**: Step-by-step replay status visible to user (which step is executing)
 
 ### Action Types
@@ -214,14 +214,14 @@
 | ACT-10 | Phase 6 | Complete |
 | ACT-11 | Phase 6 | Complete |
 | ACT-12 | Phase 6 | Complete |
-| RUN-01 | Phase 7 | Pending |
+| RUN-01 | Phase 7 | Complete |
 | RUN-02 | Phase 7 | Complete |
-| RUN-03 | Phase 7 | Pending |
-| RUN-04 | Phase 7 | Pending |
-| RUN-05 | Phase 7 | Pending |
-| RUN-06 | Phase 7 | Pending |
-| RUN-07 | Phase 7 | Pending |
-| RUN-08 | Phase 7 | Pending |
+| RUN-03 | Phase 7 | Complete |
+| RUN-04 | Phase 7 | Complete |
+| RUN-05 | Phase 7 | Complete |
+| RUN-06 | Phase 7 | Complete |
+| RUN-07 | Phase 7 | Complete |
+| RUN-08 | Phase 7 | Complete |
 | RUN-09 | Phase 7 | Complete |
 | MGMT-01 | Phase 8 | Pending |
 | MGMT-02 | Phase 8 | Pending |
