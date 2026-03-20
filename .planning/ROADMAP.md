@@ -193,6 +193,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
 | 6. Action Types | 5/5 | Complete | 2026-03-19 |
 | 7. Run Flow | 4/4 | Complete   | 2026-03-20 |
-| 8. Routine Management | 0/2 | Not started | - |
+| 8. Routine Management | 1/2 | In Progress|  |
 | 9. TUI and CLI | 0/TBD | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |

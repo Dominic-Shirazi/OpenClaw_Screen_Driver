@@ -85,9 +85,9 @@
 ### Routine Management
 
 - [ ] **MGMT-01**: Update routine — step-through existing, Enter to keep / E to edit / D to delete / I to insert
-- [ ] **MGMT-02**: Fork routine — copy under new name, modify as needed (manual step-through in V1)
-- [ ] **MGMT-03**: Delete routine
-- [ ] **MGMT-04**: Inspect routine — print human-readable step summary
+- [x] **MGMT-02**: Fork routine — copy under new name, modify as needed (manual step-through in V1)
+- [x] **MGMT-03**: Delete routine
+- [x] **MGMT-04**: Inspect routine — print human-readable step summary
 
 ### TUI
 
@@ -224,9 +224,9 @@
 | RUN-08 | Phase 7 | Complete |
 | RUN-09 | Phase 7 | Complete |
 | MGMT-01 | Phase 8 | Pending |
-| MGMT-02 | Phase 8 | Pending |
-| MGMT-03 | Phase 8 | Pending |
-| MGMT-04 | Phase 8 | Pending |
+| MGMT-02 | Phase 8 | Complete |
+| MGMT-03 | Phase 8 | Complete |
+| MGMT-04 | Phase 8 | Complete |
 | TUI-01 | Phase 9 | Pending |
 | TUI-02 | Phase 9 | Pending |
 | TUI-03 | Phase 9 | Pending |

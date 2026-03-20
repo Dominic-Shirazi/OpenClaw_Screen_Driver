@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 8 context gathered
-last_updated: "2026-03-20T04:02:59.796Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-03-20T04:47:53.523Z"
 last_activity: 2026-03-20 — Completed 07-02-PLAN.md (Replay Overlay Widgets)
 progress:
   total_phases: 10
   completed_phases: 7
-  total_plans: 24
-  completed_plans: 24
+  total_plans: 26
+  completed_plans: 25
   percent: 92
 ---
 
@@ -118,6 +118,7 @@ Progress: [██████████] 100% (22 of 22 plans)
 | Phase 07 P01 | 4min | 2 tasks | 5 files |
 | Phase 07 P03 | 8min | 3 tasks | 3 files |
 | Phase 07 P04 | 2min | 2 tasks | 3 files |
+| Phase 08 P01 | 2min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,7 @@ Recent decisions affecting current work:
 - [Phase 07]: validate_action imported lazily inside step loop to avoid hard mapper.validator dependency
 - [Phase 07]: Adapter is callable (__call__) so it can be passed directly as RunCallback
 - [Phase 07]: pyqtSignal(int, object) used because pyqtSignal doesn't support custom Enum types
+- [Phase 08]: Graph rebuilt from scratch on truncation (new OCSDGraph with kept node_ids only)
 
 ### Pending Todos
 
@@ -202,6 +204,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T04:02:59.792Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-routine-management/08-CONTEXT.md
+Last session: 2026-03-20T04:47:53.517Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
