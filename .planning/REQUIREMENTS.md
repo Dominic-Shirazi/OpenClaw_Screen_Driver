@@ -100,15 +100,15 @@
 
 ### CLI
 
-- [ ] **CLI-01**: `ocsd` launches TUI (no arguments)
-- [ ] **CLI-02**: `ocsd record "Name"` — record new routine (skip TUI, straight to overlay)
-- [ ] **CLI-03**: `ocsd run "Name"` or `ocsd run path/to/routine.json` — run routine
-- [ ] **CLI-04**: `ocsd list` (human table) and `ocsd list --json` (machine-readable)
-- [ ] **CLI-05**: `ocsd inspect "Name"` — print routine steps
-- [ ] **CLI-06**: `ocsd update "Name"` — enter update flow
-- [ ] **CLI-07**: `ocsd fork "Name" "NewName"` — fork routine
-- [ ] **CLI-08**: `ocsd hub search "query"` — search local routine hub
-- [ ] **CLI-09**: All commands support `--json` flag for structured output
+- [x] **CLI-01**: `ocsd` launches TUI (no arguments)
+- [x] **CLI-02**: `ocsd record "Name"` — record new routine (skip TUI, straight to overlay)
+- [x] **CLI-03**: `ocsd run "Name"` or `ocsd run path/to/routine.json` — run routine
+- [x] **CLI-04**: `ocsd list` (human table) and `ocsd list --json` (machine-readable)
+- [x] **CLI-05**: `ocsd inspect "Name"` — print routine steps
+- [x] **CLI-06**: `ocsd update "Name"` — enter update flow
+- [x] **CLI-07**: `ocsd fork "Name" "NewName"` — fork routine
+- [x] **CLI-08**: `ocsd hub search "query"` — search local routine hub
+- [x] **CLI-09**: All commands support `--json` flag for structured output
 
 ### API
 
@@ -233,15 +233,15 @@
 | TUI-04 | Phase 9 | Complete |
 | TUI-05 | Phase 9 | Complete |
 | TUI-06 | Phase 9 | Pending |
-| CLI-01 | Phase 9 | Pending |
-| CLI-02 | Phase 9 | Pending |
-| CLI-03 | Phase 9 | Pending |
-| CLI-04 | Phase 9 | Pending |
-| CLI-05 | Phase 9 | Pending |
-| CLI-06 | Phase 9 | Pending |
-| CLI-07 | Phase 9 | Pending |
-| CLI-08 | Phase 9 | Pending |
-| CLI-09 | Phase 9 | Pending |
+| CLI-01 | Phase 9 | Complete |
+| CLI-02 | Phase 9 | Complete |
+| CLI-03 | Phase 9 | Complete |
+| CLI-04 | Phase 9 | Complete |
+| CLI-05 | Phase 9 | Complete |
+| CLI-06 | Phase 9 | Complete |
+| CLI-07 | Phase 9 | Complete |
+| CLI-08 | Phase 9 | Complete |
+| CLI-09 | Phase 9 | Complete |
 | API-01 | Phase 10 | Pending |
 | API-02 | Phase 10 | Pending |
 | API-03 | Phase 10 | Pending |

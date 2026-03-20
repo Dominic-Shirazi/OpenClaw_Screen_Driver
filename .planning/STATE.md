@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-03-20T22:37:33.482Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-03-20T22:39:27.784Z"
 last_activity: 2026-03-20 — Completed 07-02-PLAN.md (Replay Overlay Widgets)
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 29
-  completed_plans: 27
+  completed_plans: 28
   percent: 92
 ---
 
@@ -121,6 +121,7 @@ Progress: [██████████] 100% (22 of 22 plans)
 | Phase 08 P01 | 2min | 1 tasks | 3 files |
 | Phase 08 P02 | 3min | 2 tasks | 3 files |
 | Phase 09 P02 | 6min | 2 tasks | 5 files |
+| Phase 09 P01 | 8min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Graph rebuilt from scratch on save (not mutated in place) for consistency with fork_routine pattern
 - [Phase 09]: Lazy imports for all TUI action handlers to avoid loading Qt at menu time
 - [Phase 09]: MENU_ITEMS as module-level constant tuples for testability; read_key uses msvcrt/termios per platform
+- [Phase 09]: Typer with lazy imports for all heavy backends to keep CLI startup fast
+- [Phase 09]: --speed flag wires to config human_delay override with try/finally restore
+- [Phase 09]: Read-only commands (list, inspect, fork, delete) skip loading screen
 
 ### Pending Todos
 
@@ -209,6 +213,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T22:37:33.477Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-03-20T22:39:27.779Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
