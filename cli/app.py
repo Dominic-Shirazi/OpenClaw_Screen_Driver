@@ -16,7 +16,14 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from cli.output import output_routines, parse_params, resolve_routine_path, show_error
+from cli.output import (
+    collect_variables,
+    output_routines,
+    parse_params,
+    prepare_run,
+    resolve_routine_path,
+    show_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +86,29 @@ def record(
         logger.debug("TUI loading screen not available")
 
     try:
+        from cli._minimize import minimize_terminal, restore_terminal
+
+        minimize_terminal()
+    except ImportError:
+        logger.debug("Terminal minimize not available")
+
+    try:
         from recorder.record_flow import cmd_record
 
         cmd_record(name)
     except Exception as exc:
         show_error("Record Failed", str(exc), fix="Check that all dependencies are installed.")
         raise typer.Exit(code=1) from exc
+    finally:
+        try:
+            from cli._minimize import restore_terminal
+
+            restore_terminal()
+        except ImportError:
+            pass
+
+    console = Console()
+    console.print(Panel("[green]Recording complete.[/green]", title="Record"))
 
 
 @app.command("run")
@@ -110,6 +134,14 @@ def run_command(
     original_delay = cfg.get("execution", {}).get("human_delay", 1.0)
     cfg.setdefault("execution", {})["human_delay"] = 1.0 / speed
 
+    # Collect variables and prepare temp copy if needed
+    all_params = collect_variables(path, params)
+    temp_dir: Path | None = None
+    run_path = path
+    if all_params:
+        temp_dir = prepare_run(path, all_params)
+        run_path = temp_dir
+
     try:
         from cli.tui import show_loading_screen
 
@@ -120,13 +152,17 @@ def run_command(
     try:
         from routine.runner import run_routine
 
-        result = run_routine(routine_dir=path)
+        result = run_routine(routine_dir=run_path)
     except Exception as exc:
         cfg["execution"]["human_delay"] = original_delay
         show_error("Run Failed", str(exc))
         raise typer.Exit(code=1) from exc
     finally:
         cfg["execution"]["human_delay"] = original_delay
+        if temp_dir is not None:
+            import shutil
+
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     if json_output:
         print(json.dumps({
@@ -198,11 +234,26 @@ def update(
     except ImportError:
         logger.debug("TUI loading screen not available")
 
+    try:
+        from cli._minimize import minimize_terminal, restore_terminal
+
+        minimize_terminal()
+    except ImportError:
+        logger.debug("Terminal minimize not available")
+
     from routine.format import Routine
     from routine.update_session import UpdateSession
 
-    routine = Routine.load(path)
-    session = UpdateSession(routine, path)
+    try:
+        routine = Routine.load(path)
+        session = UpdateSession(routine, path)
+    finally:
+        try:
+            from cli._minimize import restore_terminal
+
+            restore_terminal()
+        except ImportError:
+            pass
 
     console = Console()
     console.print(Panel(

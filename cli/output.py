@@ -1,19 +1,23 @@
 """Shared CLI output helpers for dual JSON/Rich table display.
 
 Provides error panels, routine path resolution, tabular output for
-routine listings, and parameter parsing utilities used across all
-CLI subcommands.
+routine listings, parameter parsing utilities, pre-run variable
+collection, and temporary routine preparation used across all CLI
+subcommands.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import shutil
+import tempfile
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.table import Table
 
 from routine.discovery import RoutineInfo, get_routine_dir
@@ -124,3 +128,88 @@ def parse_params(param_list: list[str]) -> dict[str, str]:
         key, value = item.split("=", 1)
         result[key] = value
     return result
+
+
+def collect_variables(
+    routine_dir: Path,
+    provided_params: dict[str, str],
+) -> dict[str, str]:
+    """Scan routine steps for variables and prompt for missing ones.
+
+    Loads the routine from *routine_dir*, inspects each step for an
+    ``input_spec`` of type ``"variable"``, and interactively prompts
+    the user for any variable not already present in *provided_params*.
+
+    Args:
+        routine_dir: Path to the routine directory containing routine.json.
+        provided_params: Parameters already supplied via ``--param`` flags.
+
+    Returns:
+        Merged dictionary of all variable values (provided + prompted).
+    """
+    from routine.format import Routine  # noqa: PLC0415
+
+    routine = Routine.load(routine_dir)
+    merged: dict[str, str] = dict(provided_params)
+
+    for step in routine.steps:
+        input_spec = step.get("input_spec", {})
+        if input_spec.get("type") != "variable":
+            continue
+
+        raw_value: str = input_spec.get("value", "")
+        var_name = raw_value.strip("{}")
+        if not var_name:
+            continue
+
+        if var_name in merged:
+            continue
+
+        hint = input_spec.get("hint", f"Enter {var_name}")
+        answer = Prompt.ask(f"[bold]{hint}[/]")
+        merged[var_name] = answer
+
+    return merged
+
+
+def prepare_run(
+    routine_dir: Path,
+    params: dict[str, str],
+) -> Path:
+    """Create a temporary routine copy with variable values injected.
+
+    Copies *routine_dir* to a temporary directory, loads the routine
+    from the copy, replaces ``text_to_type`` fields for variable steps
+    with the corresponding values from *params*, and saves the routine
+    back to the copy.
+
+    The caller is responsible for cleaning up the returned temporary
+    directory (e.g. via ``shutil.rmtree``).
+
+    Args:
+        routine_dir: Path to the original routine directory.
+        params: Variable name -> value mapping to inject.
+
+    Returns:
+        Path to the temporary directory containing the modified routine.
+    """
+    from routine.format import Routine  # noqa: PLC0415
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="ocsd_run_"))
+    # copytree expects the destination not to exist
+    temp_routine = temp_dir / "routine"
+    shutil.copytree(routine_dir, temp_routine)
+
+    routine = Routine.load(temp_routine)
+
+    for step in routine.steps:
+        input_spec = step.get("input_spec", {})
+        if input_spec.get("type") != "variable":
+            continue
+        raw_value: str = input_spec.get("value", "")
+        var_name = raw_value.strip("{}")
+        if var_name in params:
+            step["text_to_type"] = params[var_name]
+
+    routine.save(temp_routine)
+    return temp_routine

@@ -316,8 +316,13 @@ def run_tui() -> None:
     Displays the loading screen, then enters a menu loop where the user
     can select actions.  Each action is dispatched to the appropriate
     handler.  The loop continues until the user selects Quit.
+
+    Qt-launching commands (record, run, update) follow the sequential
+    gate pattern: TUI exits completely, terminal minimizes, Qt runs,
+    terminal restores, Rich summary printed, loop continues.
     """
     show_loading_screen()
+    console = Console()
 
     while True:
         command, kwargs = _show_menu()
@@ -339,39 +344,88 @@ def run_tui() -> None:
                 logger.warning("Record flow not available")
             except Exception as exc:  # noqa: BLE001
                 logger.error("Record failed: %s", exc)
+            finally:
+                try:
+                    from cli._minimize import restore_terminal  # noqa: PLC0415
+                    restore_terminal()
+                except ImportError:
+                    pass
 
-            try:
-                from cli._minimize import restore_terminal  # noqa: PLC0415
-                restore_terminal()
-            except ImportError:
-                pass
-
-            console = Console()
             console.print("[green]Recording complete.[/green]")
 
         elif command == "run":
+            routine_path = kwargs.get("routine_path")
+            if routine_path is None:
+                console.print("[yellow]No routine selected.[/yellow]")
+                continue
+
             try:
-                from runner.run_routine import run_routine  # noqa: PLC0415
-                run_routine(kwargs.get("routine_path"))
+                from cli._minimize import minimize_terminal, restore_terminal  # noqa: PLC0415
+                minimize_terminal()
+            except ImportError:
+                logger.info("Terminal minimize not available")
+
+            try:
+                from routine.runner import run_routine  # noqa: PLC0415
+                result = run_routine(routine_dir=routine_path)
+                status = "[green]SUCCESS[/green]" if result.success else "[red]FAILED[/red]"
+                console.print(
+                    f"Run complete: {status} "
+                    f"({result.steps_completed}/{result.total_steps} steps, "
+                    f"{result.duration_ms}ms)"
+                )
             except ImportError:
                 logger.warning("Run routine not available")
             except Exception as exc:  # noqa: BLE001
                 logger.error("Run failed: %s", exc)
+            finally:
+                try:
+                    from cli._minimize import restore_terminal  # noqa: PLC0415
+                    restore_terminal()
+                except ImportError:
+                    pass
 
         elif command == "update":
+            routine_path = kwargs.get("routine_path")
+            if routine_path is None:
+                console.print("[yellow]No routine selected.[/yellow]")
+                continue
+
             try:
-                from recorder.update_session import UpdateSession  # noqa: PLC0415
-                session = UpdateSession(kwargs.get("routine_path"))
-                session.run()
+                from cli._minimize import minimize_terminal, restore_terminal  # noqa: PLC0415
+                minimize_terminal()
+            except ImportError:
+                logger.info("Terminal minimize not available")
+
+            try:
+                from routine.format import Routine  # noqa: PLC0415
+                from routine.update_session import UpdateSession  # noqa: PLC0415
+                routine = Routine.load(routine_path)
+                session = UpdateSession(routine, routine_path)
+                console.print("[green]Update session complete.[/green]")
             except ImportError:
                 logger.warning("Update session not available")
             except Exception as exc:  # noqa: BLE001
                 logger.error("Update failed: %s", exc)
+            finally:
+                try:
+                    from cli._minimize import restore_terminal  # noqa: PLC0415
+                    restore_terminal()
+                except ImportError:
+                    pass
 
         elif command == "fork":
+            routine_path = kwargs.get("routine_path")
+            if routine_path is None:
+                console.print("[yellow]No routine selected.[/yellow]")
+                continue
+
             try:
-                from routine.fork import fork_routine  # noqa: PLC0415
-                fork_routine(kwargs.get("routine_path"))
+                from routine.management import fork_routine  # noqa: PLC0415
+                new_name = Prompt.ask("New routine name")
+                new_path = fork_routine(source_dir=routine_path, new_name=new_name)
+                console.print(f"[green]Forked -> '{new_name}'[/green]")
+                console.print(f"[dim]{new_path}[/dim]")
             except ImportError:
                 logger.warning("Fork routine not available")
             except Exception as exc:  # noqa: BLE001
@@ -380,17 +434,38 @@ def run_tui() -> None:
         elif command == "list":
             try:
                 from routine.discovery import list_routines  # noqa: PLC0415
-                from cli._output import output_routines  # noqa: PLC0415
+                from cli.output import output_routines  # noqa: PLC0415
                 routines = list_routines()
-                output_routines(routines)
+                output_routines(routines, as_json=False)
             except ImportError:
                 logger.warning("Routine listing not available")
 
         elif command == "inspect":
+            routine_path = kwargs.get("routine_path")
+            if routine_path is None:
+                console.print("[yellow]No routine selected.[/yellow]")
+                continue
+
             try:
-                from routine.inspect import inspect_routine  # noqa: PLC0415
-                inspect_routine(kwargs.get("routine_path"))
+                from routine.management import inspect_routine  # noqa: PLC0415
+                inspect_routine(routine_path)
             except ImportError:
                 logger.warning("Inspect routine not available")
             except Exception as exc:  # noqa: BLE001
                 logger.error("Inspect failed: %s", exc)
+
+        elif command == "delete":
+            routine_path = kwargs.get("routine_path")
+            if routine_path is None:
+                console.print("[yellow]No routine selected.[/yellow]")
+                continue
+
+            try:
+                from routine.management import delete_routine  # noqa: PLC0415
+                deleted = delete_routine(routine_path)
+                if deleted:
+                    console.print("[green]Routine deleted.[/green]")
+            except ImportError:
+                logger.warning("Delete routine not available")
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Delete failed: %s", exc)

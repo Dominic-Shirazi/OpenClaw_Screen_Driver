@@ -83,12 +83,13 @@ def test_run_command_by_name(tmp_path: Path) -> None:
     mock_loading = MagicMock()
 
     with patch("cli.app.resolve_routine_path", return_value=routine_dir):
-        with patch.dict("sys.modules", {
-            "cli.tui": MagicMock(show_loading_screen=mock_loading),
-            "routine.runner": MagicMock(run_routine=mock_run),
-        }):
-            with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
-                result = runner.invoke(app, ["run", "MyRoutine"])
+        with patch("cli.app.collect_variables", return_value={}):
+            with patch.dict("sys.modules", {
+                "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                "routine.runner": MagicMock(run_routine=mock_run),
+            }):
+                with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                    result = runner.invoke(app, ["run", "MyRoutine"])
 
     assert result.exit_code == 0
     mock_run.assert_called_once()
@@ -109,12 +110,13 @@ def test_run_command_with_speed(tmp_path: Path) -> None:
     mock_loading = MagicMock()
 
     with patch("cli.app.resolve_routine_path", return_value=routine_dir):
-        with patch("core.config.get_config", return_value=cfg):
-            with patch.dict("sys.modules", {
-                "cli.tui": MagicMock(show_loading_screen=mock_loading),
-                "routine.runner": MagicMock(run_routine=capture_config_during_run),
-            }):
-                result = runner.invoke(app, ["run", "Name", "--speed", "2.0"])
+        with patch("cli.app.collect_variables", return_value={}):
+            with patch("core.config.get_config", return_value=cfg):
+                with patch.dict("sys.modules", {
+                    "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                    "routine.runner": MagicMock(run_routine=capture_config_during_run),
+                }):
+                    result = runner.invoke(app, ["run", "Name", "--speed", "2.0"])
 
     assert result.exit_code == 0
     # During run, human_delay should have been 0.5 (1.0 / 2.0)
@@ -133,12 +135,13 @@ def test_run_command_with_json(tmp_path: Path) -> None:
     mock_loading = MagicMock()
 
     with patch("cli.app.resolve_routine_path", return_value=routine_dir):
-        with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
-            with patch.dict("sys.modules", {
-                "cli.tui": MagicMock(show_loading_screen=mock_loading),
-                "routine.runner": MagicMock(run_routine=mock_run),
-            }):
-                result = runner.invoke(app, ["run", "Name", "--json"])
+        with patch("cli.app.collect_variables", return_value={}):
+            with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                with patch.dict("sys.modules", {
+                    "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                    "routine.runner": MagicMock(run_routine=mock_run),
+                }):
+                    result = runner.invoke(app, ["run", "Name", "--json"])
 
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -156,12 +159,14 @@ def test_run_command_with_param(tmp_path: Path) -> None:
     mock_loading = MagicMock()
 
     with patch("cli.app.resolve_routine_path", return_value=routine_dir):
-        with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
-            with patch.dict("sys.modules", {
-                "cli.tui": MagicMock(show_loading_screen=mock_loading),
-                "routine.runner": MagicMock(run_routine=mock_run),
-            }):
-                result = runner.invoke(app, ["run", "Name", "--param", "search_term=news"])
+        with patch("cli.app.collect_variables", return_value={"search_term": "news"}):
+            with patch("cli.app.prepare_run", return_value=routine_dir):
+                with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                    with patch.dict("sys.modules", {
+                        "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                        "routine.runner": MagicMock(run_routine=mock_run),
+                    }):
+                        result = runner.invoke(app, ["run", "Name", "--param", "search_term=news"])
 
     assert result.exit_code == 0
 
