@@ -76,6 +76,14 @@ _DEFAULTS: dict[str, Any] = {
         "human_delay": float(os.environ.get("OCSD_HUMAN_DELAY", "1.0")),
         "typo_chance": float(os.environ.get("OCSD_TYPO_CHANCE", "0.04")),
     },
+    "replay": {
+        "show_overlay": True,
+        "auto_minimize": True,
+        "poll_interval": 2.0,
+        "max_cascade_retries": 2,
+        "keep_successful_runs": 5,
+        "keep_failed_runs": 10,
+    },
     "api": {
         "host": "0.0.0.0",
         "port": 8742,

@@ -16,6 +16,7 @@ class OverlayState(Enum):
     READY = auto()       # Green shimmer, click-through ON
     RECORDING = auto()   # Red shimmer, click-through OFF (captures clicks)
     PAUSED = auto()      # Green shimmer, click-through ON (same visual as READY)
+    REPLAYING = auto()   # Purple shimmer, click-through ON (automation active)
 
 
 # Transition table: (current_state, trigger) -> new_state
@@ -30,6 +31,7 @@ STATE_COLORS: dict[OverlayState, tuple[int, int, int, int]] = {
     OverlayState.READY: (50, 200, 50, 150),       # Green
     OverlayState.RECORDING: (255, 50, 50, 200),    # Red
     OverlayState.PAUSED: (50, 200, 50, 150),       # Green (same as READY)
+    OverlayState.REPLAYING: (160, 80, 220, 180),   # Purple
 }
 
 

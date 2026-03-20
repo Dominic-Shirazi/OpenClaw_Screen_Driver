@@ -90,6 +90,10 @@ class ShimmerLayer(QGraphicsObject):
             self._loop_duration = 2.0
             self._target_glow_radius = _GLOW_RECORDING
             self._alpha_mult = 0.55
+        elif state == OverlayState.REPLAYING:
+            self._loop_duration = 3.0
+            self._target_glow_radius = _GLOW_READY
+            self._alpha_mult = 0.45
         else:
             self._loop_duration = 5.0
             self._target_glow_radius = _GLOW_READY
