@@ -91,11 +91,11 @@
 
 ### TUI
 
-- [ ] **TUI-01**: Rich TUI as home base — routine browser with searchable list
-- [ ] **TUI-02**: TUI shows model loading status
-- [ ] **TUI-03**: TUI loading screen with bundled demo routines scrolling (marketing during load)
-- [ ] **TUI-04**: TUI menu: Record Routine | Run Routine | Update Routine | Fork Routine
-- [ ] **TUI-05**: Greyed-out V2+ features with "Feature inbound" labels
+- [x] **TUI-01**: Rich TUI as home base — routine browser with searchable list
+- [x] **TUI-02**: TUI shows model loading status
+- [x] **TUI-03**: TUI loading screen with bundled demo routines scrolling (marketing during load)
+- [x] **TUI-04**: TUI menu: Record Routine | Run Routine | Update Routine | Fork Routine
+- [x] **TUI-05**: Greyed-out V2+ features with "Feature inbound" labels
 - [ ] **TUI-06**: TUI runs before Qt event loop (sequential gate, not concurrent)
 
 ### CLI
@@ -227,11 +227,11 @@
 | MGMT-02 | Phase 8 | Complete |
 | MGMT-03 | Phase 8 | Complete |
 | MGMT-04 | Phase 8 | Complete |
-| TUI-01 | Phase 9 | Pending |
-| TUI-02 | Phase 9 | Pending |
-| TUI-03 | Phase 9 | Pending |
-| TUI-04 | Phase 9 | Pending |
-| TUI-05 | Phase 9 | Pending |
+| TUI-01 | Phase 9 | Complete |
+| TUI-02 | Phase 9 | Complete |
+| TUI-03 | Phase 9 | Complete |
+| TUI-04 | Phase 9 | Complete |
+| TUI-05 | Phase 9 | Complete |
 | TUI-06 | Phase 9 | Pending |
 | CLI-01 | Phase 9 | Pending |
 | CLI-02 | Phase 9 | Pending |
