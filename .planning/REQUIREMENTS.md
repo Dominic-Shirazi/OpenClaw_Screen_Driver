@@ -48,7 +48,7 @@
 ### Run Flow
 
 - [ ] **RUN-01**: User selects routine from TUI or triggers via CLI/API
-- [ ] **RUN-02**: Per-step element location using 5-stage cascade (pixel → CLIP → OCR → VLM → position)
+- [x] **RUN-02**: Per-step element location using 5-stage cascade (pixel → CLIP → OCR → VLM → position)
 - [ ] **RUN-03**: Human-like mouse execution via Bézier curves with overshoot-and-correct
 - [ ] **RUN-04**: Human-like typing with per-letter delays, variance, occasional typo + correction
 - [ ] **RUN-05**: Configurable execution speed — human_delay multiplier (0=instant, 1.0=normal, 5.0=slow)
@@ -215,7 +215,7 @@
 | ACT-11 | Phase 6 | Complete |
 | ACT-12 | Phase 6 | Complete |
 | RUN-01 | Phase 7 | Pending |
-| RUN-02 | Phase 7 | Pending |
+| RUN-02 | Phase 7 | Complete |
 | RUN-03 | Phase 7 | Pending |
 | RUN-04 | Phase 7 | Pending |
 | RUN-05 | Phase 7 | Pending |

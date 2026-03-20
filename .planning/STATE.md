@@ -3,11 +3,27 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-03-20T02:46:01.721Z"
+last_activity: 2026-03-20 — Completed 07-02-PLAN.md (Replay Overlay Widgets)
+progress:
+  total_phases: 10
+  completed_phases: 6
+  total_plans: 24
+  completed_plans: 22
+  percent: 92
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
 stopped_at: Phase 7 context gathered
 last_updated: "2026-03-20T01:48:26.186Z"
 last_activity: 2026-03-19 — Completed 06-05-PLAN.md (Add Loop Action)
 progress:
-  total_phases: 10
+  [█████████░] 92%
   completed_phases: 6
   total_plans: 20
   completed_plans: 20
@@ -99,6 +115,7 @@ Progress: [██████████] 100% (22 of 22 plans)
 | Phase 06 P04 | 4min | 2 tasks | 6 files |
 | Phase 06 P05 | 5min | 2 tasks | 6 files |
 | Phase 07 P02 | 2min | 2 tasks | 7 files |
+| Phase 07 P01 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -162,6 +179,8 @@ Recent decisions affecting current work:
 - [Phase 06]: LoopDialog instantiated directly in controller due to extra steps parameter (not via generic show_mini_dialog)
 - [Phase 07]: Replay overlay z-ordering: CameraFlash(280) < TargetHighlight(290) < StatusBadge(300)
 - [Phase 07]: TargetHighlight and CameraFlash self-register with AnimationClock in constructor
+- [Phase 07]: Adaptive VLM: first 3 polls skip VLM for fast checking, then escalate on poll 4+
+- [Phase 07]: skip_position_fallback=True always for conditions -- never blind-click for condition checks
 
 ### Pending Todos
 
@@ -177,6 +196,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T02:43:21Z
-Stopped at: Completed 07-02-PLAN.md
-Resume file: .planning/phases/07-run-flow/07-03-PLAN.md
+Last session: 2026-03-20T02:46:01.717Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None
