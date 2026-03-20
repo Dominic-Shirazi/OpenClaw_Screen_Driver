@@ -67,16 +67,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** A non-technical person can record a multi-step screen routine in under 2 minutes and replay it reliably on any resolution — "Muscle Memory: Show it once, it never forgets."
-**Current focus:** Phase 7 — Run Flow
+**Current focus:** Phase 9 — TUI and CLI
 
 ## Current Position
 
-Phase: 7 of 10 (Run Flow)
-Plan: 2 of 4 in current phase
+Phase: 9 of 10 (TUI and CLI)
+Plan: 3 of 3 in current phase
 Status: Executing
-Last activity: 2026-03-20 — Completed 07-02-PLAN.md (Replay Overlay Widgets)
+Last activity: 2026-03-20 — Completed 09-03-PLAN.md (TUI-to-Qt Handoff & Variable Collection)
 
-Progress: [██████████] 100% (22 of 22 plans)
+Progress: [██████████] 97% (31 of 32 plans)
 
 ## Performance Metrics
 
@@ -122,6 +122,7 @@ Progress: [██████████] 100% (22 of 22 plans)
 | Phase 08 P02 | 3min | 2 tasks | 3 files |
 | Phase 09 P02 | 6min | 2 tasks | 5 files |
 | Phase 09 P01 | 8min | 2 tasks | 7 files |
+| Phase 09 P03 | 5min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -198,6 +199,7 @@ Recent decisions affecting current work:
 - [Phase 09]: Typer with lazy imports for all heavy backends to keep CLI startup fast
 - [Phase 09]: --speed flag wires to config human_delay override with try/finally restore
 - [Phase 09]: Read-only commands (list, inspect, fork, delete) skip loading screen
+- [Phase 09]: Variable injection creates temp routine copy rather than mutating original; collect_variables prompts only for missing params
 
 ### Pending Todos
 
@@ -213,6 +215,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-20T22:39:27.779Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-03-20T22:46:37Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None

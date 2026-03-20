@@ -96,7 +96,7 @@
 - [x] **TUI-03**: TUI loading screen with bundled demo routines scrolling (marketing during load)
 - [x] **TUI-04**: TUI menu: Record Routine | Run Routine | Update Routine | Fork Routine
 - [x] **TUI-05**: Greyed-out V2+ features with "Feature inbound" labels
-- [ ] **TUI-06**: TUI runs before Qt event loop (sequential gate, not concurrent)
+- [x] **TUI-06**: TUI runs before Qt event loop (sequential gate, not concurrent)
 
 ### CLI
 
@@ -232,7 +232,7 @@
 | TUI-03 | Phase 9 | Complete |
 | TUI-04 | Phase 9 | Complete |
 | TUI-05 | Phase 9 | Complete |
-| TUI-06 | Phase 9 | Pending |
+| TUI-06 | Phase 9 | Complete |
 | CLI-01 | Phase 9 | Complete |
 | CLI-02 | Phase 9 | Complete |
 | CLI-03 | Phase 9 | Complete |
