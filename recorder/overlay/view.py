@@ -33,6 +33,9 @@ from recorder.overlay.scan_layer import ScanLayer
 from recorder.overlay.shimmer_layer import ShimmerLayer
 from recorder.overlay.state import STATE_COLORS, OverlayState
 from recorder.overlay.tag_dialog_panel import TagDialogPanel
+from recorder.overlay.camera_flash import CameraFlash
+from recorder.overlay.status_badge import StatusBadge
+from recorder.overlay.target_highlight import TargetHighlight
 from recorder.overlay.toolbar_panel import ToolbarMode, ToolbarPanel
 
 logger = logging.getLogger(__name__)
@@ -117,6 +120,9 @@ class OverlayView(QGraphicsView):
         self._flash_bbox_rect: QGraphicsRectItem | None = None
         self._card_glow_pulsing: bool = False
         self._mini_dialog: Any = None  # WaitDialog or PromptDialog
+        self._status_badge: StatusBadge | None = None
+        self._target_highlight: TargetHighlight | None = None
+        self._camera_flash: CameraFlash | None = None
 
         # ---- Mouse tracking ----
         self.setMouseTracking(True)
@@ -206,6 +212,12 @@ class OverlayView(QGraphicsView):
             self._countdown.setVisible(False)
         if self._abort_panel is not None:
             self._abort_panel.setVisible(False)
+        if self._status_badge is not None:
+            self._status_badge.setVisible(False)
+        if self._target_highlight is not None:
+            self._target_highlight.setVisible(False)
+        if self._camera_flash is not None:
+            self._camera_flash.setVisible(False)
         self._clock.stop()
         self.hide()
 
@@ -220,6 +232,9 @@ class OverlayView(QGraphicsView):
         if self._countdown is not None and self._countdown._remaining > 0:
             self._countdown.setVisible(True)
         # abort panel stays hidden after capture (user must re-trigger)
+        if self._status_badge is not None and self._status_badge._text:
+            self._status_badge.setVisible(True)
+        # target_highlight and camera_flash intentionally NOT restored (ephemeral)
         self._clock.start()
 
     # ------------------------------------------------------------------
@@ -636,6 +651,62 @@ class OverlayView(QGraphicsView):
         self._card_glow_pulsing = False
         if self._tag_dialog is not None:
             self._tag_dialog.set_glow_pulsing(False)
+
+    # ------------------------------------------------------------------
+    # Replay widgets
+    # ------------------------------------------------------------------
+
+    def show_replay_badge(self) -> None:
+        """Create and show the replay status badge at top-center."""
+        if self._status_badge is None:
+            self._status_badge = StatusBadge(
+                self._clock, self._screen_w, self._screen_h,
+            )
+            self.scene().addItem(self._status_badge)
+        self._status_badge.set_visible_animated(True)
+
+    def hide_replay_badge(self) -> None:
+        """Hide the replay status badge."""
+        if self._status_badge is not None:
+            self._status_badge.set_visible_animated(False)
+
+    def set_replay_status(self, text: str) -> None:
+        """Update the status badge text."""
+        if self._status_badge is not None:
+            self._status_badge.set_text(text)
+
+    def show_target_highlight(self, x: int, y: int, w: int, h: int) -> None:
+        """Show a brief purple highlight around a located element.
+
+        Args:
+            x: Target X coordinate.
+            y: Target Y coordinate.
+            w: Target width.
+            h: Target height.
+        """
+        if self._target_highlight is None:
+            self._target_highlight = TargetHighlight(self._clock)
+            self.scene().addItem(self._target_highlight)
+        self._target_highlight.highlight(x, y, w, h)
+
+    def hide_target_highlight(self) -> None:
+        """Hide the target highlight immediately."""
+        if self._target_highlight is not None:
+            self._target_highlight.hide()
+
+    def camera_flash(self) -> None:
+        """Trigger the camera flash effect."""
+        if self._camera_flash is None:
+            self._camera_flash = CameraFlash(
+                self._clock, self._screen_w, self._screen_h,
+            )
+            self.scene().addItem(self._camera_flash)
+        self._camera_flash.flash()
+
+    def hide_camera_flash(self) -> None:
+        """Hide the camera flash immediately."""
+        if self._camera_flash is not None:
+            self._camera_flash.hide()
 
     # ------------------------------------------------------------------
     # Keyboard fallback

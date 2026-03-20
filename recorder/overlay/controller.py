@@ -407,6 +407,66 @@ class OverlayController:
             self._view.stop_card_glow_pulse()
 
     # ------------------------------------------------------------------
+    # Replay mode API
+    # ------------------------------------------------------------------
+
+    def set_replay_mode(self, active: bool) -> None:
+        """Enter or exit replay mode.
+
+        When active, sets REPLAYING state (purple shimmer, click-through ON).
+        When inactive, returns to READY state and clears replay widgets.
+
+        Args:
+            active: True to enter replay mode, False to exit.
+        """
+        if active:
+            self._state = OverlayState.REPLAYING
+            if self._view is not None:
+                self._view.apply_state(OverlayState.REPLAYING)
+                self._view.set_click_through(True)
+                self._view.show_replay_badge()
+            if self._on_state_changed:
+                self._fire_callback(self._on_state_changed, OverlayState.REPLAYING)
+        else:
+            if self._view is not None:
+                self._view.hide_replay_badge()
+                self._view.hide_target_highlight()
+                self._view.hide_camera_flash()
+            self._state = OverlayState.READY
+            if self._view is not None:
+                self._view.apply_state(OverlayState.READY)
+
+    def set_replay_status(self, text: str) -> None:
+        """Update the status badge text during replay.
+
+        Args:
+            text: Status text, e.g. "Step 3/8: Click Submit".
+        """
+        if self._view is not None:
+            self._view.set_replay_status(text)
+
+    def show_target_highlight(self, x: int, y: int, w: int, h: int) -> None:
+        """Show a brief purple highlight around a located element.
+
+        Args:
+            x: Left edge of element bbox.
+            y: Top edge of element bbox.
+            w: Width of element bbox.
+            h: Height of element bbox.
+        """
+        if self._view is not None:
+            self._view.show_target_highlight(x, y, w, h)
+
+    def camera_flash(self) -> None:
+        """Trigger a 15px border camera flash effect.
+
+        Called after each screenshot capture during replay. Shows a bright
+        white border that fades out over ~200ms.
+        """
+        if self._view is not None:
+            self._view.camera_flash()
+
+    # ------------------------------------------------------------------
     # Private: hotkey handlers
     # ------------------------------------------------------------------
 
