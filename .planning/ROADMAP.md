@@ -150,7 +150,10 @@ Plans:
   2. Fork creates a copy of the routine under a new name and opens it in the update flow for modification
   3. Delete removes the routine directory and its routine.json, snippets, and embeddings
   4. Inspect prints a human-readable step summary — action type, element label, and bbox for each step — without launching the overlay
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 08-01-PLAN.md -- Fork, delete, inspect functions and version bump helpers
+- [ ] 08-02-PLAN.md -- UpdateSession orchestrator and UPDATE toolbar mode
 
 ### Phase 9: TUI and CLI
 **Goal**: Users can drive all of OCSD from a terminal — a Rich loading screen and menu for interactive use, and `ocsd` subcommands for direct invocation
@@ -190,6 +193,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 5. Routine File Format | 2/2 | Complete   | 2026-03-19 |
 | 6. Action Types | 5/5 | Complete | 2026-03-19 |
 | 7. Run Flow | 4/4 | Complete   | 2026-03-20 |
-| 8. Routine Management | 0/TBD | Not started | - |
+| 8. Routine Management | 0/2 | Not started | - |
 | 9. TUI and CLI | 0/TBD | Not started | - |
 | 10. API and MCP | 0/TBD | Not started | - |
