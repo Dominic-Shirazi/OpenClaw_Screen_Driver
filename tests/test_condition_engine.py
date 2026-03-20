@@ -344,3 +344,172 @@ class TestPromptUserBlocking:
 
         assert len(results) == 1
         assert results[0] == "yes"
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: element_appears and text_matches completion tests
+# ---------------------------------------------------------------------------
+
+SAMPLE_STEP = {
+    "step_index": 0,
+    "node_id": "abc123def456",
+    "label": "Submit",
+    "element_type": "button",
+    "action": "click",
+    "snippet_path": "snippets/abc123def456.png",
+    "embedding_path": "embeddings/abc123def456.npy",
+    "anchors": {
+        "visual_match": "snippets/abc123def456.png",
+        "ocr_text": "Submit",
+        "position_pct": {"x_pct": 0.5, "y_pct": 0.8},
+        "region_hint": "bottom_center",
+    },
+}
+
+
+class TestElementAppearsLocateSuccess:
+    """element_appears returns True when locate_element_from_step succeeds."""
+
+    def test_element_appears_with_locate_success(self) -> None:
+        from core.conditions import ConditionChecker
+        from core.types import LocateResult, Point
+
+        checker = ConditionChecker(
+            condition_type="element_appears",
+            params={"step": SAMPLE_STEP, "routine_dir": "/tmp/test"},
+            timeout=5.0,
+            poll_interval=0.01,
+        )
+
+        mock_result = LocateResult(point=Point(960, 864), method="ocr", confidence=0.9)
+        with patch("core.locate.locate_element_from_step", return_value=mock_result):
+            assert checker._check_element_appears() is True
+
+
+class TestElementAppearsLocateFailure:
+    """element_appears returns False when locate_element_from_step raises."""
+
+    def test_element_appears_with_locate_failure(self) -> None:
+        from core.conditions import ConditionChecker
+        from core.types import ElementNotFoundError
+
+        checker = ConditionChecker(
+            condition_type="element_appears",
+            params={"step": SAMPLE_STEP, "routine_dir": "/tmp/test"},
+            timeout=5.0,
+            poll_interval=0.01,
+        )
+
+        with patch(
+            "core.locate.locate_element_from_step",
+            side_effect=ElementNotFoundError("abc123", "not found"),
+        ):
+            assert checker._check_element_appears() is False
+
+
+class TestElementAppearsAdaptiveVlm:
+    """First 3 calls skip VLM, 4th includes VLM."""
+
+    def test_element_appears_adaptive_vlm(self) -> None:
+        from core.conditions import ConditionChecker
+        from core.types import LocateResult, Point
+
+        checker = ConditionChecker(
+            condition_type="element_appears",
+            params={"step": SAMPLE_STEP, "routine_dir": "/tmp/test"},
+            timeout=5.0,
+            poll_interval=0.01,
+        )
+
+        mock_result = LocateResult(point=Point(960, 864), method="ocr", confidence=0.9)
+        calls_skip_vlm: list[bool] = []
+
+        def track_call(step, routine_dir, *, skip_vlm=False, skip_position_fallback=False):
+            calls_skip_vlm.append(skip_vlm)
+            return mock_result
+
+        with patch("core.locate.locate_element_from_step", side_effect=track_call):
+            # Simulate 4 poll iterations by manually incrementing _iteration_count
+            for i in range(4):
+                checker._iteration_count = i
+                checker._check_element_appears()
+
+        # First 3 calls (iteration 0,1,2): skip_vlm=True (use_vlm=False)
+        # 4th call (iteration 3): skip_vlm=False (use_vlm=True)
+        assert calls_skip_vlm == [True, True, True, False]
+
+
+class TestTextMatchesExactHit:
+    """find_text_on_screen returns a match -> True."""
+
+    def test_text_matches_exact_hit(self) -> None:
+        from core.conditions import ConditionChecker
+        from core.types import LocateResult, Point
+
+        checker = ConditionChecker(
+            condition_type="text_matches",
+            params={"target_text": "Submit"},
+            timeout=5.0,
+        )
+
+        mock_result = LocateResult(point=Point(100, 200), method="ocr", confidence=0.95)
+        with patch("core.ocr.find_text_on_screen", return_value=mock_result):
+            assert checker._check_text_matches() is True
+
+
+class TestTextMatchesFuzzyHit:
+    """Exact OCR misses but fuzzy Levenshtein matches."""
+
+    def test_text_matches_fuzzy_hit(self) -> None:
+        from core.conditions import ConditionChecker
+
+        checker = ConditionChecker(
+            condition_type="text_matches",
+            params={"target_text": "Submit"},
+            timeout=5.0,
+        )
+
+        mock_screenshot = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        with (
+            patch("core.ocr.find_text_on_screen", return_value=None),
+            patch.object(checker, "_take_screenshot", return_value=mock_screenshot),
+            patch("pytesseract.image_to_data", return_value={"text": ["Subm1t", ""]}),
+        ):
+            assert checker._check_text_matches() is True
+
+
+class TestTextMatchesNoMatch:
+    """OCR returns unrelated text -> False."""
+
+    def test_text_matches_no_match(self) -> None:
+        from core.conditions import ConditionChecker
+
+        checker = ConditionChecker(
+            condition_type="text_matches",
+            params={"target_text": "Submit"},
+            timeout=5.0,
+        )
+
+        mock_screenshot = np.zeros((100, 100, 3), dtype=np.uint8)
+
+        with (
+            patch("core.ocr.find_text_on_screen", return_value=None),
+            patch.object(checker, "_take_screenshot", return_value=mock_screenshot),
+            patch("pytesseract.image_to_data", return_value={"text": ["Cancel", ""]}),
+        ):
+            assert checker._check_text_matches() is False
+
+
+class TestTextMatchesEmptyTarget:
+    """Empty target_text -> False immediately."""
+
+    def test_text_matches_empty_target(self) -> None:
+        from core.conditions import ConditionChecker
+
+        checker = ConditionChecker(
+            condition_type="text_matches",
+            params={"target_text": ""},
+            timeout=5.0,
+        )
+        assert checker._check_text_matches() is False
