@@ -1,9 +1,11 @@
-"""Tests for the TUI launcher (recorder.tui)."""
+"""Tests for the Rich TUI (cli.tui) and key reader (cli._keys).
+
+Covers feature loading, menu navigation, routine browser filtering,
+loading screen execution, and V2+ disabled item behaviour.
+"""
 
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -12,210 +14,270 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
-def _make_skill_files(tmp_path: Path, names: list[str]) -> Path:
-    """Creates fake skill JSON files in a temp directory.
-
-    Args:
-        tmp_path: Pytest tmp_path fixture.
-        names: List of filenames (without extension) to create.
-
-    Returns:
-        The directory containing the created files.
-    """
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-    for name in names:
-        fp = skills_dir / f"{name}.json"
-        fp.write_text(json.dumps({"name": name, "nodes": []}))
-    return skills_dir
+@pytest.fixture()
+def mock_read_key():
+    """Fixture that patches read_key and returns the mock."""
+    with patch("cli.tui.read_key") as m:
+        yield m
 
 
-# ---------------------------------------------------------------------------
-# Import guard
-# ---------------------------------------------------------------------------
+@pytest.fixture()
+def sample_routines():
+    """Three sample RoutineInfo objects for browser tests."""
+    from routine.discovery import RoutineInfo
 
-
-class TestRichImportGuard:
-    """Verifies graceful failure when rich is not installed."""
-
-    def test_import_error_without_rich(self) -> None:
-        """launch_menu raises ImportError with a helpful message when
-        rich is missing."""
-        # Temporarily remove rich from sys.modules and block re-import
-        saved_modules: dict[str, Any] = {}
-        rich_keys = [k for k in sys.modules if k == "rich" or k.startswith("rich.")]
-        for k in rich_keys:
-            saved_modules[k] = sys.modules.pop(k)
-
-        # Also remove our own module so it re-imports
-        tui_key = "recorder.tui"
-        saved_tui = sys.modules.pop(tui_key, None)
-
-        import builtins
-
-        _real_import = builtins.__import__
-
-        def _mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "rich" or name.startswith("rich."):
-                raise ImportError("No module named 'rich'")
-            return _real_import(name, *args, **kwargs)
-
-        try:
-            with patch("builtins.__import__", side_effect=_mock_import):
-                with pytest.raises(ImportError, match="rich"):
-                    import importlib
-
-                    importlib.import_module("recorder.tui")
-        finally:
-            # Restore everything
-            sys.modules.update(saved_modules)
-            if saved_tui is not None:
-                sys.modules[tui_key] = saved_tui
+    return [
+        RoutineInfo(name="login_flow", path=Path("/r/login_flow"), schema_version="v1"),
+        RoutineInfo(name="checkout_v2", path=Path("/r/checkout_v2"), schema_version="v1"),
+        RoutineInfo(name="search_test", path=Path("/r/search_test"), schema_version="v0"),
+    ]
 
 
 # ---------------------------------------------------------------------------
-# Menu flow tests
+# _load_features tests
 # ---------------------------------------------------------------------------
 
 
-class TestLaunchMenu:
-    """Tests for launch_menu() with mocked rich prompts."""
+class TestLoadFeatures:
+    """Tests for _load_features()."""
 
-    def test_record_returns_command_and_skill_name(self) -> None:
-        """Selecting 'Record Workflow' prompts for a name and returns
-        ('record', {'skill_name': ...})."""
+    def test_load_features_returns_list_with_keys(self) -> None:
+        """_load_features returns list of dicts with text and status keys."""
+        from cli.tui import _load_features
+
+        features = _load_features()
+
+        assert isinstance(features, list)
+        assert len(features) > 0
+        for feat in features:
+            assert "text" in feat
+            assert "status" in feat
+
+    def test_load_features_has_shipped_and_coming(self) -> None:
+        """Feature list includes both shipped and coming_soon items."""
+        from cli.tui import _load_features
+
+        features = _load_features()
+        statuses = {f["status"] for f in features}
+
+        assert "shipped" in statuses
+        assert "coming_soon" in statuses
+
+    def test_load_features_fallback_on_missing_file(self, tmp_path: Path) -> None:
+        """When features.yml is missing, returns hardcoded fallback."""
+        from cli.tui import _load_features
+
+        fake_path = tmp_path / "nonexistent" / "features.yml"
+        with patch("cli.tui.Path") as mock_path_cls:
+            # Make Path(__file__).parent / "features.yml" return nonexistent
+            mock_file = MagicMock()
+            mock_path_cls.return_value = mock_file
+            mock_file.parent.__truediv__ = lambda self, x: fake_path
+
+            # Directly test: patch the open call to raise
+            with patch("builtins.open", side_effect=OSError("not found")):
+                features = _load_features()
+
+        assert isinstance(features, list)
+        assert len(features) >= 3
+        assert features[0]["text"] == "Record once, replay forever"
+
+
+# ---------------------------------------------------------------------------
+# Menu item tests
+# ---------------------------------------------------------------------------
+
+
+class TestMenuItems:
+    """Tests for menu item definitions."""
+
+    def test_menu_items_include_disabled(self) -> None:
+        """Menu has at least 2 disabled items for V2+ features."""
+        from cli.tui import MENU_ITEMS
+
+        disabled = [item for item in MENU_ITEMS if not item[2]]
+        assert len(disabled) >= 2
+
+    def test_disabled_items_are_hub_and_voice(self) -> None:
+        """Disabled items include Hub Browse and Voice Record."""
+        from cli.tui import MENU_ITEMS
+
+        disabled_labels = {item[0] for item in MENU_ITEMS if not item[2]}
+        assert "Hub Browse" in disabled_labels
+        assert "Voice Record" in disabled_labels
+
+    def test_feature_inbound_label_in_tui(self) -> None:
+        """V2+ items display 'Feature inbound' text."""
+        import cli.tui as tui_module
+
+        src = Path(tui_module.__file__).read_text(encoding="utf-8")
+        assert "Feature inbound" in src
+
+
+# ---------------------------------------------------------------------------
+# Routine browser tests
+# ---------------------------------------------------------------------------
+
+
+class TestRoutineBrowser:
+    """Tests for _show_routine_browser()."""
+
+    def test_routine_browser_empty(self, mock_read_key: MagicMock) -> None:
+        """Empty routine list shows 'No routines' and returns None."""
+        with patch("routine.discovery.list_routines", return_value=[]):
+            from cli.tui import _show_routine_browser
+
+            result = _show_routine_browser()
+
+        assert result is None
+
+    def test_routine_browser_escape_returns_none(
+        self,
+        mock_read_key: MagicMock,
+        sample_routines: list[Any],
+    ) -> None:
+        """Pressing escape in routine browser returns None."""
+        mock_read_key.return_value = "escape"
         with (
-            patch("recorder.tui.Prompt.ask", side_effect=["1", "login_flow"]),
-            patch("recorder.tui.Console"),
+            patch("routine.discovery.list_routines", return_value=sample_routines),
+            patch("cli.tui.Live"),
         ):
-            from recorder.tui import launch_menu
+            from cli.tui import _show_routine_browser
 
-            cmd, kwargs = launch_menu()
+            result = _show_routine_browser()
 
-        assert cmd == "record"
-        assert kwargs == {"skill_name": "login_flow"}
+        assert result is None
 
-    def test_diagram_returns_command_and_skill_name(self) -> None:
-        """Selecting 'Annotate Diagram' prompts for a name and returns
-        ('diagram', {'skill_name': ...})."""
-        with (
-            patch("recorder.tui.Prompt.ask", side_effect=["2", "chrome_home"]),
-            patch("recorder.tui.Console"),
-        ):
-            from recorder.tui import launch_menu
-
-            cmd, kwargs = launch_menu()
-
-        assert cmd == "diagram"
-        assert kwargs == {"skill_name": "chrome_home"}
-
-    def test_execute_with_file_picker(self, tmp_path: Path) -> None:
-        """Selecting 'Execute Skill' shows a file picker when skills
-        exist and returns ('execute', {'skill_file': ...})."""
-        skills_dir = _make_skill_files(tmp_path, ["login", "checkout"])
+    def test_routine_browser_filter_and_select(
+        self,
+        mock_read_key: MagicMock,
+        sample_routines: list[Any],
+    ) -> None:
+        """Typing 'l', 'o' filters to login_flow, enter selects it."""
+        # Type "l", "o", then enter to select first filtered result
+        mock_read_key.side_effect = ["l", "o", "enter"]
 
         with (
-            patch("recorder.tui.Prompt.ask", side_effect=["3"]),
-            patch("recorder.tui.IntPrompt.ask", return_value=1),
-            patch("recorder.tui.Console"),
+            patch("routine.discovery.list_routines", return_value=sample_routines),
+            patch("cli.tui.Live"),
         ):
-            from recorder.tui import launch_menu
+            from cli.tui import _show_routine_browser
 
-            cmd, kwargs = launch_menu(skills_dir=skills_dir)
+            result = _show_routine_browser()
 
-        assert cmd == "execute"
-        assert "skill_file" in kwargs
-        assert "checkout.json" in kwargs["skill_file"]
-
-    def test_execute_manual_path_when_no_skills(self, tmp_path: Path) -> None:
-        """When no skill files exist, prompts for a manual path."""
-        empty_dir = tmp_path / "empty_skills"
-        empty_dir.mkdir()
-
-        with (
-            patch(
-                "recorder.tui.Prompt.ask",
-                side_effect=["3", "path/to/my_skill.json"],
-            ),
-            patch("recorder.tui.Console"),
-        ):
-            from recorder.tui import launch_menu
-
-            cmd, kwargs = launch_menu(skills_dir=empty_dir)
-
-        assert cmd == "execute"
-        assert kwargs["skill_file"] == "path/to/my_skill.json"
-
-    def test_compose_returns_skill_file(self, tmp_path: Path) -> None:
-        """Selecting 'Connect Steps' picks a skill file and returns
-        ('compose', {'skill_file': ...})."""
-        skills_dir = _make_skill_files(tmp_path, ["diagram_v1"])
-
-        with (
-            patch("recorder.tui.Prompt.ask", side_effect=["4"]),
-            patch("recorder.tui.IntPrompt.ask", return_value=1),
-            patch("recorder.tui.Console"),
-        ):
-            from recorder.tui import launch_menu
-
-            cmd, kwargs = launch_menu(skills_dir=skills_dir)
-
-        assert cmd == "compose"
-        assert "diagram_v1.json" in kwargs["skill_file"]
-
-    def test_help_returns_empty_kwargs(self) -> None:
-        """Selecting 'Help' returns ('help', {})."""
-        with (
-            patch("recorder.tui.Prompt.ask", side_effect=["5"]),
-            patch("recorder.tui.Console"),
-        ):
-            from recorder.tui import launch_menu
-
-            cmd, kwargs = launch_menu()
-
-        assert cmd == "help"
-        assert kwargs == {}
+        assert result == Path("/r/login_flow")
 
 
 # ---------------------------------------------------------------------------
-# Skill scanner tests
+# Loading screen tests
 # ---------------------------------------------------------------------------
 
 
-class TestScanSkills:
-    """Tests for _scan_skills helper."""
+class TestShowLoadingScreen:
+    """Tests for show_loading_screen()."""
 
-    def test_returns_sorted_json_files(self, tmp_path: Path) -> None:
-        """_scan_skills returns sorted list of .json paths."""
-        skills_dir = _make_skill_files(tmp_path, ["zebra", "alpha", "middle"])
+    def test_show_loading_screen_runs(self) -> None:
+        """show_loading_screen completes without error with mocked models."""
+        with (
+            patch("cli.tui.Live"),
+            patch("cli.tui.Console"),
+            patch("cli.tui.Progress") as mock_progress,
+        ):
+            # Make progress mock work like a real progress
+            mock_prog_inst = MagicMock()
+            mock_progress.return_value = mock_prog_inst
+            mock_prog_inst.add_task.return_value = 0
 
-        from recorder.tui import _scan_skills
+            from cli.tui import show_loading_screen
 
-        result = _scan_skills(skills_dir)
+            # This should not raise
+            show_loading_screen()
 
-        names = [p.stem for p in result]
-        assert names == ["alpha", "middle", "zebra"]
 
-    def test_returns_empty_for_missing_dir(self, tmp_path: Path) -> None:
-        """_scan_skills returns [] when directory does not exist."""
-        from recorder.tui import _scan_skills
+# ---------------------------------------------------------------------------
+# read_key tests
+# ---------------------------------------------------------------------------
 
-        result = _scan_skills(tmp_path / "nonexistent")
-        assert result == []
 
-    def test_ignores_non_json(self, tmp_path: Path) -> None:
-        """_scan_skills only returns .json files."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        (skills_dir / "readme.txt").write_text("not a skill")
-        (skills_dir / "real.json").write_text("{}")
+class TestReadKey:
+    """Tests for cli._keys.read_key."""
 
-        from recorder.tui import _scan_skills
+    def test_read_key_returns_string(self) -> None:
+        """read_key returns a string type on Windows via msvcrt mock."""
+        import sys
+        if sys.platform != "win32":
+            pytest.skip("Windows-only test")
 
-        result = _scan_skills(skills_dir)
-        assert len(result) == 1
-        assert result[0].name == "real.json"
+        import msvcrt
+        with patch.object(msvcrt, "getwch", return_value="a"):
+            from cli._keys import read_key
+
+            result = read_key()
+            assert isinstance(result, str)
+            assert result == "a"
+
+    def test_read_key_windows_arrow_up(self) -> None:
+        """Windows arrow up returns 'up'."""
+        import sys
+        if sys.platform != "win32":
+            pytest.skip("Windows-only test")
+
+        import msvcrt
+        with patch.object(msvcrt, "getwch", side_effect=["\xe0", "H"]):
+            from cli._keys import _read_key_windows
+
+            result = _read_key_windows()
+            assert result == "up"
+
+    def test_read_key_windows_enter(self) -> None:
+        """Windows enter returns 'enter'."""
+        import sys
+        if sys.platform != "win32":
+            pytest.skip("Windows-only test")
+
+        import msvcrt
+        with patch.object(msvcrt, "getwch", return_value="\r"):
+            from cli._keys import _read_key_windows
+
+            result = _read_key_windows()
+            assert result == "enter"
+
+
+# ---------------------------------------------------------------------------
+# Disabled item navigation test
+# ---------------------------------------------------------------------------
+
+
+class TestDisabledNavigation:
+    """Tests that disabled items cannot be selected via Enter."""
+
+    def test_enter_on_disabled_skips(self, mock_read_key: MagicMock) -> None:
+        """Pressing enter on a disabled item does nothing; navigating
+        to an enabled item and pressing enter selects it."""
+        from cli.tui import MENU_ITEMS
+
+        # Find index of first disabled item
+        disabled_idx = next(i for i, item in enumerate(MENU_ITEMS) if not item[2])
+        quit_idx = next(i for i, item in enumerate(MENU_ITEMS) if item[1] == "quit")
+
+        # Navigate down to disabled item, try enter (should not break),
+        # then press escape to quit
+        keys: list[str] = []
+        # Go down to disabled item
+        for _ in range(disabled_idx):
+            keys.append("down")
+        keys.append("enter")  # This should NOT select (disabled)
+        keys.append("escape")  # This should quit
+
+        mock_read_key.side_effect = keys
+
+        with patch("cli.tui.Live"):
+            from cli.tui import _show_menu
+
+            command, kwargs = _show_menu()
+
+        assert command == "quit"
