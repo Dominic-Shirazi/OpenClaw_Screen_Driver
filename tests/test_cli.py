@@ -372,3 +372,154 @@ def test_resolve_routine_path_not_found() -> None:
     with patch("cli.output.get_routine_dir", return_value=Path("/nonexistent/dir")):
         with pytest.raises(FileNotFoundError):
             resolve_routine_path("NoSuchRoutine")
+
+
+# ---------------------------------------------------------------------------
+# Variable collection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_fixture_routine(
+    routine_dir: Path,
+    steps: list[dict],
+) -> None:
+    """Helper: create a minimal routine.json in routine_dir."""
+    from routine.format import Routine
+
+    routine = Routine(name="test_routine", steps=steps)
+    routine.save(routine_dir)
+
+
+def test_collect_variables_scans_steps(tmp_path: Path) -> None:
+    """collect_variables prompts only for missing variables."""
+    from cli.output import collect_variables
+
+    routine_dir = tmp_path / "VarRoutine"
+    _make_fixture_routine(routine_dir, [
+        {
+            "step_index": 0,
+            "node_id": "n1",
+            "action": "type",
+            "label": "search",
+            "input_spec": {"type": "variable", "value": "{search_term}", "hint": "Search query"},
+        },
+        {
+            "step_index": 1,
+            "node_id": "n2",
+            "action": "type",
+            "label": "user",
+            "input_spec": {"type": "variable", "value": "{username}", "hint": "Your username"},
+        },
+        {
+            "step_index": 2,
+            "node_id": "n3",
+            "action": "click",
+            "label": "submit",
+        },
+    ])
+
+    with patch("cli.output.Prompt.ask", return_value="john") as mock_ask:
+        result = collect_variables(routine_dir, {"search_term": "test"})
+
+    assert result == {"search_term": "test", "username": "john"}
+    # Should only prompt for username, not search_term
+    mock_ask.assert_called_once()
+    assert "username" in mock_ask.call_args[0][0].lower() or "Your username" in mock_ask.call_args[0][0]
+
+
+def test_collect_variables_all_provided(tmp_path: Path) -> None:
+    """collect_variables does NOT prompt when all params provided."""
+    from cli.output import collect_variables
+
+    routine_dir = tmp_path / "VarRoutine2"
+    _make_fixture_routine(routine_dir, [
+        {
+            "step_index": 0,
+            "node_id": "n1",
+            "action": "type",
+            "label": "search",
+            "input_spec": {"type": "variable", "value": "{search_term}"},
+        },
+        {
+            "step_index": 1,
+            "node_id": "n2",
+            "action": "type",
+            "label": "user",
+            "input_spec": {"type": "variable", "value": "{username}"},
+        },
+    ])
+
+    with patch("cli.output.Prompt.ask") as mock_ask:
+        result = collect_variables(
+            routine_dir,
+            {"search_term": "test", "username": "john"},
+        )
+
+    mock_ask.assert_not_called()
+    assert result == {"search_term": "test", "username": "john"}
+
+
+def test_prepare_run_injects_values(tmp_path: Path) -> None:
+    """prepare_run creates temp dir with text_to_type populated."""
+    import shutil
+
+    from cli.output import prepare_run
+    from routine.format import Routine
+
+    routine_dir = tmp_path / "InjectRoutine"
+    _make_fixture_routine(routine_dir, [
+        {
+            "step_index": 0,
+            "node_id": "n1",
+            "action": "type",
+            "label": "search box",
+            "input_spec": {"type": "variable", "value": "{search_term}"},
+            "text_to_type": "",
+        },
+    ])
+
+    temp_dir = prepare_run(routine_dir, {"search_term": "hello"})
+    try:
+        loaded = Routine.load(temp_dir)
+        assert loaded.steps[0]["text_to_type"] == "hello"
+    finally:
+        shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+
+def test_run_command_with_variables(tmp_path: Path) -> None:
+    """CLI run command with --param collects and injects correctly."""
+    routine_dir = tmp_path / "Name"
+    routine_dir.mkdir()
+
+    mock_result = _mock_run_result(routine_dir)
+    mock_run = MagicMock(return_value=mock_result)
+    mock_loading = MagicMock()
+    mock_collect = MagicMock(return_value={"search_term": "news"})
+    mock_prepare = MagicMock(return_value=routine_dir)
+
+    with patch("cli.app.resolve_routine_path", return_value=routine_dir):
+        with patch("cli.app.collect_variables", mock_collect):
+            with patch("cli.app.prepare_run", mock_prepare):
+                with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                    with patch.dict("sys.modules", {
+                        "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                        "routine.runner": MagicMock(run_routine=mock_run),
+                    }):
+                        result = runner.invoke(app, ["run", "Name", "--param", "search_term=news"])
+
+    assert result.exit_code == 0
+    mock_collect.assert_called_once()
+    mock_prepare.assert_called_once()
+    mock_run.assert_called_once()
+
+
+def test_main_redirect() -> None:
+    """main.main is callable and redirects to cli.app.main."""
+    from main import main as main_func
+
+    assert callable(main_func)
+
+    with patch("cli.app.main") as mock_cli_main:
+        main_func()
+
+    mock_cli_main.assert_called_once()

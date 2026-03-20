@@ -281,3 +281,82 @@ class TestDisabledNavigation:
             command, kwargs = _show_menu()
 
         assert command == "quit"
+
+
+# ---------------------------------------------------------------------------
+# Sequential gate tests
+# ---------------------------------------------------------------------------
+
+
+class TestSequentialGate:
+    """Tests for the TUI-to-Qt sequential gate pattern."""
+
+    def test_sequential_gate(self) -> None:
+        """show_loading_screen completes without importing PyQt6."""
+        import sys
+
+        # Remove PyQt6 from sys.modules if it's there, then verify
+        # it is NOT there after loading screen runs
+        modules_before = set(sys.modules.keys())
+
+        with (
+            patch("cli.tui.Live"),
+            patch("cli.tui.Console"),
+            patch("cli.tui.Progress") as mock_progress,
+        ):
+            mock_prog_inst = MagicMock()
+            mock_progress.return_value = mock_prog_inst
+            mock_prog_inst.add_task.return_value = 0
+
+            from cli.tui import show_loading_screen
+
+            show_loading_screen()
+
+        # PyQt6 should not have been newly imported during loading screen
+        new_modules = set(sys.modules.keys()) - modules_before
+        pyqt_modules = {m for m in new_modules if m.startswith("PyQt6")}
+        assert not pyqt_modules, f"PyQt6 was imported during loading screen: {pyqt_modules}"
+
+
+# ---------------------------------------------------------------------------
+# TUI run_tui loop tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunTuiLoop:
+    """Tests for the run_tui main menu loop."""
+
+    def test_tui_quit_exits(self, mock_read_key: MagicMock) -> None:
+        """Selecting quit from menu exits run_tui without error."""
+        mock_read_key.side_effect = ["enter"]  # "Record Routine" is first, need to go to quit
+
+        with (
+            patch("cli.tui.show_loading_screen"),
+            patch("cli.tui._show_menu", return_value=("quit", {})),
+        ):
+            from cli.tui import run_tui
+
+            # Should return without error
+            run_tui()
+
+    def test_tui_menu_loop_back(self) -> None:
+        """After completing an action, menu shows again."""
+        call_count = [0]
+
+        def mock_show_menu() -> tuple[str, dict]:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return ("list", {})
+            return ("quit", {})
+
+        with (
+            patch("cli.tui.show_loading_screen"),
+            patch("cli.tui._show_menu", side_effect=mock_show_menu),
+            patch("routine.discovery.list_routines", return_value=[]),
+            patch("cli.output.output_routines"),
+        ):
+            from cli.tui import run_tui
+
+            run_tui()
+
+        assert call_count[0] == 2, "Menu should have been called twice (list then quit)"
