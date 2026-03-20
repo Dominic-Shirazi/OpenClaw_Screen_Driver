@@ -13,7 +13,8 @@ speed and cost (cheapest first):
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pyautogui
 
@@ -236,4 +237,204 @@ def locate_element(
 
     raise ElementNotFoundError(
         node_id, f"All locate stages failed for node {node_id[:8]}",
+    )
+
+
+def locate_element_from_step(
+    step: dict[str, Any],
+    routine_dir: Path,
+    *,
+    skip_vlm: bool = False,
+    skip_position_fallback: bool = False,
+) -> LocateResult:
+    """Locates an element on screen using a v1 step dict instead of a graph node.
+
+    Mirrors the 5-stage cascade of :func:`locate_element` but extracts
+    all data (snippet path, embedding path, OCR text, position hints,
+    label) from the step dictionary produced by :func:`routine.format.build_v1_step`.
+
+    Args:
+        step: A v1 step dict with keys ``anchors``, ``snippet_path``,
+            ``embedding_path``, ``label``, ``element_type``, ``node_id``.
+        routine_dir: Base directory for resolving relative snippet and
+            embedding file paths.
+        skip_vlm: If True, skip Stage 4 (VLM). Useful for fast
+            condition polling where VLM latency is unacceptable.
+        skip_position_fallback: If True, skip Stage 5 (position).
+            Used for condition checking where blind-clicking is
+            never acceptable.
+
+    Returns:
+        LocateResult with the screen location and match info.
+
+    Raises:
+        ElementNotFoundError: If all enabled cascade stages fail.
+    """
+    anchors = step.get("anchors", {})
+    position_pct = anchors.get("position_pct", {})
+    node_id = step.get("node_id", "unknown")
+
+    # Resolve position hint from percentage-based anchors
+    sw, sh = pyautogui.size()
+    x_pct = position_pct.get("x_pct")
+    y_pct = position_pct.get("y_pct")
+    hint_x: int | None = int(x_pct * sw) if x_pct is not None else None
+    hint_y: int | None = int(y_pct * sh) if y_pct is not None else None
+
+    # ------------------------------------------------------------------
+    # Stage 1: OmniParser detect + CLIP match
+    # ------------------------------------------------------------------
+    snippet_rel = step.get("snippet_path")
+    if snippet_rel:
+        try:
+            import cv2
+
+            from core.detection import get_detector
+
+            snippet_path = routine_dir / snippet_rel
+            snippet = cv2.imread(str(snippet_path))
+            if snippet is not None:
+                screen = screenshot_full()
+                cfg = get_config()
+                detector = get_detector()
+                result = detector.detect_and_match(
+                    screen, snippet, hint_x or 0, hint_y or 0,
+                    match_threshold=cfg.get("detection", {}).get("match_threshold", 0.7),
+                    search_radius=cfg.get("detection", {}).get("search_radius", 400),
+                )
+                if result is not None:
+                    logger.info(
+                        "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
+                        node_id[:8], result.point.x, result.point.y, result.confidence,
+                    )
+                    return result
+                logger.debug("OmniParser found no match for [%s]", node_id[:8])
+            else:
+                logger.debug("Snippet file not found at %s, skipping Stage 1", snippet_path)
+        except ImportError:
+            logger.debug("Detection module not available, skipping Stage 1")
+        except Exception as e:
+            logger.debug("OmniParser locate error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 2: CLIP embedding
+    # ------------------------------------------------------------------
+    embedding_rel = step.get("embedding_path")
+    if embedding_rel and hint_x is not None and hint_y is not None:
+        try:
+            import cv2
+            import numpy as np
+
+            from core.capture import screenshot_region
+            from core.embeddings import generate_embedding
+
+            emb_path = routine_dir / embedding_rel
+            if emb_path.exists():
+                saved_emb = np.load(str(emb_path))
+
+                search_r = 300
+                rx = max(0, hint_x - search_r)
+                ry = max(0, hint_y - search_r)
+                rw = min(search_r * 2, sw - rx)
+                rh = min(search_r * 2, sh - ry)
+
+                crop = screenshot_region(rx, ry, rw, rh)
+                if crop.size > 0:
+                    rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                    current_emb = generate_embedding(rgb_crop)
+
+                    score = float(np.dot(saved_emb, current_emb.T).item())
+
+                    if score > 0.75:
+                        logger.info(
+                            "Located [%s] via CLIP at (%d, %d) score=%.3f",
+                            node_id[:8], hint_x, hint_y, score,
+                        )
+                        return LocateResult(
+                            point=Point(hint_x, hint_y),
+                            confidence=min(score, 0.85),
+                            method="clip",
+                        )
+                    else:
+                        logger.debug(
+                            "CLIP score %.3f too low for [%s]", score, node_id[:8],
+                        )
+        except ImportError:
+            logger.debug("CLIP/FAISS not available, skipping Stage 2")
+        except Exception as e:
+            logger.debug("CLIP search error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 3: OCR text match — scoped to region around expected position
+    # ------------------------------------------------------------------
+    ocr_text = anchors.get("ocr_text")
+    if ocr_text:
+        logger.debug("Locate [%s] via OCR: %r", node_id[:8], ocr_text)
+        result = find_text_on_screen(
+            ocr_text,
+            hint_x=hint_x,
+            hint_y=hint_y,
+            search_radius=400,
+        )
+        if result is not None:
+            logger.info(
+                "Located [%s] via OCR at (%d, %d) conf=%.2f",
+                node_id[:8],
+                result.point.x,
+                result.point.y,
+                result.confidence,
+            )
+            return result
+
+    # ------------------------------------------------------------------
+    # Stage 4: VLM full-screen analysis (expensive, high reliability)
+    # ------------------------------------------------------------------
+    if not skip_vlm:
+        try:
+            from core.vision import first_pass_map_array
+
+            full_img = screenshot_full()
+            candidates = first_pass_map_array(full_img)
+
+            target_label = step.get("label", "").lower()
+
+            if target_label and candidates:
+                for c in candidates:
+                    c_label = c.get("label_guess", "").lower()
+                    if target_label in c_label or c_label in target_label:
+                        rect = c.get("rect", {})
+                        cx = rect.get("x", 0) + rect.get("w", 0) // 2
+                        cy = rect.get("y", 0) + rect.get("h", 0) // 2
+                        conf = c.get("confidence", 0.5)
+                        logger.info(
+                            "Located [%s] via VLM at (%d, %d) conf=%.2f",
+                            node_id[:8], cx, cy, conf,
+                        )
+                        return LocateResult(
+                            point=Point(cx, cy),
+                            confidence=conf,
+                            method="vlm",
+                        )
+        except ImportError:
+            logger.debug("VLM module not available, skipping Stage 4")
+        except Exception as e:
+            logger.debug("VLM scan error: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 5: Position fallback — blind click at recorded coordinates
+    # ------------------------------------------------------------------
+    if not skip_position_fallback and hint_x is not None and hint_y is not None:
+        logger.warning(
+            "Located [%s] via position fallback at (%d, %d) — "
+            "no visual confirmation",
+            node_id[:8], hint_x, hint_y,
+        )
+        return LocateResult(
+            point=Point(hint_x, hint_y),
+            confidence=0.3,
+            method="direct",
+        )
+
+    raise ElementNotFoundError(
+        node_id, f"All locate stages failed for step {node_id[:8]}",
     )

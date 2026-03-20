@@ -178,9 +178,29 @@ class ConditionChecker:
         return (changed / total) > threshold if total > 0 else False
 
     def _check_element_appears(self) -> bool:
-        """Stub -- full implementation needs the 5-stage locate cascade (Phase 7)."""
-        logger.debug("element_appears check (stub -- full cascade in Phase 7)")
-        return False
+        """Locate element using cascade with adaptive VLM escalation."""
+        step = self.params.get("step")
+        routine_dir = self.params.get("routine_dir")
+        if not step or not routine_dir:
+            logger.warning("element_appears missing step or routine_dir params")
+            return False
+
+        from pathlib import Path
+
+        from core.locate import locate_element_from_step
+
+        # Adaptive: first 3 polls skip VLM (stages 1-3 only), then include VLM
+        use_vlm = self._iteration_count >= 3
+        try:
+            result = locate_element_from_step(
+                step,
+                Path(routine_dir),
+                skip_vlm=not use_vlm,
+                skip_position_fallback=True,  # Never use position for conditions
+            )
+            return result is not None
+        except Exception:
+            return False
 
     def _check_vlm(self) -> bool:
         """Ask VLM a yes/no question about the current screen."""
@@ -203,11 +223,50 @@ class ConditionChecker:
             return False
 
     def _check_text_matches(self) -> bool:
-        """Stub -- full implementation with Phase 7 OCR cascade."""
+        """Fuzzy OCR text matching with Levenshtein tolerance."""
         target = self.params.get("target_text", "")
         if not target:
             return False
-        logger.debug("text_matches check (stub)")
+
+        from core.ocr import find_text_on_screen
+
+        # Try exact match first via scoped OCR
+        hint = self.params.get("position_hint", {})
+        result = find_text_on_screen(
+            target,
+            hint_x=hint.get("x"),
+            hint_y=hint.get("y"),
+            search_radius=400,
+        )
+        if result is not None:
+            return True
+
+        # Fuzzy fallback: OCR full region and check Levenshtein distance
+        try:
+            import cv2
+            import pytesseract
+            from rapidfuzz.distance import Levenshtein
+
+            screenshot = self._take_screenshot()
+            if screenshot is None:
+                return False
+
+            gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+            ocr_data = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            texts = [t for t in ocr_data.get("text", []) if t.strip()]
+
+            # Threshold: at least 2 edits, plus 1 per 5 chars, capped at 5
+            threshold = min(5, max(2, len(target) // 5))
+            for text in texts:
+                dist = Levenshtein.distance(target.lower(), text.lower())
+                if dist <= threshold:
+                    logger.info("text_matches: '%s' ~= '%s' (dist=%d)", target, text, dist)
+                    return True
+        except ImportError:
+            logger.warning("rapidfuzz not installed, fuzzy text matching unavailable")
+        except Exception as e:
+            logger.warning("text_matches fuzzy check failed: %s", e)
+
         return False
 
     def _check_n_iterations(self) -> bool:

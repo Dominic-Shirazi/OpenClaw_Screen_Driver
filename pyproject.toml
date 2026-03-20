@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "PyQt6>=6.5",
     "pyperclip>=1.8",
+    "rapidfuzz>=3.0",
 ]
 
 [project.optional-dependencies]
