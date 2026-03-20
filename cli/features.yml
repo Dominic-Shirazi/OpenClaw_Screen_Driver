@@ -1,0 +1,13 @@
+features:
+  - text: "Record once, replay forever"
+    status: shipped
+  - text: "Visual element detection with OmniParser"
+    status: shipped
+  - text: "AI-powered element descriptions"
+    status: shipped
+  - text: "Routine forking and versioning"
+    status: shipped
+  - text: "Voice-recorded routines"
+    status: coming_soon
+  - text: "Community routine hub"
+    status: coming_soon
