@@ -1,13 +1,25 @@
 features:
   - text: "Record once, replay forever"
     status: shipped
-  - text: "Visual element detection with OmniParser"
+  - text: "AI-powered element detection (5-stage cascade)"
     status: shipped
-  - text: "AI-powered element descriptions"
+  - text: "Human-like mouse movement and typing"
     status: shipped
-  - text: "Routine forking and versioning"
+  - text: "Smart bbox refinement with OmniParser"
+    status: shipped
+  - text: "Update and fork existing routines"
+    status: shipped
+  - text: "Loop actions with exit conditions"
+    status: shipped
+  - text: "12 action types: click, type, scroll, wait, and more"
+    status: shipped
+  - text: "Cross-resolution replay with visual anchoring"
     status: shipped
   - text: "Voice-recorded routines"
     status: coming_soon
-  - text: "Community routine hub"
+  - text: "Routine Hub marketplace"
+    status: coming_soon
+  - text: "Cross-routine composition"
+    status: coming_soon
+  - text: "macOS and Android support"
     status: coming_soon
