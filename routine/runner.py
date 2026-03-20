@@ -561,6 +561,12 @@ def _handle_loop_step(
 
     from core.conditions import ConditionChecker
 
+    # For n_iterations, handle iteration counting directly in the loop
+    # (creating a new ConditionChecker per iteration would reset the counter)
+    n_iter_target: int | None = None
+    if cond_type == "n_iterations":
+        n_iter_target = cond_params.get("count", 1)
+
     iteration = 0
     while iteration < max_iterations:
         iteration += 1
@@ -591,17 +597,24 @@ def _handle_loop_step(
 
             _dispatch_action(body_step, lr, dry_run=dry_run)
 
-        # Check exit condition (single poll, not blocking)
-        checker = ConditionChecker(
-            cond_type, cond_params,
-            poll_interval=0.1,
-            timeout=timeout if timeout > 0 else 0.5,
-            max_iterations=1,
-        )
-        cond_result = checker.poll_until()
-        if cond_result.met:
-            logger.info("Loop exit condition met after %d iterations", iteration)
-            break
+        # Check exit condition
+        if n_iter_target is not None:
+            # Simple iteration count -- no ConditionChecker needed
+            if iteration >= n_iter_target:
+                logger.info("Loop n_iterations met after %d iterations", iteration)
+                break
+        else:
+            # Use ConditionChecker for non-count conditions (single poll)
+            checker = ConditionChecker(
+                cond_type, cond_params,
+                poll_interval=0.1,
+                timeout=timeout if timeout > 0 else 0.5,
+                max_iterations=1,
+            )
+            cond_result = checker.poll_until()
+            if cond_result.met:
+                logger.info("Loop exit condition met after %d iterations", iteration)
+                break
 
     step_results.append({
         "step_index": step_index,
