@@ -42,6 +42,8 @@ class ToolbarMode(Enum):
     DRY_RUN = auto()     # [Run Step] [Skip Step] [Finish]
     VALIDATING = auto()  # [Yes] [Edit Tags] [Re-capture] [Retry]
     BBOX_EDITING = auto()  # [Keep My Drag]
+    UPDATE = auto()          # [OK] [Edit Step] [Fork Here] [Delete Step]
+    UPDATE_NOT_FOUND = auto()  # [Skip] [Edit] [Delete] [Abort Update]
 
 
 # Button definitions per mode: list of (label, signal_name)
@@ -72,6 +74,18 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
     ],
     ToolbarMode.BBOX_EDITING: [
         ("Keep My Drag", "keep_drag"),
+    ],
+    ToolbarMode.UPDATE: [
+        ("OK", "ok"),
+        ("Edit Step", "edit"),
+        ("Fork Here", "fork_here"),
+        ("Delete Step", "delete_step"),
+    ],
+    ToolbarMode.UPDATE_NOT_FOUND: [
+        ("Skip", "skip"),
+        ("Edit", "edit"),
+        ("Delete", "delete_step"),
+        ("Abort Update", "abort"),
     ],
 }
 
