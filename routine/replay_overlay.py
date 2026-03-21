@@ -141,6 +141,18 @@ class ReplayOverlayAdapter(QObject):
                         f"FAILED at step {idx}: {label}"
                     )
 
+                case RunEvent.RUN_PAUSED:
+                    # Abort triggers pause UX per CONTEXT.md:
+                    # - Shimmer turns green (READY state)
+                    # - Status badge shows "Paused"
+                    # - Overlay stays open for human-at-keyboard decision
+                    self._controller.set_replay_mode(False)  # READY = green shimmer
+                    self._controller.set_replay_status("Paused")
+                    # Do NOT call close() or _cleanup_after_failure()
+                    logger.info(
+                        "Run paused via abort -- overlay showing pause state"
+                    )
+
                 case RunEvent.RUN_COMPLETE:
                     self._controller.set_replay_status("Complete")
                     self._controller.set_replay_mode(False)
