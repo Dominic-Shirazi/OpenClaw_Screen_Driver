@@ -181,11 +181,12 @@ Plans:
   3. FastAPI server starts as a daemon thread with `install_signal_handlers = False` — Qt signal ownership is never contested
   4. Hub scanner flags suspicious URLs, prompt injection patterns, data exfiltration patterns, and keylogger signatures before any routine is executed
   5. Server only binds to 127.0.0.1 — no remote access in V1; routine replay is 100% local with no cloud calls
-**Plans**: 3 plans
+**Plans**: 4 plans
 Plans:
-- [ ] 10-01-PLAN.md -- Server infrastructure: RunManager, config update, daemon lifecycle, routine-centric endpoints (health, list, detail)
-- [ ] 10-02-PLAN.md -- Run endpoints: start, status, respond, screenshot, abort + abort_event in runner + prompt timeout
-- [ ] 10-03-PLAN.md -- MCP tool layer via fastapi-mcp, ocsd serve CLI command, scanner verification
+- [x] 10-01-PLAN.md -- Server infrastructure: RunManager, config update, daemon lifecycle, routine-centric endpoints (health, list, detail)
+- [x] 10-02-PLAN.md -- Run endpoints: start, status, respond, screenshot, abort + abort_event in runner + prompt timeout
+- [x] 10-03-PLAN.md -- MCP tool layer via fastapi-mcp, ocsd serve CLI command, scanner verification
+- [ ] 10-04-PLAN.md -- Gap closure: fix REQUIREMENTS.md URL paths and SEC-02 status, wire prompt_timeout_s end-to-end
 
 ## Progress
 
@@ -203,4 +204,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 7. Run Flow | 4/4 | Complete   | 2026-03-20 |
 | 8. Routine Management | 1/2 | In Progress|  |
 | 9. TUI and CLI | 3/3 | Complete   | 2026-03-20 |
-| 10. API and MCP | 3/3 | Complete   | 2026-03-21 |
+| 10. API and MCP | 3/4 | In Progress | - |
