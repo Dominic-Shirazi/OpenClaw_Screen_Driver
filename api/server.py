@@ -1,9 +1,8 @@
-"""FastAPI server providing MCP-compatible tool call endpoints for OCSD.
+"""FastAPI server providing routine-centric REST API for OCSD.
 
-Exposes REST endpoints for skill listing, execution, recording status,
-and graph inspection.  Designed to be run as a sidecar or embedded
-service that automation orchestrators (MCP hosts, custom agents, etc.)
-can call.
+Exposes endpoints for health checking, routine discovery, routine
+detail inspection, and (stubbed) run management. Designed to run
+as a daemon thread alongside the Qt event loop.
 
 Usage:
     uvicorn api.server:app --port 8420 --reload
@@ -12,11 +11,10 @@ Usage:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel
 except ImportError:
@@ -25,219 +23,297 @@ except ImportError:
         "Install with:  pip install 'ocsd[api]'  or  pip install fastapi uvicorn"
     )
 
+from api.run_manager import (
+    RunAlreadyActiveError,
+    RunManager,
+    RunNotFoundError,
+    RunStatus,
+)
 from core.config import get_config
-from mapper.export import load_skill, export_skill
-from mapper.graph import OCSDGraph
+from routine.discovery import get_routine_dir, list_routines
+from routine.format import Routine
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="OCSD API",
-    version="0.1.0",
-    description="OpenClaw Screen Driver — skill execution and management API.",
-)
-
 
 # ---------------------------------------------------------------------------
-# Request / Response models
+# Pydantic models
 # ---------------------------------------------------------------------------
-
-class ExecuteRequest(BaseModel):
-    """Request body for skill execution."""
-    skill_id: str
-    start_node: str | None = None
-    goal_node: str | None = None
-    dry_run: bool = False
-    params: dict[str, str] | None = None
-
-
-class ExecuteResponse(BaseModel):
-    """Response from a skill execution run."""
-    skill_id: str
-    success: bool
-    steps_total: int
-    steps_succeeded: int
-    duration_ms: int
-    errors: list[str]
-
-
-class SkillSummary(BaseModel):
-    """Lightweight skill metadata returned in list endpoints."""
-    skill_id: str
-    name: str
-    node_count: int
-    edge_count: int
-    file_path: str
-
-
-class NodeInfo(BaseModel):
-    """Information about a single graph node."""
-    node_id: str
-    element_type: str
-    label: str
-    position: dict[str, float] | None = None
 
 
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str
     version: str
+    models_loaded: bool
+
+
+class RoutineSummary(BaseModel):
+    """Lightweight routine metadata for list endpoints."""
+
+    id: str
+    name: str
+    version: str
+    step_count: int
+    tags: list[str]
+
+
+class RoutineDetail(BaseModel):
+    """Full routine metadata and steps."""
+
+    id: str
+    name: str
+    version: str
+    description: str
+    tags: list[str]
+    steps: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
+class RunRequest(BaseModel):
+    """Request body for starting a routine run."""
+
+    params: dict[str, str] | None = None
+    show_overlay: bool = True
+    prompt_timeout_s: int | None = None
+
+
+class RunResponse(BaseModel):
+    """Response after starting a run."""
+
+    run_id: str
+
+
+class RunStatusResponse(BaseModel):
+    """Status of an active or completed run."""
+
+    run_id: str
+    status: str
+    current_step: int
+    total_steps: int
+    error: str | None = None
+    prompt_text: str | None = None
+
+
+class RespondRequest(BaseModel):
+    """Request body for responding to a prompt."""
+
+    response: str
+
+
+class ErrorResponse(BaseModel):
+    """Structured error response."""
+
+    code: str
+    message: str
+    suggestion: str | None = None
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# App and singletons
 # ---------------------------------------------------------------------------
 
-def _skills_dir() -> Path:
-    """Returns the configured skills directory."""
-    config = get_config()
-    return Path(config.get("paths", {}).get("skills_dir", "./skills"))
+manager = RunManager()
+
+app = FastAPI(
+    title="OCSD API",
+    version="1.0.0",
+    description="OpenClaw Screen Driver -- routine execution API",
+)
 
 
-def _load_graph(skill_id: str) -> OCSDGraph:
-    """Loads a skill graph from disk by ID."""
-    skills_dir = _skills_dir()
-    skill_path = skills_dir / f"{skill_id}.json"
-    if not skill_path.exists():
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+# ---------------------------------------------------------------------------
+# Exception handlers
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(RunAlreadyActiveError)
+async def _handle_run_active(
+    request: Any, exc: RunAlreadyActiveError
+) -> JSONResponse:
+    """Handle attempt to start a run when one is already active."""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "code": "RUN_ALREADY_ACTIVE",
+            "message": str(exc),
+            "suggestion": "Wait for current run to finish or POST /runs/{run_id}/abort",
+        },
+    )
+
+
+@app.exception_handler(RunNotFoundError)
+async def _handle_run_not_found(
+    request: Any, exc: RunNotFoundError
+) -> JSONResponse:
+    """Handle lookup of a nonexistent run."""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "code": "RUN_NOT_FOUND",
+            "message": str(exc),
+            "suggestion": None,
+        },
+    )
+
+
+def _routine_not_found(name: str) -> HTTPException:
+    """Build a 404 HTTPException for a missing routine.
+
+    Args:
+        name: The routine ID that was not found.
+
+    Returns:
+        HTTPException with structured error body.
+    """
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": "ROUTINE_NOT_FOUND",
+            "message": f"Routine '{name}' not found",
+            "suggestion": "Run 'ocsd list' to see available routines",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET endpoints (Plan 01)
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    operation_id="ocsd_health",
+)
+async def health() -> HealthResponse:
+    """Health check -- returns server status, version, and model availability."""
+    models_loaded = False
     try:
-        return load_skill(skill_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading skill: {e}")
+        from core.detection import OmniParser  # noqa: F401
+
+        models_loaded = True
+    except Exception:
+        pass
+    return HealthResponse(status="ok", version="1.0.0", models_loaded=models_loaded)
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+@app.get(
+    "/routines",
+    response_model=list[RoutineSummary],
+    operation_id="ocsd_list_routines",
+)
+async def list_routines_endpoint(
+    tag: str | None = Query(default=None, description="Filter routines by tag"),
+) -> list[RoutineSummary]:
+    """List all discovered routines with name, version, and step count."""
+    discovered = list_routines()
+    results: list[RoutineSummary] = []
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
-    """Health check — returns server status and version."""
-    return HealthResponse(status="ok", version="0.1.0")
-
-
-@app.get("/skills", response_model=list[SkillSummary])
-async def list_skills() -> list[SkillSummary]:
-    """Lists all available skills in the skills directory."""
-    skills_dir = _skills_dir()
-    if not skills_dir.exists():
-        return []
-
-    results: list[SkillSummary] = []
-    for skill_file in sorted(skills_dir.glob("*.json")):
+    for info in discovered:
         try:
-            graph = load_skill(skill_file)
-            results.append(SkillSummary(
-                skill_id=graph.skill_id,
-                name=graph.name,
-                node_count=len(graph.nodes),
-                edge_count=graph.nx_graph.number_of_edges(),
-                file_path=str(skill_file),
-            ))
-        except Exception as e:
-            logger.warning("Skipping invalid skill file %s: %s", skill_file, e)
+            routine = Routine.load(info.path)
+            summary = RoutineSummary(
+                id=info.name,
+                name=routine.name,
+                version=routine.version,
+                step_count=len(routine.steps),
+                tags=list(routine.tags),
+            )
+            if tag is not None and tag not in routine.tags:
+                continue
+            results.append(summary)
+        except Exception as exc:
+            logger.warning("Could not load routine '%s': %s", info.name, exc)
+
     return results
 
 
-@app.get("/skills/{skill_id}", response_model=dict[str, Any])
-async def get_skill(skill_id: str) -> dict[str, Any]:
-    """Returns the full graph data for a skill."""
-    graph = _load_graph(skill_id)
-    return graph.to_dict()
-
-
-@app.get("/skills/{skill_id}/nodes", response_model=list[NodeInfo])
-async def list_nodes(skill_id: str) -> list[NodeInfo]:
-    """Lists all nodes in a skill graph."""
-    graph = _load_graph(skill_id)
-    nodes: list[NodeInfo] = []
-    for node_id in graph.nodes:
-        data = graph.get_node(node_id)
-        pos = data.get("relative_position")
-        nodes.append(NodeInfo(
-            node_id=node_id,
-            element_type=data.get("element_type", "unknown"),
-            label=data.get("label", ""),
-            position=pos if pos else None,
-        ))
-    return nodes
-
-
-@app.post("/skills/{skill_id}/execute", response_model=ExecuteResponse)
-async def execute_skill(skill_id: str, req: ExecuteRequest) -> ExecuteResponse:
-    """Executes a skill from start to goal node.
-
-    If start_node / goal_node are omitted, uses the first and last
-    nodes in the graph's recorded order.
-    """
-    graph = _load_graph(skill_id)
-    nodes_list = list(graph.nodes)
-    if len(nodes_list) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="Skill must have at least 2 nodes to execute",
-        )
-
-    start_id = req.start_node or nodes_list[0]
-    goal_id = req.goal_node or nodes_list[-1]
+@app.get(
+    "/routines/{routine_id}",
+    response_model=RoutineDetail,
+    operation_id="ocsd_get_routine",
+)
+async def get_routine(routine_id: str) -> RoutineDetail:
+    """Return full routine metadata including steps."""
+    routine_path = get_routine_dir() / routine_id
+    if not routine_path.exists():
+        raise _routine_not_found(routine_id)
 
     try:
-        from mapper.runner import run_skill
+        routine = Routine.load(routine_path)
+    except (FileNotFoundError, ValueError) as exc:
+        raise _routine_not_found(routine_id) from exc
 
-        replay_log = run_skill(
-            graph, start_id, goal_id,
-            dry_run=req.dry_run,
-            execution_params=req.params,
-        )
-
-        errors = [
-            step.error
-            for step in replay_log.steps
-            if step.error
-        ]
-
-        return ExecuteResponse(
-            skill_id=skill_id,
-            success=replay_log.overall_success,
-            steps_total=len(replay_log.steps),
-            steps_succeeded=sum(1 for s in replay_log.steps if s.success),
-            duration_ms=replay_log.duration_ms,
-            errors=errors,
-        )
-    except Exception as e:
-        logger.error("Skill execution failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Execution error: {e}")
+    data = routine.to_dict()
+    return RoutineDetail(
+        id=routine_id,
+        name=routine.name,
+        version=routine.version,
+        description=routine.description,
+        tags=list(routine.tags),
+        steps=data.get("steps", []),
+        metadata={
+            "author": data.get("author"),
+            "platform": data.get("platform"),
+            "resolution": data.get("resolution"),
+            "category": data.get("category"),
+            "created_at": data.get("created_at"),
+            "updated_at": data.get("updated_at"),
+        },
+    )
 
 
-@app.get("/skills/{skill_id}/plan")
-async def get_plan(
-    skill_id: str,
-    start: str | None = None,
-    goal: str | None = None,
-) -> dict[str, Any]:
-    """Returns the execution plan (path, steps, reliability) without running it."""
-    graph = _load_graph(skill_id)
-    nodes_list = list(graph.nodes)
-    if len(nodes_list) < 2:
-        raise HTTPException(status_code=400, detail="Skill needs at least 2 nodes")
-
-    start_id = start or nodes_list[0]
-    goal_id = goal or nodes_list[-1]
-
-    try:
-        from mapper.pathfinder import get_execution_plan as build_plan
-        plan = build_plan(graph, start_id, goal_id)
-        return plan
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Planning error: {e}")
+# ---------------------------------------------------------------------------
+# Stub endpoints (implemented in Plan 02)
+# ---------------------------------------------------------------------------
 
 
-@app.delete("/skills/{skill_id}")
-async def delete_skill(skill_id: str) -> dict[str, str]:
-    """Deletes a skill file from disk."""
-    skills_dir = _skills_dir()
-    skill_path = skills_dir / f"{skill_id}.json"
-    if not skill_path.exists():
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-    skill_path.unlink()
-    return {"status": "deleted", "skill_id": skill_id}
+@app.post(
+    "/routines/{routine_id}/run",
+    response_model=RunResponse,
+    operation_id="ocsd_run_routine",
+)
+async def run_routine_endpoint(
+    routine_id: str, req: RunRequest
+) -> RunResponse:
+    """Start a routine execution run (stub -- Plan 02)."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
+
+
+@app.get(
+    "/runs/{run_id}/status",
+    response_model=RunStatusResponse,
+    operation_id="ocsd_get_run_status",
+)
+async def get_run_status(run_id: str) -> RunStatusResponse:
+    """Get the status of an active or recent run (stub -- Plan 02)."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
+
+
+@app.post(
+    "/runs/{run_id}/respond",
+    operation_id="ocsd_respond_to_prompt",
+)
+async def respond_to_prompt(run_id: str, req: RespondRequest) -> dict[str, str]:
+    """Respond to a prompt during a running routine (stub -- Plan 02)."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
+
+
+@app.get(
+    "/runs/{run_id}/screenshot",
+    operation_id="ocsd_get_screenshot",
+)
+async def get_screenshot(run_id: str) -> bytes:
+    """Get the latest screenshot from a run (stub -- Plan 02)."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
+
+
+@app.post(
+    "/runs/{run_id}/abort",
+    operation_id="ocsd_abort_run",
+)
+async def abort_run(run_id: str) -> dict[str, str]:
+    """Abort an active run (stub -- Plan 02)."""
+    raise HTTPException(status_code=501, detail="Not yet implemented")
