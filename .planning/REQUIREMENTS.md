@@ -115,17 +115,17 @@
 - [x] **API-01**: `GET /routines` — list all routines (filterable by tags, name)
 - [x] **API-02**: `GET /routines/{id}` — get routine metadata + steps
 - [x] **API-03**: `POST /routines/{id}/run` — start execution, return run_id
-- [x] **API-04**: `GET /routines/{id}/runs/{run_id}/status` — execution status (running/waiting/completed/failed)
-- [x] **API-05**: `POST /routines/{id}/runs/{run_id}/respond` — respond to prompt_user step
-- [x] **API-06**: `GET /routines/{id}/runs/{run_id}/screenshot` — current screen state
-- [x] **API-07**: `POST /routines/{id}/runs/{run_id}/abort` — cancel running routine
+- [x] **API-04**: `GET /runs/{run_id}/status` — execution status (running/waiting/paused/completed/failed)
+- [x] **API-05**: `POST /runs/{run_id}/respond` — respond to prompt_user step
+- [x] **API-06**: `GET /runs/{run_id}/screenshot` — current screen state
+- [x] **API-07**: `POST /runs/{run_id}/abort` — cancel running routine
 - [x] **API-08**: MCP-compatible tool names mapped 1:1 from REST endpoints (via fastapi-mcp)
 - [x] **API-09**: FastAPI server runs as daemon process/thread with `install_signal_handlers=False`
 
 ### Security
 
 - [x] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
-- [ ] **SEC-02**: Routine files are auditable — every step human-readable in JSON
+- [x] **SEC-02**: Routine files are auditable — every step human-readable in JSON
 - [x] **SEC-03**: No cloud dependency at runtime — replay is 100% local
 
 ## v2 Requirements
@@ -252,7 +252,7 @@
 | API-08 | Phase 10 | Complete |
 | API-09 | Phase 10 | Complete |
 | SEC-01 | Phase 10 | Complete |
-| SEC-02 | Phase 10 | Pending |
+| SEC-02 | Phase 5 | Complete |
 | SEC-03 | Phase 10 | Complete |
 
 **Coverage:**
