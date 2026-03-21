@@ -371,6 +371,7 @@ async def run_routine_endpoint(
                 routine_dir=routine_path,
                 callback=callback,
                 abort_event=active.abort_event,
+                prompt_timeout_s=timeout_s,
             )
         except Exception as exc:
             manager.mark_failed(run_id, str(exc))

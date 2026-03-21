@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -174,6 +175,49 @@ def test_scanner_exists() -> None:
     )
     assert isinstance(result, ScanResult)
     assert result.is_safe is True
+
+
+@patch("api.server.get_routine_dir")
+def test_run_passes_prompt_timeout(mock_dir: MagicMock) -> None:
+    """POST /routines/{id}/run passes prompt_timeout_s to run_routine."""
+    import time
+
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "timeout-test"
+        p.mkdir()
+        (p / "routine.json").write_text(
+            json.dumps({
+                "schema": "ocsd-routine-v1",
+                "name": "timeout-test",
+                "steps": [],
+                "graph": {"nodes": [], "edges": []},
+                "metadata": {},
+            })
+        )
+        mock_dir.return_value = Path(td)
+
+        captured_kwargs: dict = {}
+
+        def fake_run_routine(**kwargs: Any) -> None:
+            captured_kwargs.update(kwargs)
+
+        manager._active = None
+
+        with patch("routine.runner.run_routine", fake_run_routine):
+            resp = client.post(
+                "/routines/timeout-test/run",
+                json={"prompt_timeout_s": 42},
+            )
+            assert resp.status_code == 200
+            run_id = resp.json()["run_id"]
+
+            # Give the thread a moment to call run_routine
+            time.sleep(0.3)
+
+        assert captured_kwargs.get("prompt_timeout_s") == 42
+
+        # Clean up
+        manager.mark_complete(run_id)
 
 
 def test_no_remote_binding() -> None:

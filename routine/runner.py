@@ -412,6 +412,7 @@ def _dispatch_action(
     step: dict[str, Any],
     locate_result: LocateResult,
     dry_run: bool = False,
+    prompt_timeout_s: float | None = None,
 ) -> str:
     """Execute the appropriate action for a step.
 
@@ -491,7 +492,7 @@ def _dispatch_action(
 
     elif action == "prompt_user":
         question = step.get("question_text", "")
-        response = prompt_user_blocking(question, dry_run=dry_run)
+        response = prompt_user_blocking(question, dry_run=dry_run, timeout=prompt_timeout_s)
         return response if response else "prompt_empty"
 
     elif action == "wait":
@@ -531,6 +532,7 @@ def _handle_loop_step(
     dry_run: bool,
     step_results: list[dict[str, Any]],
     abort_event: threading.Event | None = None,
+    prompt_timeout_s: float | None = None,
 ) -> None:
     """Execute a loop step by replaying body steps and checking exit condition.
 
@@ -603,7 +605,7 @@ def _handle_loop_step(
                         )
                         continue
 
-            _dispatch_action(body_step, lr, dry_run=dry_run)
+            _dispatch_action(body_step, lr, dry_run=dry_run, prompt_timeout_s=prompt_timeout_s)
 
         # Check exit condition
         if n_iter_target is not None:
@@ -638,6 +640,7 @@ def run_routine(
     callback: RunCallback | None = None,
     dry_run: bool = False,
     abort_event: threading.Event | None = None,
+    prompt_timeout_s: float | None = None,
 ) -> RunResult:
     """Execute a routine from its directory.
 
@@ -750,6 +753,7 @@ def run_routine(
                 step, routine, routine_dir, run_dir, i,
                 callback, dry_run, step_results,
                 abort_event=abort_event,
+                prompt_timeout_s=prompt_timeout_s,
             )
             steps_completed += 1
             continue
@@ -804,7 +808,7 @@ def run_routine(
                 })
 
         # Execute action
-        action_result = _dispatch_action(step, locate_result, dry_run=dry_run)
+        action_result = _dispatch_action(step, locate_result, dry_run=dry_run, prompt_timeout_s=prompt_timeout_s)
         _emit(callback, RunEvent.ACTION_EXECUTED, {
             "step_index": i,
             "action": action,
