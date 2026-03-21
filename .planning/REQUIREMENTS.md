@@ -112,21 +112,21 @@
 
 ### API
 
-- [ ] **API-01**: `GET /routines` — list all routines (filterable by tags, name)
-- [ ] **API-02**: `GET /routines/{id}` — get routine metadata + steps
+- [x] **API-01**: `GET /routines` — list all routines (filterable by tags, name)
+- [x] **API-02**: `GET /routines/{id}` — get routine metadata + steps
 - [ ] **API-03**: `POST /routines/{id}/run` — start execution, return run_id
 - [ ] **API-04**: `GET /routines/{id}/runs/{run_id}/status` — execution status (running/waiting/completed/failed)
 - [ ] **API-05**: `POST /routines/{id}/runs/{run_id}/respond` — respond to prompt_user step
 - [ ] **API-06**: `GET /routines/{id}/runs/{run_id}/screenshot` — current screen state
 - [ ] **API-07**: `POST /routines/{id}/runs/{run_id}/abort` — cancel running routine
 - [ ] **API-08**: MCP-compatible tool names mapped 1:1 from REST endpoints (via fastapi-mcp)
-- [ ] **API-09**: FastAPI server runs as daemon process/thread with `install_signal_handlers=False`
+- [x] **API-09**: FastAPI server runs as daemon process/thread with `install_signal_handlers=False`
 
 ### Security
 
 - [ ] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
 - [ ] **SEC-02**: Routine files are auditable — every step human-readable in JSON
-- [ ] **SEC-03**: No cloud dependency at runtime — replay is 100% local
+- [x] **SEC-03**: No cloud dependency at runtime — replay is 100% local
 
 ## v2 Requirements
 
@@ -242,18 +242,18 @@
 | CLI-07 | Phase 9 | Complete |
 | CLI-08 | Phase 9 | Complete |
 | CLI-09 | Phase 9 | Complete |
-| API-01 | Phase 10 | Pending |
-| API-02 | Phase 10 | Pending |
+| API-01 | Phase 10 | Complete |
+| API-02 | Phase 10 | Complete |
 | API-03 | Phase 10 | Pending |
 | API-04 | Phase 10 | Pending |
 | API-05 | Phase 10 | Pending |
 | API-06 | Phase 10 | Pending |
 | API-07 | Phase 10 | Pending |
 | API-08 | Phase 10 | Pending |
-| API-09 | Phase 10 | Pending |
+| API-09 | Phase 10 | Complete |
 | SEC-01 | Phase 10 | Pending |
 | SEC-02 | Phase 10 | Pending |
-| SEC-03 | Phase 10 | Pending |
+| SEC-03 | Phase 10 | Complete |
 
 **Coverage:**
 - v1 requirements: 87 total
