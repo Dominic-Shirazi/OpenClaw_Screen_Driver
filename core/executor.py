@@ -28,6 +28,12 @@ from core.config import get_config
 
 logger = logging.getLogger(__name__)
 
+
+class PromptTimeoutError(Exception):
+    """Raised when prompt_user_blocking times out waiting for a response."""
+
+    pass
+
 # PyAutoGUI safety: moving mouse to (0,0) aborts. Keep this ON.
 pyautogui.FAILSAFE = True
 # Disable default pause between actions (we handle timing ourselves).
@@ -379,6 +385,7 @@ def prompt_user_blocking(
     question_text: str,
     screenshot_path: str | None = None,
     dry_run: bool = False,
+    timeout: float | None = None,
 ) -> str:
     """Pause routine execution and wait for user/agent response via API.
 
@@ -405,7 +412,11 @@ def prompt_user_blocking(
 
     # Block until respond_to_prompt is called
     logger.info("Routine paused. Waiting for API /respond...")
-    _prompt_response_event.wait()
+    signaled = _prompt_response_event.wait(timeout=timeout)
+    if not signaled:
+        raise PromptTimeoutError(
+            f"Prompt timed out after {timeout}s: {question_text[:50]}"
+        )
 
     response = _prompt_response_text
     logger.info("Prompt response received: %s", response[:80])

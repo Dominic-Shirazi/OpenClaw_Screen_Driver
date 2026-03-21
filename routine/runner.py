@@ -14,6 +14,7 @@ import json
 import logging
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -76,6 +77,7 @@ class RunEvent(Enum):
     LOOP_ITERATION = auto()
     RUN_COMPLETE = auto()
     RUN_FAILED = auto()
+    RUN_PAUSED = auto()
 
 
 class RunCallback(Protocol):
@@ -528,6 +530,7 @@ def _handle_loop_step(
     callback: RunCallback | None,
     dry_run: bool,
     step_results: list[dict[str, Any]],
+    abort_event: threading.Event | None = None,
 ) -> None:
     """Execute a loop step by replaying body steps and checking exit condition.
 
@@ -569,6 +572,11 @@ def _handle_loop_step(
 
     iteration = 0
     while iteration < max_iterations:
+        # Check abort flag between loop iterations
+        if abort_event is not None and abort_event.is_set():
+            logger.info("Abort requested during loop at iteration %d", iteration)
+            break
+
         iteration += 1
         _emit(callback, RunEvent.LOOP_ITERATION, {
             "step_index": step_index,
@@ -629,6 +637,7 @@ def run_routine(
     *,
     callback: RunCallback | None = None,
     dry_run: bool = False,
+    abort_event: threading.Event | None = None,
 ) -> RunResult:
     """Execute a routine from its directory.
 
@@ -640,6 +649,7 @@ def run_routine(
         routine_dir: Path to the routine directory containing routine.json.
         callback: Optional event callback for overlay integration.
         dry_run: If True, log actions without executing them.
+        abort_event: Optional threading.Event; when set, pauses run between steps.
 
     Returns:
         RunResult with execution outcome and metadata.
@@ -719,6 +729,18 @@ def run_routine(
     failure_reason: str | None = None
 
     for i, step in enumerate(routine.steps):
+        # Check abort flag between steps
+        if abort_event is not None and abort_event.is_set():
+            logger.info("Abort requested, pausing run at step %d", i)
+            _emit(callback, RunEvent.RUN_PAUSED, {
+                "routine_name": routine.name,
+                "paused_step": i,
+                "reason": "Aborted by user/agent",
+            })
+            failure_step = i
+            failure_reason = "Paused by user/agent"
+            break
+
         action = step.get("action", "click")
         label = step.get("label", f"step_{i}")
 
@@ -727,6 +749,7 @@ def run_routine(
             _handle_loop_step(
                 step, routine, routine_dir, run_dir, i,
                 callback, dry_run, step_results,
+                abort_event=abort_event,
             )
             steps_completed += 1
             continue
