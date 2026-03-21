@@ -199,12 +199,15 @@ Plans:
   2. `run` from TUI menu shows the same overlay feedback as CLI
   3. Before any routine executes (CLI, TUI, or API), the hub scanner checks for suspicious patterns and blocks execution if threats are found
   4. Scanner accepts v1 routine format (steps array) — not just legacy skill_data format
-**Plans**: 0 plans
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md -- Security scanner v1 format adapter and runner preflight integration
+- [ ] 11-02-PLAN.md -- Replay overlay wiring into CLI and TUI run paths
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -218,4 +221,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 8. Routine Management | 1/2 | In Progress|  |
 | 9. TUI and CLI | 3/3 | Complete   | 2026-03-20 |
 | 10. API and MCP | 4/4 | Complete    | 2026-03-21 |
-| 11. Integration Wiring | 0/0 | Not started | - |
+| 11. Integration Wiring | 0/2 | Not started | - |
