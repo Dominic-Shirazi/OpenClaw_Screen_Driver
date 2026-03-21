@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-03-21T00:47:57.227Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-03-21T00:54:42.571Z"
 last_activity: 2026-03-20 — Completed 09-03-PLAN.md (TUI-to-Qt Handoff & Variable Collection)
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 32
-  completed_plans: 30
+  completed_plans: 31
 ---
 
 ---
@@ -139,6 +139,7 @@ Progress: [██████████] 97% (31 of 32 plans)
 | Phase 09 P01 | 8min | 2 tasks | 7 files |
 | Phase 09 P03 | 5min | 2 tasks | 6 files |
 | Phase 10 P01 | 3min | 2 tasks | 6 files |
+| Phase 10 P02 | 4min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -219,6 +220,9 @@ Recent decisions affecting current work:
 - [Phase 10]: RunManager uses threading.Lock with single active run constraint
 - [Phase 10]: _NoSignalServer subclass prevents uvicorn from stealing Qt signal handlers
 - [Phase 10]: Config defaults updated to 127.0.0.1:8420 with localhost-only binding
+- [Phase 10]: RUN_PAUSED emitted on abort (not RUN_FAILED) so overlay and RunManager treat abort as pause
+- [Phase 10]: run_routine imported lazily inside thread function to avoid circular imports
+- [Phase 10]: Overlay stays open on abort with green shimmer + Paused badge; resume via API deferred to V2
 
 ### Pending Todos
 
@@ -234,6 +238,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T00:47:57.222Z
-Stopped at: Completed 10-01-PLAN.md
+Last session: 2026-03-21T00:54:42.566Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
