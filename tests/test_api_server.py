@@ -1,18 +1,20 @@
 """Tests for OCSD API server endpoints.
 
-Verifies health check, routine listing, routine detail, and
-localhost binding configuration using FastAPI TestClient.
+Verifies health check, routine listing, routine detail, run start,
+status, conflict, and localhost binding configuration using FastAPI TestClient.
 """
 
 from __future__ import annotations
 
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from api.server import app
+from api.server import app, manager
 
 client = TestClient(app)
 
@@ -56,16 +58,61 @@ def test_localhost_binding(tmp_path: Path) -> None:
     assert "mcp_compatible" not in _DEFAULTS["api"]
 
 
-def test_stub_endpoints_return_501() -> None:
-    """Stub endpoints return 501 Not Implemented."""
-    resp = client.post("/routines/test-routine/run", json={})
-    assert resp.status_code == 501
+def test_run_not_found() -> None:
+    """GET /runs/{run_id}/status returns 404 for nonexistent run."""
+    resp = client.get("/runs/nonexistent/status")
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "RUN_NOT_FOUND"
 
-    resp = client.get("/runs/fakeid/status")
-    assert resp.status_code == 501
 
-    resp = client.post("/runs/fakeid/respond", json={"response": "yes"})
-    assert resp.status_code == 501
+@patch("routine.runner.run_routine")
+@patch("api.server.get_routine_dir")
+def test_start_run(mock_dir: MagicMock, mock_run: MagicMock) -> None:
+    """POST /routines/{id}/run returns run_id."""
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "test-routine"
+        p.mkdir()
+        (p / "routine.json").write_text(
+            json.dumps({"schema": "ocsd-routine-v1", "name": "test", "steps": []})
+        )
+        mock_dir.return_value = Path(td)
+        mock_run.return_value = MagicMock(success=True)
 
-    resp = client.post("/runs/fakeid/abort")
-    assert resp.status_code == 501
+        # Reset manager state
+        manager._active = None
+
+        resp = client.post("/routines/test-routine/run")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "run_id" in data
+
+        # Clean up: mark the run as complete so it doesn't block next test
+        run_id = data["run_id"]
+        manager.mark_complete(run_id)
+
+
+@patch("routine.runner.run_routine")
+@patch("api.server.get_routine_dir")
+def test_run_conflict(mock_dir: MagicMock, mock_run: MagicMock) -> None:
+    """Second POST /run returns 409."""
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "test-routine"
+        p.mkdir()
+        (p / "routine.json").write_text(
+            json.dumps({"schema": "ocsd-routine-v1", "name": "test", "steps": []})
+        )
+        mock_dir.return_value = Path(td)
+
+        manager._active = None
+
+        # First run succeeds
+        resp1 = client.post("/routines/test-routine/run")
+        assert resp1.status_code == 200
+
+        # Second run should 409
+        resp2 = client.post("/routines/test-routine/run")
+        assert resp2.status_code == 409
+
+        # Clean up
+        run_id = resp1.json()["run_id"]
+        manager.mark_complete(run_id)
