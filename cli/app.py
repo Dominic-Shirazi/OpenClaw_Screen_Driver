@@ -308,6 +308,48 @@ def delete(
         console.print(f"[green]Deleted '{name}'[/green]")
 
 
+@app.command()
+def serve(
+    port: int = typer.Option(8420, "--port", help="API server port"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+) -> None:
+    """Start the OCSD API server for agent/headless use.
+
+    Preloads AI models, then blocks serving HTTP requests.
+    Press Ctrl+C for graceful shutdown.
+    """
+    console = Console()
+    console.print("[bold]OCSD API Server[/bold]")
+    console.print(f"Binding to {host}:{port}")
+
+    # Preload models
+    console.print("[dim]Preloading models...[/dim]")
+    try:
+        from core.detection import get_detector
+
+        get_detector()
+        console.print("[green]  OmniParser loaded[/green]")
+    except Exception as exc:
+        console.print(f"[yellow]  OmniParser not available: {exc}[/yellow]")
+
+    try:
+        from core.embeddings import get_clip_model
+
+        get_clip_model()
+        console.print("[green]  CLIP loaded[/green]")
+    except Exception as exc:
+        console.print(f"[yellow]  CLIP not available: {exc}[/yellow]")
+
+    console.print(f"\n[bold green]OCSD API ready at http://{host}:{port}[/bold green]")
+    console.print("[dim]Press Ctrl+C to stop[/dim]\n")
+
+    import uvicorn
+
+    from api.server import app as api_app
+
+    uvicorn.run(api_app, host=host, port=port, log_level="info")
+
+
 def main() -> None:
     """Entry point for the ``ocsd`` CLI."""
     app()

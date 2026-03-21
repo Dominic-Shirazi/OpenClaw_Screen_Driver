@@ -464,3 +464,20 @@ async def abort_run(run_id: str) -> dict[str, str]:
         )
     run.abort_event.set()
     return {"status": "pause_requested", "run_id": run_id}
+
+
+# ---------------------------------------------------------------------------
+# MCP tool layer
+# ---------------------------------------------------------------------------
+try:
+    from fastapi_mcp import FastApiMCP
+
+    mcp = FastApiMCP(
+        app,
+        name="ocsd",
+        description="OCSD routine automation tools",
+    )
+    mcp.mount()  # HTTP Streamable transport at /mcp
+    logger.info("MCP tools mounted at /mcp")
+except ImportError:
+    logger.debug("fastapi-mcp not installed, MCP tools unavailable")
