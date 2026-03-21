@@ -477,7 +477,7 @@ try:
         name="ocsd",
         description="OCSD routine automation tools",
     )
-    mcp.mount()  # HTTP Streamable transport at /mcp
+    mcp.mount_http()  # HTTP Streamable transport at /mcp
     logger.info("MCP tools mounted at /mcp")
 except ImportError:
     logger.debug("fastapi-mcp not installed, MCP tools unavailable")
