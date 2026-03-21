@@ -85,9 +85,9 @@ _DEFAULTS: dict[str, Any] = {
         "keep_failed_runs": 10,
     },
     "api": {
-        "host": "0.0.0.0",
-        "port": 8742,
-        "mcp_compatible": True,
+        "host": "127.0.0.1",
+        "port": 8420,
+        "prompt_timeout_s": 300,
     },
     "hub": {
         "registry_url": "https://github.com/openclaw/ocsd-hub",
