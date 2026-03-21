@@ -22,6 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 8: Routine Management** - Update, fork, delete, and inspect operations on saved routines
 - [x] **Phase 9: TUI and CLI** - Rich pre-launch launcher with loading screen and full `ocsd` CLI entry point (completed 2026-03-20)
 - [x] **Phase 10: API and MCP** - FastAPI REST endpoints, MCP tool mapping via fastapi-mcp, and security scanning (completed 2026-03-21)
+- [ ] **Phase 11: Integration Wiring** - Wire replay overlay adapter into CLI/TUI run paths and connect security scanner to routine execution preflight
 
 ## Phase Details
 
@@ -188,6 +189,18 @@ Plans:
 - [x] 10-03-PLAN.md -- MCP tool layer via fastapi-mcp, ocsd serve CLI command, scanner verification
 - [ ] 10-04-PLAN.md -- Gap closure: fix REQUIREMENTS.md URL paths and SEC-02 status, wire prompt_timeout_s end-to-end
 
+### Phase 11: Integration Wiring
+**Goal**: Replay overlay visuals activate during CLI/TUI routine runs, and the security scanner checks routines before execution
+**Depends on**: Phase 10
+**Requirements**: RUN-09, SEC-01
+**Gap Closure**: Closes gaps from v1.0 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. `ocsd run "Name"` from CLI shows purple shimmer, StatusBadge (current step), TargetHighlight, and CameraFlash during replay
+  2. `run` from TUI menu shows the same overlay feedback as CLI
+  3. Before any routine executes (CLI, TUI, or API), the hub scanner checks for suspicious patterns and blocks execution if threats are found
+  4. Scanner accepts v1 routine format (steps array) — not just legacy skill_data format
+**Plans**: 0 plans
+
 ## Progress
 
 **Execution Order:**
@@ -205,3 +218,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 8. Routine Management | 1/2 | In Progress|  |
 | 9. TUI and CLI | 3/3 | Complete   | 2026-03-20 |
 | 10. API and MCP | 4/4 | Complete    | 2026-03-21 |
+| 11. Integration Wiring | 0/0 | Not started | - |

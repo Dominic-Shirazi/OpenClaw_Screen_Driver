@@ -55,7 +55,7 @@
 - [x] **RUN-06**: Post-action validation via pixel-diff + optional VLM confirmation
 - [x] **RUN-07**: Failure cascade — auto-retry (2x) → widen search to full screen → prompt user/agent → log
 - [x] **RUN-08**: Never silently fail or blind-click when unsure — always surface uncertainty
-- [x] **RUN-09**: Step-by-step replay status visible to user (which step is executing)
+- [ ] **RUN-09**: Step-by-step replay status visible to user (which step is executing)
 
 ### Action Types
 
@@ -124,7 +124,7 @@
 
 ### Security
 
-- [x] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
+- [ ] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
 - [x] **SEC-02**: Routine files are auditable — every step human-readable in JSON
 - [x] **SEC-03**: No cloud dependency at runtime — replay is 100% local
 
@@ -222,7 +222,7 @@
 | RUN-06 | Phase 7 | Complete |
 | RUN-07 | Phase 7 | Complete |
 | RUN-08 | Phase 7 | Complete |
-| RUN-09 | Phase 7 | Complete |
+| RUN-09 | Phase 11 | Pending |
 | MGMT-01 | Phase 8 | Complete |
 | MGMT-02 | Phase 8 | Complete |
 | MGMT-03 | Phase 8 | Complete |
@@ -251,7 +251,7 @@
 | API-07 | Phase 10 | Complete |
 | API-08 | Phase 10 | Complete |
 | API-09 | Phase 10 | Complete |
-| SEC-01 | Phase 10 | Complete |
+| SEC-01 | Phase 11 | Pending |
 | SEC-02 | Phase 5 | Complete |
 | SEC-03 | Phase 10 | Complete |
 
