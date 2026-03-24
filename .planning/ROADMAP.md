@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 8: Routine Management** - Update, fork, delete, and inspect operations on saved routines
 - [x] **Phase 9: TUI and CLI** - Rich pre-launch launcher with loading screen and full `ocsd` CLI entry point (completed 2026-03-20)
 - [x] **Phase 10: API and MCP** - FastAPI REST endpoints, MCP tool mapping via fastapi-mcp, and security scanning (completed 2026-03-21)
-- [ ] **Phase 11: Integration Wiring** - Wire replay overlay adapter into CLI/TUI run paths and connect security scanner to routine execution preflight
+- [x] **Phase 11: Integration Wiring** - Wire replay overlay adapter into CLI/TUI run paths and connect security scanner to routine execution preflight (completed 2026-03-24)
 
 ## Phase Details
 
@@ -221,4 +221,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 8. Routine Management | 1/2 | In Progress|  |
 | 9. TUI and CLI | 3/3 | Complete   | 2026-03-20 |
 | 10. API and MCP | 4/4 | Complete    | 2026-03-21 |
-| 11. Integration Wiring | 1/2 | In Progress|  |
+| 11. Integration Wiring | 2/2 | Complete   | 2026-03-24 |

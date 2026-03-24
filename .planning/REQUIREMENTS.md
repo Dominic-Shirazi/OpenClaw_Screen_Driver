@@ -124,7 +124,7 @@
 
 ### Security
 
-- [ ] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
+- [x] **SEC-01**: Hub scanner flags suspicious URLs, prompt injection, data exfiltration, keylogger patterns
 - [x] **SEC-02**: Routine files are auditable — every step human-readable in JSON
 - [x] **SEC-03**: No cloud dependency at runtime — replay is 100% local
 
@@ -251,7 +251,7 @@
 | API-07 | Phase 10 | Complete |
 | API-08 | Phase 10 | Complete |
 | API-09 | Phase 10 | Complete |
-| SEC-01 | Phase 11 | Pending |
+| SEC-01 | Phase 11 | Complete |
 | SEC-02 | Phase 5 | Complete |
 | SEC-03 | Phase 10 | Complete |
 
