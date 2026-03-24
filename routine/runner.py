@@ -699,6 +699,47 @@ def run_routine(
 
     _emit(callback, RunEvent.PREFLIGHT_OK, {"routine_name": routine.name})
 
+    # Security scan
+    try:
+        from hub.scanner import scan_routine
+        scan_result = scan_routine(routine.to_dict())
+        if not scan_result.is_safe:
+            scan_errors = [
+                f"Security scan failed (risk={scan_result.risk_score:.2f}): {w}"
+                for w in scan_result.warnings
+            ]
+            _emit(callback, RunEvent.PREFLIGHT_FAILED, {"errors": scan_errors})
+            logger.error("Security scan blocked routine: %s", scan_errors)
+            run_dir = create_run_dir(routine_dir)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            result = RunResult(
+                success=False,
+                routine_name=routine.name,
+                run_id=run_dir.name,
+                run_dir=run_dir,
+                steps_completed=0,
+                total_steps=total_steps,
+                duration_ms=duration_ms,
+                failure_step=None,
+                failure_reason=scan_errors[0] if scan_errors else "Security scan failed",
+            )
+            save_run_result(run_dir, {
+                "run_id": run_dir.name,
+                "routine_name": routine.name,
+                "status": "failed",
+                "started_at": started_at,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": duration_ms,
+                "steps_completed": 0,
+                "total_steps": total_steps,
+                "failure_step": None,
+                "failure_reason": result.failure_reason,
+            })
+            prune_old_runs(routine_dir)
+            return result
+    except ImportError:
+        logger.debug("hub.scanner not available, skipping security scan")
+
     # Create run directory and logger
     run_dir = create_run_dir(routine_dir)
     handler = setup_run_logger(run_dir)

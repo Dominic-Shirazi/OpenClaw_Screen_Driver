@@ -249,6 +249,64 @@ class TestRunRoutine:
 
 
 # ---------------------------------------------------------------------------
+# Scanner integration tests
+# ---------------------------------------------------------------------------
+
+class TestScannerIntegration:
+    """Tests for scanner wired into run_routine() preflight."""
+
+    def test_run_routine_blocks_unsafe_routine(
+        self, sample_routine_dir: Path, mock_routine: MagicMock,
+    ) -> None:
+        """Verify run_routine returns failure when scanner flags threats."""
+        from hub.scanner import ScanResult
+
+        unsafe_result = ScanResult(
+            is_safe=False,
+            warnings=["Threat detected: malicious URL"],
+            risk_score=0.8,
+        )
+
+        with (
+            patch(_RUN_PATCHES["load"], return_value=mock_routine),
+            patch(_RUN_PATCHES["locate"], side_effect=_locate_ok),
+            patch(_RUN_PATCHES["screenshot"], side_effect=_fake_screenshot),
+            patch(_RUN_PATCHES["prune"]),
+            patch("routine.runner.scan_routine", return_value=unsafe_result, create=True),
+            patch("hub.scanner.scan_routine", return_value=unsafe_result),
+        ):
+            result = run_routine(sample_routine_dir, dry_run=True)
+
+        assert result.success is False
+        assert result.failure_reason is not None
+        assert "Security scan" in result.failure_reason
+
+    def test_run_routine_allows_safe_routine(
+        self, sample_routine_dir: Path, mock_routine: MagicMock,
+    ) -> None:
+        """Verify run_routine proceeds normally when scanner says safe."""
+        from hub.scanner import ScanResult
+
+        safe_result = ScanResult(is_safe=True, warnings=[], risk_score=0.0)
+
+        with (
+            patch(_RUN_PATCHES["load"], return_value=mock_routine),
+            patch(_RUN_PATCHES["locate"], side_effect=_locate_ok),
+            patch(_RUN_PATCHES["screenshot"], side_effect=_fake_screenshot),
+            patch(_RUN_PATCHES["validate"], side_effect=_validate_ok),
+            patch(_RUN_PATCHES["click"]),
+            patch(_RUN_PATCHES["type_text"]),
+            patch(_RUN_PATCHES["press_enter"]),
+            patch(_RUN_PATCHES["prune"]),
+            patch("hub.scanner.scan_routine", return_value=safe_result),
+        ):
+            result = run_routine(sample_routine_dir, dry_run=True)
+
+        assert result.success is True
+        assert result.steps_completed == result.total_steps
+
+
+# ---------------------------------------------------------------------------
 # Dispatch tests
 # ---------------------------------------------------------------------------
 
