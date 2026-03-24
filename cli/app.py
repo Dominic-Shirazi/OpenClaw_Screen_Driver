@@ -150,9 +150,42 @@ def run_command(
         logger.debug("TUI loading screen not available")
 
     try:
+        import sys as _sys
+        import threading as _threading
+
+        from PyQt6.QtWidgets import QApplication
+
+        from recorder.overlay.controller import OverlayController
+        from routine.replay_overlay import ReplayOverlayAdapter
         from routine.runner import run_routine
 
-        result = run_routine(routine_dir=run_path)
+        qt_app = QApplication.instance() or QApplication(_sys.argv)
+        qt_app.setQuitOnLastWindowClosed(False)
+
+        controller = OverlayController()
+        adapter = ReplayOverlayAdapter(controller)
+        controller.show()
+
+        run_result_holder: list = [None]
+        run_exc_holder: list = [None]
+
+        def _run_thread() -> None:
+            try:
+                run_result_holder[0] = run_routine(
+                    routine_dir=run_path, callback=adapter,
+                )
+            except Exception as exc:
+                run_exc_holder[0] = exc
+            finally:
+                qt_app.quit()
+
+        thread = _threading.Thread(target=_run_thread, daemon=True)
+        thread.start()
+        qt_app.exec()
+
+        if run_exc_holder[0] is not None:
+            raise run_exc_holder[0]
+        result = run_result_holder[0]
     except Exception as exc:
         cfg["execution"]["human_delay"] = original_delay
         show_error("Run Failed", str(exc))
