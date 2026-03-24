@@ -366,8 +366,42 @@ def run_tui() -> None:
                 logger.info("Terminal minimize not available")
 
             try:
+                import sys as _sys  # noqa: PLC0415
+                import threading as _threading  # noqa: PLC0415
+
+                from PyQt6.QtWidgets import QApplication  # noqa: PLC0415
+
+                from recorder.overlay.controller import OverlayController  # noqa: PLC0415
+                from routine.replay_overlay import ReplayOverlayAdapter  # noqa: PLC0415
                 from routine.runner import run_routine  # noqa: PLC0415
-                result = run_routine(routine_dir=routine_path)
+
+                qt_app = QApplication.instance() or QApplication(_sys.argv)
+                qt_app.setQuitOnLastWindowClosed(False)
+
+                controller = OverlayController()
+                adapter = ReplayOverlayAdapter(controller)
+                controller.show()
+
+                run_result_holder: list = [None]
+                run_exc_holder: list = [None]
+
+                def _run_thread() -> None:
+                    try:
+                        run_result_holder[0] = run_routine(
+                            routine_dir=routine_path, callback=adapter,
+                        )
+                    except Exception as exc:
+                        run_exc_holder[0] = exc
+                    finally:
+                        qt_app.quit()
+
+                thread = _threading.Thread(target=_run_thread, daemon=True)
+                thread.start()
+                qt_app.exec()
+
+                if run_exc_holder[0] is not None:
+                    raise run_exc_holder[0]
+                result = run_result_holder[0]
                 status = "[green]SUCCESS[/green]" if result.success else "[red]FAILED[/red]"
                 console.print(
                     f"Run complete: {status} "

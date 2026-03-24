@@ -513,6 +513,96 @@ def test_run_command_with_variables(tmp_path: Path) -> None:
     mock_run.assert_called_once()
 
 
+def test_run_command_wires_overlay_callback(tmp_path: Path) -> None:
+    """Verify run_command passes ReplayOverlayAdapter as callback to run_routine."""
+    routine_dir = tmp_path / "OverlayRoutine"
+    routine_dir.mkdir()
+
+    mock_result = _mock_run_result(routine_dir, "OverlayRoutine")
+    captured_kwargs: dict = {}
+
+    def _capture_run(**kwargs):
+        captured_kwargs.update(kwargs)
+        return mock_result
+
+    mock_loading = MagicMock()
+
+    # Mock QApplication to avoid needing a real display
+    mock_qapp_instance = MagicMock()
+    mock_qapp_instance.exec = MagicMock(return_value=0)
+    mock_qapp_instance.quit = MagicMock()
+
+    mock_qapp_cls = MagicMock()
+    mock_qapp_cls.instance = MagicMock(return_value=mock_qapp_instance)
+
+    mock_controller = MagicMock()
+    mock_adapter = MagicMock()
+
+    # We need to intercept the thread to run synchronously
+    def _fake_thread_start(self_thread):
+        self_thread._target()
+
+    with patch("cli.app.resolve_routine_path", return_value=routine_dir):
+        with patch("cli.app.collect_variables", return_value={}):
+            with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                with patch.dict("sys.modules", {
+                    "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                    "routine.runner": MagicMock(run_routine=_capture_run),
+                    "PyQt6.QtWidgets": MagicMock(QApplication=mock_qapp_cls),
+                    "recorder.overlay.controller": MagicMock(OverlayController=MagicMock(return_value=mock_controller)),
+                    "routine.replay_overlay": MagicMock(ReplayOverlayAdapter=MagicMock(return_value=mock_adapter)),
+                }):
+                    with patch("threading.Thread") as mock_thread_cls:
+                        mock_thread_obj = MagicMock()
+                        mock_thread_cls.return_value = mock_thread_obj
+                        # When start() is called, run the target synchronously
+                        def _run_target():
+                            target = mock_thread_cls.call_args[1].get("target") or mock_thread_cls.call_args[0][0]
+                            target()
+                        mock_thread_obj.start = _run_target
+                        result = runner.invoke(app, ["run", "OverlayRoutine"])
+
+    assert result.exit_code == 0
+    assert captured_kwargs.get("callback") is not None, "callback= must be passed to run_routine"
+
+
+def test_run_command_still_outputs_result_with_overlay(tmp_path: Path) -> None:
+    """Verify run_command still shows result panel after overlay run."""
+    routine_dir = tmp_path / "OutputRoutine"
+    routine_dir.mkdir()
+
+    mock_result = _mock_run_result(routine_dir, "OutputRoutine")
+    mock_loading = MagicMock()
+
+    mock_qapp_instance = MagicMock()
+    mock_qapp_instance.exec = MagicMock(return_value=0)
+    mock_qapp_instance.quit = MagicMock()
+    mock_qapp_cls = MagicMock()
+    mock_qapp_cls.instance = MagicMock(return_value=mock_qapp_instance)
+
+    with patch("cli.app.resolve_routine_path", return_value=routine_dir):
+        with patch("cli.app.collect_variables", return_value={}):
+            with patch("core.config.get_config", return_value={"execution": {"human_delay": 1.0}}):
+                with patch.dict("sys.modules", {
+                    "cli.tui": MagicMock(show_loading_screen=mock_loading),
+                    "routine.runner": MagicMock(run_routine=MagicMock(return_value=mock_result)),
+                    "PyQt6.QtWidgets": MagicMock(QApplication=mock_qapp_cls),
+                    "recorder.overlay.controller": MagicMock(OverlayController=MagicMock()),
+                    "routine.replay_overlay": MagicMock(ReplayOverlayAdapter=MagicMock()),
+                }):
+                    with patch("threading.Thread") as mock_thread_cls:
+                        mock_thread_obj = MagicMock()
+                        mock_thread_cls.return_value = mock_thread_obj
+                        def _run_target():
+                            target = mock_thread_cls.call_args[1].get("target") or mock_thread_cls.call_args[0][0]
+                            target()
+                        mock_thread_obj.start = _run_target
+                        result = runner.invoke(app, ["run", "OutputRoutine"])
+
+    assert result.exit_code == 0
+    assert "Run Result" in result.output
+
+
 def test_main_redirect() -> None:
     """main.main is callable and redirects to cli.app.main."""
     from main import main as main_func
