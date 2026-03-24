@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-04-PLAN.md
-last_updated: "2026-03-21T01:29:18.957Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-03-24T22:45:27.277Z"
 last_activity: 2026-03-20 — Completed 09-03-PLAN.md (TUI-to-Qt Handoff & Variable Collection)
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 10
-  total_plans: 33
-  completed_plans: 33
+  total_plans: 35
+  completed_plans: 34
 ---
 
 ---
@@ -142,6 +142,7 @@ Progress: [██████████] 97% (31 of 32 plans)
 | Phase 10 P02 | 4min | 3 tasks | 5 files |
 | Phase 10 P03 | 2min | 2 tasks | 4 files |
 | Phase 10 P04 | 2min | 2 tasks | 4 files |
+| Phase 11 P02 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -229,6 +230,7 @@ Recent decisions affecting current work:
 - [Phase 10]: ocsd serve uses uvicorn.run() directly (blocking) for headless mode, not daemon thread
 - [Phase 10]: mount_http() used instead of deprecated mount() for forward compatibility
 - [Phase 10]: prompt_timeout_s threaded through _handle_loop_step as well for loop body prompt_user steps
+- [Phase 11]: Same QApplication+OverlayController+ReplayOverlayAdapter+background-thread pattern in both CLI and TUI
 
 ### Pending Todos
 
@@ -244,6 +246,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T01:25:09.381Z
-Stopped at: Completed 10-04-PLAN.md
+Last session: 2026-03-24T22:45:27.271Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None

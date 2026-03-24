@@ -55,7 +55,7 @@
 - [x] **RUN-06**: Post-action validation via pixel-diff + optional VLM confirmation
 - [x] **RUN-07**: Failure cascade — auto-retry (2x) → widen search to full screen → prompt user/agent → log
 - [x] **RUN-08**: Never silently fail or blind-click when unsure — always surface uncertainty
-- [ ] **RUN-09**: Step-by-step replay status visible to user (which step is executing)
+- [x] **RUN-09**: Step-by-step replay status visible to user (which step is executing)
 
 ### Action Types
 
@@ -222,7 +222,7 @@
 | RUN-06 | Phase 7 | Complete |
 | RUN-07 | Phase 7 | Complete |
 | RUN-08 | Phase 7 | Complete |
-| RUN-09 | Phase 11 | Pending |
+| RUN-09 | Phase 11 | Complete |
 | MGMT-01 | Phase 8 | Complete |
 | MGMT-02 | Phase 8 | Complete |
 | MGMT-03 | Phase 8 | Complete |
