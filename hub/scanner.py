@@ -208,3 +208,29 @@ def scan_skill(skill_data: dict) -> ScanResult:
         len(result.warnings),
     )
     return result
+
+
+def scan_routine(routine_data: dict) -> ScanResult:
+    """Scan a v1 routine for malicious patterns.
+
+    Adapts the v1 routine format (steps array with action/text_to_type keys)
+    to the legacy scanner input format (nodes/edges dict) and delegates
+    to scan_skill().
+
+    Args:
+        routine_data: Routine dict with 'steps' key.
+
+    Returns:
+        ScanResult with safety verdict and warnings.
+    """
+    steps = routine_data.get("steps", [])
+    nodes = list(steps)  # Steps have element_type, label, etc.
+    edges: list[dict] = []
+    for step in steps:
+        action = step.get("action", "")
+        if action in ("type", "type_text", "keystroke"):
+            edges.append({
+                "action_type": action,
+                "action_payload": step.get("text_to_type", ""),
+            })
+    return scan_skill({"nodes": nodes, "edges": edges})
