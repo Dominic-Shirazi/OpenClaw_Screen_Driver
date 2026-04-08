@@ -116,12 +116,14 @@ class TestAbortPanelInstantiation:
 
     def test_z_value(self, qapp: QApplication) -> None:
         """Z-value is 200."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         assert p.zValue() == 200
 
     def test_starts_invisible(self, qapp: QApplication) -> None:
         """Panel is hidden on creation."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         assert not p.isVisible()
 
 
@@ -130,20 +132,23 @@ class TestAbortPanelShowHide:
 
     def test_show_makes_visible(self, qapp: QApplication) -> None:
         """show_panel makes panel visible."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         p.show_panel(5)
         assert p.isVisible()
 
     def test_hide_makes_invisible(self, qapp: QApplication) -> None:
         """hide_panel makes panel invisible."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         p.show_panel(3)
         p.hide_panel()
         assert not p.isVisible()
 
     def test_body_text_contains_count(self, qapp: QApplication) -> None:
         """Body text contains the step count."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         p.show_panel(7)
         assert p._body_label is not None
         assert "7" in p._body_label.text()
@@ -154,12 +159,14 @@ class TestAbortPanelSignals:
 
     def test_discard_signal_exists(self, qapp: QApplication) -> None:
         """discard_clicked signal is connectable."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         handler = MagicMock()
         p.discard_clicked.connect(handler)
 
     def test_keep_signal_exists(self, qapp: QApplication) -> None:
         """keep_clicked signal is connectable."""
-        p = AbortPanel()
+        clock = AnimationClock()
+        p = AbortPanel(clock)
         handler = MagicMock()
         p.keep_clicked.connect(handler)
