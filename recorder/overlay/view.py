@@ -205,7 +205,7 @@ class OverlayView(QGraphicsView):
         """Hide the overlay window before a screenshot capture."""
         # Force-hide HUD panels (don't rely on animation)
         if self._tag_dialog is not None:
-            self._tag_dialog.setVisible(False)
+            self._tag_dialog.hide()
         if self._toolbar is not None:
             self._toolbar.setVisible(False)
         if self._countdown is not None:
@@ -234,10 +234,9 @@ class OverlayView(QGraphicsView):
         # Restore HUD panels visibility (check _target_opacity to avoid
         # re-showing panels that were mid-fade-out when capture started)
         if self._tag_dialog is not None and self._tag_dialog._target_opacity > 0:
-            self._tag_dialog.setVisible(True)
-            # Re-activate window for keyboard input if tag dialog is visible
-            self.activateWindow()
-            self.raise_()
+            self._tag_dialog.show()
+            self._tag_dialog.raise_()
+            self._tag_dialog.activateWindow()
         if self._toolbar is not None and self._toolbar._target_opacity > 0:
             self._toolbar.setVisible(True)
         if self._countdown is not None and self._countdown._remaining > 0:
@@ -267,13 +266,10 @@ class OverlayView(QGraphicsView):
         """
         if self._tag_dialog is None:
             self._tag_dialog = TagDialogPanel(self._clock)
-            self.scene().addItem(self._tag_dialog)
-        # Allow OS keyboard input by removing non-activating flag
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
-        self.activateWindow()
-        self.raise_()
         self._tag_dialog.show_dialog(
             element_rect, vlm_data=vlm_data, edit_mode=edit_mode,
+            screen_w=float(self._screen_w),
+            screen_h=float(self._screen_h),
         )
         self._update_avoidance_rects()
 
@@ -388,9 +384,13 @@ class OverlayView(QGraphicsView):
     # ------------------------------------------------------------------
 
     def _is_hud_item(self, item: Any) -> bool:
-        """Check if a scene item belongs to a HUD panel (toolbar, dialog, etc.)."""
+        """Check if a scene item belongs to a HUD panel (toolbar, dialog, etc.).
+
+        Note: TagDialogPanel is now a top-level QWidget, not a scene item,
+        so it will never appear in this check.  Its clicks are handled by
+        the OS window manager directly.
+        """
         from recorder.overlay.toolbar_panel import ToolbarPanel
-        from recorder.overlay.tag_dialog_panel import TagDialogPanel
         from recorder.overlay.abort_panel import AbortPanel
         from recorder.overlay.countdown_widget import CountdownWidget
         from recorder.overlay.status_badge import StatusBadge
@@ -399,7 +399,7 @@ class OverlayView(QGraphicsView):
         current = item
         while current is not None:
             if isinstance(current, (
-                ToolbarPanel, TagDialogPanel, AbortPanel,
+                ToolbarPanel, AbortPanel,
                 CountdownWidget, StatusBadge,
             )):
                 return True
@@ -824,8 +824,11 @@ class OverlayView(QGraphicsView):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event: Any) -> None:
-        """Route key events to focused proxy widgets, or accept as fallback."""
-        # If a proxy widget (text field) has focus, let it handle the key
+        """Route key events to focused scene items, or accept as fallback.
+
+        Note: TagDialogPanel is a top-level QWidget that handles its own
+        keyboard events.  This only handles scene-item focus (toolbar, etc.).
+        """
         focus_item = self.scene().focusItem() if self.scene() else None
         if focus_item is not None:
             super().keyPressEvent(event)
