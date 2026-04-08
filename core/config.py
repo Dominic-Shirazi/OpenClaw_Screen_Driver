@@ -8,6 +8,7 @@ Environment variables from .env are loaded automatically.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ _PROJECT_ROOT_FOR_ENV = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT_FOR_ENV / ".env", override=False)
 
 _config_cache: dict | None = None
+_config_lock = threading.Lock()
 
 # Resolve project root relative to this file (core/config.py → project root)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -135,14 +137,23 @@ def load_config(path: str | Path | None = None) -> dict:
 
 
 def get_config() -> dict:
-    """Get the cached config, loading from disk on first call."""
-    if _config_cache is None:
+    """Get the cached config, loading from disk on first call.
+
+    Thread-safe: uses a lock to prevent duplicate loads when multiple
+    threads race on an empty cache.
+    """
+    if _config_cache is not None:
+        return _config_cache
+    with _config_lock:
+        # Double-checked locking: re-check after acquiring the lock.
+        if _config_cache is not None:
+            return _config_cache
         return load_config()
-    return _config_cache
 
 
 def reload_config() -> dict:
-    """Force reload config from disk."""
-    global _config_cache
-    _config_cache = None
-    return load_config()
+    """Force reload config from disk. Thread-safe."""
+    with _config_lock:
+        global _config_cache
+        _config_cache = None
+        return load_config()

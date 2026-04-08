@@ -774,7 +774,7 @@ def run_routine(
     # Create run directory and logger
     run_dir = create_run_dir(routine_dir)
     handler = setup_run_logger(run_dir)
-    logging.getLogger().addHandler(handler)
+    logger.addHandler(handler)
 
     # Desktop setup
     config = get_config()
@@ -994,5 +994,5 @@ def run_routine(
 
     finally:
         # Always remove and close the run logger handler to prevent leaks
-        logging.getLogger().removeHandler(handler)
+        logger.removeHandler(handler)
         handler.close()

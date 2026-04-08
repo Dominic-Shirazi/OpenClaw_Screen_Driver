@@ -42,6 +42,9 @@ class RunNotFoundError(Exception):
 class ActiveRun:
     """State of an in-progress or completed routine run.
 
+    Internal mutable object — never returned to callers directly.
+    Use ``RunManager.get_run()`` which returns a frozen :class:`RunSnapshot`.
+
     Attributes:
         run_id: Unique identifier for this run.
         routine_id: Name/ID of the routine being executed.
@@ -63,6 +66,45 @@ class ActiveRun:
     prompt_text: str | None = None
     abort_event: threading.Event = field(default_factory=threading.Event)
     thread: threading.Thread | None = None
+
+    def snapshot(self) -> RunSnapshot:
+        """Return a frozen, thread-safe copy of the current run state."""
+        return RunSnapshot(
+            run_id=self.run_id,
+            routine_id=self.routine_id,
+            status=self.status,
+            current_step=self.current_step,
+            total_steps=self.total_steps,
+            error=self.error,
+            prompt_text=self.prompt_text,
+        )
+
+
+@dataclass(frozen=True)
+class RunSnapshot:
+    """Immutable, thread-safe snapshot of a run's state.
+
+    Returned by ``RunManager.get_run()`` so callers can inspect run state
+    without holding the manager lock and without risk of unsynchronised
+    mutation.
+
+    Attributes:
+        run_id: Unique identifier for this run.
+        routine_id: Name/ID of the routine being executed.
+        status: Current run status.
+        current_step: Index of the step currently executing.
+        total_steps: Total number of steps in the routine.
+        error: Error message if the run failed.
+        prompt_text: Text of the current prompt if status is WAITING.
+    """
+
+    run_id: str
+    routine_id: str
+    status: RunStatus = RunStatus.RUNNING
+    current_step: int = 0
+    total_steps: int = 0
+    error: str | None = None
+    prompt_text: str | None = None
 
 
 class RunManager:
@@ -108,19 +150,20 @@ class RunManager:
             logger.info("Started run %s for routine '%s'", run_id, routine_id)
             return run_id
 
-    def get_run(self, run_id: str) -> ActiveRun | None:
-        """Get a run by its ID.
+    def get_run(self, run_id: str) -> RunSnapshot | None:
+        """Get a frozen snapshot of a run by its ID.
 
         Args:
             run_id: The run identifier to look up.
 
         Returns:
-            The ActiveRun if found, None otherwise.
+            A frozen RunSnapshot if found, None otherwise.
         """
         with self._lock:
             if self._active is not None and self._active.run_id == run_id:
-                return self._active
-            return self._history.get(run_id)
+                return self._active.snapshot()
+            hist = self._history.get(run_id)
+            return hist.snapshot() if hist is not None else None
 
     def update_step(self, run_id: str, step_index: int, total_steps: int) -> None:
         """Update the current step progress for an active run.

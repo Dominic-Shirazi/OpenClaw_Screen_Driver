@@ -380,6 +380,7 @@ def hotkey(*keys: str, dry_run: bool = False) -> None:
 
 _prompt_response_event = threading.Event()
 _prompt_response_text: str = ""
+_prompt_lock = threading.Lock()
 
 
 def prompt_user_blocking(
@@ -397,6 +398,7 @@ def prompt_user_blocking(
         question_text: The question to surface to the user/agent.
         screenshot_path: Optional screenshot path to include with the prompt.
         dry_run: If True, return empty string without blocking.
+        timeout: Max seconds to wait for a response (None = wait forever).
 
     Returns:
         The user/agent response text.
@@ -407,9 +409,10 @@ def prompt_user_blocking(
         logger.info("prompt_user dry-run: would block waiting for /respond")
         return ""
 
-    # Clear any previous response
-    _prompt_response_event.clear()
-    _prompt_response_text = ""
+    # Clear any previous response — lock protects the text/event pair
+    with _prompt_lock:
+        _prompt_response_event.clear()
+        _prompt_response_text = ""
 
     # Block until respond_to_prompt is called
     logger.info("Routine paused. Waiting for API /respond...")
@@ -419,7 +422,8 @@ def prompt_user_blocking(
             f"Prompt timed out after {timeout}s: {question_text[:50]}"
         )
 
-    response = _prompt_response_text
+    with _prompt_lock:
+        response = _prompt_response_text
     logger.info("Prompt response received: %s", response[:80])
     return response
 
@@ -433,8 +437,9 @@ def respond_to_prompt(response_text: str) -> None:
         response_text: The user/agent response text.
     """
     global _prompt_response_text
-    _prompt_response_text = response_text
-    _prompt_response_event.set()
+    with _prompt_lock:
+        _prompt_response_text = response_text
+        _prompt_response_event.set()
     logger.info("Prompt responded: %s", response_text[:80])
 
 

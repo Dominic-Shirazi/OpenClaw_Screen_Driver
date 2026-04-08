@@ -16,6 +16,8 @@ import json
 import logging
 import re
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,39 +41,74 @@ def _get_model_name() -> str:
 
 
 _vlm_reachable: bool | None = None
-"""Cached result of VLM proxy reachability check."""
+_vlm_reachable_ts: float = 0.0
+_vlm_lock = threading.Lock()
+_VLM_REACHABLE_TTL: float = 30.0  # seconds before a negative result expires
+"""Cached result of VLM proxy reachability check with TTL for failures."""
 
 
 def _check_vlm_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
-    """Fast TCP connect check. Cached after first call."""
-    global _vlm_reachable
-    if _vlm_reachable is not None:
+    """Fast TCP connect check. Cached with TTL for negative results.
+
+    Positive results are cached indefinitely (the proxy was up).
+    Negative results expire after _VLM_REACHABLE_TTL seconds so that
+    a transient failure at startup does not permanently disable VLM.
+
+    Thread-safe via _vlm_lock.
+    """
+    global _vlm_reachable, _vlm_reachable_ts
+
+    # Fast path: read without lock for positive cache hits
+    if _vlm_reachable is True:
+        return True
+
+    with _vlm_lock:
+        now = time.monotonic()
+        # Re-check under lock
+        if _vlm_reachable is True:
+            return True
+        if _vlm_reachable is False and (now - _vlm_reachable_ts) < _VLM_REACHABLE_TTL:
+            return False
+        # Cache miss or expired negative -- probe again
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((host, port))
+            sock.close()
+            _vlm_reachable = True
+            _vlm_reachable_ts = now
+        except (OSError, socket.timeout):
+            _vlm_reachable = False
+            _vlm_reachable_ts = now
+            logger.warning("VLM proxy at %s:%d not reachable", host, port)
         return _vlm_reachable
-    import socket
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((host, port))
-        sock.close()
-        _vlm_reachable = True
-    except (OSError, socket.timeout):
-        _vlm_reachable = False
-        logger.warning("VLM proxy at %s:%d not reachable", host, port)
-    return _vlm_reachable
 
 
 def reset_vlm_cache() -> None:
-    """Clear the cached VLM reachability result."""
-    global _vlm_reachable
-    _vlm_reachable = None
+    """Clear the cached VLM reachability result and client."""
+    global _vlm_reachable, _vlm_reachable_ts, _cached_client
+    with _vlm_lock:
+        _vlm_reachable = None
+        _vlm_reachable_ts = 0.0
+        _cached_client = None
+
+
+_cached_client: Any = None
+_cached_client_key: tuple[str, str] | None = None
 
 
 def _get_client():
     """Returns a cached OpenAI client pointing at the LiteLLM proxy.
 
+    The client is created once and reused. If the config changes
+    (base_url or api_key), a new client is created automatically.
+
     Raises:
         ConnectionError: If the VLM proxy is not reachable.
     """
+    global _cached_client, _cached_client_key
+
     from openai import OpenAI
     from urllib.parse import urlparse
 
@@ -89,12 +126,19 @@ def _get_client():
             f"VLM proxy at {host}:{port} not reachable"
         )
 
+    cache_key = (base_url, api_key)
+    if _cached_client is not None and _cached_client_key == cache_key:
+        return _cached_client
+
     import httpx
-    return OpenAI(
+    client = OpenAI(
         base_url=base_url,
         api_key=api_key,
         timeout=httpx.Timeout(60.0, connect=5.0),
     )
+    _cached_client = client
+    _cached_client_key = cache_key
+    return client
 
 
 def _encode_image_to_base64(img_path: str) -> str:
