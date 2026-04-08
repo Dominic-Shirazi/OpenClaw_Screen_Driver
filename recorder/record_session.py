@@ -78,7 +78,9 @@ def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
     from routine.format import build_v1_step
 
     node_id = step.get("node_id", str(uuid4()))
-    return build_v1_step(step, index, node_id, screen_w, screen_h)
+    # Strip non-serializable fields before passing to build_v1_step
+    clean_step = {k: v for k, v in step.items() if k != "screenshot"}
+    return build_v1_step(clean_step, index, node_id, screen_w, screen_h)
 
 
 class RecordSession:
@@ -313,6 +315,9 @@ class RecordSession:
             **self._current_step,
             "tag_data": data,
             "bbox": self._current_bbox,
+            # P1.6 fix: capture this step's screenshot so snippets are
+            # cropped from the correct frame, not the final one
+            "screenshot": self._screenshot,
         }
 
         self._controller.dismiss_tag_dialog()
@@ -1468,6 +1473,9 @@ class RecordSession:
                     resolution=(screen_w, screen_h),
                 )
                 node_ids.append(node_id)
+                # P1.2 fix: store graph node_id in step so _step_to_json
+                # uses the same ID instead of generating a new uuid4()
+                step["node_id"] = node_id
 
                 if prev_node_id is not None:
                     action_type = "button"
@@ -1548,10 +1556,6 @@ class RecordSession:
             screen_w: Screen width.
             screen_h: Screen height.
         """
-        if self._screenshot is None:
-            logger.debug("No screenshot available for snippets")
-            return
-
         cfg = get_config()
         crop_buffer = cfg.get("detection", {}).get("crop_buffer_pct", 0.30)
 
@@ -1564,6 +1568,13 @@ class RecordSession:
             if bw <= 0 or bh <= 0:
                 continue
 
+            # P1.6 fix: use each step's own screenshot (captured at record
+            # time) instead of self._screenshot which only holds the last one
+            step_screenshot = step.get("screenshot", self._screenshot)
+            if step_screenshot is None:
+                logger.debug("No screenshot for step %d, skipping snippet", i)
+                continue
+
             # 30% padded crop
             buf_w = int(bw * crop_buffer)
             buf_h = int(bh * crop_buffer)
@@ -1572,11 +1583,11 @@ class RecordSession:
             x2 = min(screen_w, bx + bw + buf_w)
             y2 = min(screen_h, by + bh + buf_h)
 
-            sh, sw = self._screenshot.shape[:2]
+            sh, sw = step_screenshot.shape[:2]
             x2 = min(x2, sw)
             y2 = min(y2, sh)
 
-            crop = self._screenshot[y1:y2, x1:x2]
+            crop = step_screenshot[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
 

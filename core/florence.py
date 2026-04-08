@@ -113,7 +113,8 @@ def caption_crop(image: np.ndarray, task: str = "<CAPTION>") -> str:
     """Caption a single image crop.
 
     Args:
-        image: RGB numpy array of element crop.
+        image: BGR or RGB numpy array of element crop.
+               BGR images (from OpenCV) are converted to RGB automatically.
         task: Florence-2 task token. Options:
               "<CAPTION>" — short caption
               "<DETAILED_CAPTION>" — detailed description
@@ -124,7 +125,13 @@ def caption_crop(image: np.ndarray, task: str = "<CAPTION>") -> str:
     """
     _ensure_model()
 
+    import cv2
     from PIL import Image
+
+    # OpenCV captures are BGR; Florence-2 expects RGB via PIL.
+    if image.ndim == 3 and image.shape[2] == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
     pil_img = Image.fromarray(image)
 
     inputs = _processor(text=task, images=pil_img, return_tensors="pt")

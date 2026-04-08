@@ -110,6 +110,12 @@ def get_detector(config: dict | None = None) -> DetectionProvider:
         detector_name = config.get("models", {}).get("detector", "omniparser")
 
         if detector_name == "omniparser":
+            if OmniParserProvider is None:
+                raise ImportError(
+                    "OmniParser backend selected but 'core.omniparser' could "
+                    "not be imported. Ensure OmniParser and its dependencies "
+                    "are installed (pip install ocsd[omniparser])."
+                )
             conf_threshold = config.get("detection", {}).get(
                 "confidence_threshold", 0.3
             )

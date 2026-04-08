@@ -90,6 +90,7 @@ def execute_node(
     graph: OCSDGraph,
     node_id: str,
     next_node_id: str | None = None,
+    prev_node_id: str | None = None,  # Added: incoming edge source for action_payload lookup — fix P1.5 — 2026-04-07
     dry_run: bool = False,
     skill_id: str = "",
     execution_params: dict[str, str] | None = None,  # Updated: accept execution_params — enables parameterized textbox resolution — 2026-04-03
@@ -103,6 +104,8 @@ def execute_node(
         graph: The OCSDGraph containing the node data.
         node_id: The node to interact with.
         next_node_id: The next node in the path (for edge stats tracking).
+        prev_node_id: The previous node in the path (source of incoming edge
+            carrying action_payload, e.g. text for textbox nodes).
         dry_run: If True, logs actions without executing them.
         skill_id: Skill name for loading snippet PNGs during locate.
         execution_params: Optional variable->value mappings for textbox resolution.
@@ -112,11 +115,13 @@ def execute_node(
     """
     action_type = _action_type_for_node(graph, node_id)
 
-    # Get action payload from incoming edge if it exists
+    # Get action payload from INCOMING edge (prev → current node).
+    # The payload (e.g. text to type) is stored on the edge that leads
+    # TO this node, not the edge leading away from it.  — fix P1.5 — 2026-04-07
     action_payload = ""
-    if next_node_id:
+    if prev_node_id:
         try:
-            edge_data = graph.get_edge(node_id, next_node_id)
+            edge_data = graph.get_edge(prev_node_id, node_id)
             action_payload = edge_data.get("action_payload", "")
         except (KeyError, Exception):
             pass
@@ -340,6 +345,7 @@ def run_skill(
     # Execute every node in the path (click each element in sequence)
     for i, node_id in enumerate(path):
         next_id = path[i + 1] if i < len(path) - 1 else None
+        prev_id = path[i - 1] if i > 0 else None  # Added: pass prev node for incoming-edge payload — fix P1.5 — 2026-04-07
         node_label = graph.get_node(node_id).get("label", node_id[:8])
         logger.info(
             "Step %d/%d: %s",
@@ -350,6 +356,7 @@ def run_skill(
 
         step = execute_node(
             graph, node_id, next_node_id=next_id,
+            prev_node_id=prev_id,  # Added: incoming edge for action_payload — fix P1.5 — 2026-04-07
             dry_run=dry_run, skill_id=graph.skill_id,
             execution_params=execution_params,  # Updated: forward execution_params to execute_node — was silently dropped — 2026-04-03
         )
@@ -466,8 +473,10 @@ def run_path(
 
         # Live execution: delegate to execute_node
         next_id = path[step_idx + 1] if step_idx + 1 < len(path) else None
+        prev_id = path[step_idx - 1] if step_idx > 0 else None  # Added: incoming edge for action_payload — fix P1.5 — 2026-04-07
         step = execute_node(
             graph, node_id, next_node_id=next_id,
+            prev_node_id=prev_id,  # Added: incoming edge for action_payload — fix P1.5 — 2026-04-07
             dry_run=False, skill_id=graph.skill_id,
         )
         replay_log.append_step(step)

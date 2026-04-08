@@ -47,6 +47,9 @@ pyautogui.PAUSE = 0
 
 # Thread lock — HumanMouse and PyAutoGUI are NOT thread-safe.
 _lock = threading.Lock()
+# Separate lock for lazy singleton initialization to avoid races in
+# _get_hmm() and _get_human_typer() when called from multiple threads.
+_init_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +72,11 @@ def _get_hmm() -> Any:
     global _hmm_instance
     hd = _exec_cfg()["human_delay"]
     if _hmm_instance is None or _hmm_instance.speed != hd:
-        from human_mouse_moves import HumanMouse
-        _hmm_instance = HumanMouse(speed=max(hd, 0.1))
+        with _init_lock:
+            # Double-check after acquiring lock to avoid duplicate creation.
+            if _hmm_instance is None or _hmm_instance.speed != hd:
+                from human_mouse_moves import HumanMouse
+                _hmm_instance = HumanMouse(speed=max(hd, 0.1))
     return _hmm_instance
 
 
@@ -253,14 +259,19 @@ def _get_human_typer() -> Any:
     if _human_typer is not None:
         return _human_typer
 
-    # Add the bundled human_typing package to path
-    ht_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "human_typing-main")
-    if ht_dir not in sys.path:
-        sys.path.insert(0, ht_dir)
+    with _init_lock:
+        # Double-check after acquiring lock to avoid duplicate creation.
+        if _human_typer is not None:
+            return _human_typer
 
-    from human_typer import HumanTyper
-    _human_typer = HumanTyper(config_path=os.path.join(ht_dir, "config.yaml"))
-    return _human_typer
+        # Add the bundled human_typing package to path
+        ht_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "human_typing-main")
+        if ht_dir not in sys.path:
+            sys.path.insert(0, ht_dir)
+
+        from human_typer import HumanTyper
+        _human_typer = HumanTyper(config_path=os.path.join(ht_dir, "config.yaml"))
+        return _human_typer
 
 
 _human_typer: Any = None
