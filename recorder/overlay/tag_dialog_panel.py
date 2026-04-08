@@ -289,6 +289,33 @@ class TagDialogPanel(QWidget):
         font.setWeight(QFont.Weight(weight))
         return font
 
+    @staticmethod
+    def _fix_combo_popup_transparency(combo: QComboBox) -> None:
+        """Prevent QComboBox popup from inheriting WA_TranslucentBackground.
+
+        When the parent window has WA_TranslucentBackground set (required for
+        the frosted-glass panel effect), Qt propagates transparency to child
+        popup windows.  QSS background-color on the QAbstractItemView does
+        NOT override this compositor-level attribute, resulting in a fully
+        transparent dropdown.
+
+        The fix: enable autoFillBackground on the popup view *and* its
+        container QFrame, and explicitly disable WA_TranslucentBackground
+        on the popup container.
+
+        Args:
+            combo: QComboBox whose popup needs the transparency fix.
+        """
+        view = combo.view()
+        if view is not None:
+            view.setAutoFillBackground(True)
+            popup = view.window()
+            if popup is not None:
+                popup.setAutoFillBackground(True)
+                popup.setAttribute(
+                    Qt.WidgetAttribute.WA_TranslucentBackground, False,
+                )
+
     def _make_field_row(
         self,
         key: str,
@@ -356,6 +383,7 @@ class TagDialogPanel(QWidget):
 
         # -- Action Type combo --
         action_combo = QComboBox()
+        self._fix_combo_popup_transparency(action_combo)
         for at in _ACTION_TYPES:
             action_combo.addItem(at, at)
         action_combo.currentIndexChanged.connect(self._on_action_type_changed)
@@ -366,6 +394,7 @@ class TagDialogPanel(QWidget):
         # -- Element Type combo (grouped with separator headers) --
         elem_combo = QComboBox()
         elem_combo.setMaxVisibleItems(20)
+        self._fix_combo_popup_transparency(elem_combo)
         self._populate_element_type_combo(elem_combo)
         main_layout.addWidget(
             self._make_field_row("element_type", "Element Type", elem_combo),
