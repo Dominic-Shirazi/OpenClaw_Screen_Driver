@@ -285,9 +285,6 @@ class TagDialogPanel(QGraphicsObject):
         proxy.setWidget(widget)
         proxy.setPos(x, y)
         proxy.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
-        )
-        proxy.setFlag(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
         )
         # Combo popups need higher z to render above sibling proxies
@@ -442,9 +439,6 @@ class TagDialogPanel(QGraphicsObject):
         proxy_enter = QGraphicsProxyWidget(self)
         proxy_enter.setWidget(press_enter)
         proxy_enter.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
-        )
-        proxy_enter.setFlag(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
         )
         self._proxies["press_enter"] = proxy_enter
@@ -541,9 +535,6 @@ class TagDialogPanel(QGraphicsObject):
         self._widgets["confirm_btn"] = confirm_btn
         proxy_confirm = QGraphicsProxyWidget(self)
         proxy_confirm.setWidget(confirm_btn)
-        proxy_confirm.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
-        )
         self._proxies["confirm_btn"] = proxy_confirm
 
         dismiss_btn = QPushButton("Dismiss")
@@ -560,9 +551,6 @@ class TagDialogPanel(QGraphicsObject):
         self._widgets["dismiss_btn"] = dismiss_btn
         proxy_dismiss = QGraphicsProxyWidget(self)
         proxy_dismiss.setWidget(dismiss_btn)
-        proxy_dismiss.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
-        )
         self._proxies["dismiss_btn"] = proxy_dismiss
 
         # Initial layout: hide all conditional fields, position buttons

@@ -226,14 +226,18 @@ class OverlayView(QGraphicsView):
 
     def show_after_capture(self) -> None:
         """Restore the overlay window after a screenshot capture."""
+        # Always clear non-activating flag when restoring — overlay must be
+        # activatable whenever visible.  The flag is only needed during the
+        # hidden capture period (set in hide_for_capture).
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.show()
         # Restore HUD panels visibility (check _target_opacity to avoid
         # re-showing panels that were mid-fade-out when capture started)
         if self._tag_dialog is not None and self._tag_dialog._target_opacity > 0:
             self._tag_dialog.setVisible(True)
             # Re-activate window for keyboard input if tag dialog is visible
-            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
             self.activateWindow()
+            self.raise_()
         if self._toolbar is not None and self._toolbar._target_opacity > 0:
             self._toolbar.setVisible(True)
         if self._countdown is not None and self._countdown._remaining > 0:
@@ -264,9 +268,10 @@ class OverlayView(QGraphicsView):
         if self._tag_dialog is None:
             self._tag_dialog = TagDialogPanel(self._clock)
             self.scene().addItem(self._tag_dialog)
-        # Allow OS keyboard input by temporarily removing non-activating flag
+        # Allow OS keyboard input by removing non-activating flag
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
         self.activateWindow()
+        self.raise_()
         self._tag_dialog.show_dialog(
             element_rect, vlm_data=vlm_data, edit_mode=edit_mode,
         )
@@ -277,8 +282,6 @@ class OverlayView(QGraphicsView):
         if self._tag_dialog is not None:
             self._tag_dialog.dismiss()
             self._update_avoidance_rects()
-        # Restore non-activating flag so overlay doesn't steal focus
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
 
     def get_tag_data(self) -> dict | None:
         """Return current tag dialog form data, or None if not showing.
