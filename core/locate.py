@@ -173,13 +173,13 @@ def locate_element(
                 best_cx, best_cy = hint_x, hint_y
                 crop_h, crop_w = crop.shape[:2]
                 window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
-                step = 40
+                stride = 40
 
                 for win_w, win_h in window_sizes:
                     if win_w > crop_w or win_h > crop_h:
                         continue
-                    for wy in range(0, crop_h - win_h + 1, step):
-                        for wx in range(0, crop_w - win_w + 1, step):
+                    for wy in range(0, crop_h - win_h + 1, stride):
+                        for wx in range(0, crop_w - win_w + 1, stride):
                             tile = crop[wy:wy + win_h, wx:wx + win_w]
                             rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
                             tile_emb = generate_embedding(rgb_tile)
@@ -403,13 +403,13 @@ def locate_element_from_step(
                     best_cx, best_cy = hint_x, hint_y
                     crop_h, crop_w = crop.shape[:2]
                     window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
-                    step = 40
+                    stride = 40
 
                     for win_w, win_h in window_sizes:
                         if win_w > crop_w or win_h > crop_h:
                             continue
-                        for wy in range(0, crop_h - win_h + 1, step):
-                            for wx in range(0, crop_w - win_w + 1, step):
+                        for wy in range(0, crop_h - win_h + 1, stride):
+                            for wx in range(0, crop_w - win_w + 1, stride):
                                 tile = crop[wy:wy + win_h, wx:wx + win_w]
                                 rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
                                 tile_emb = generate_embedding(rgb_tile)

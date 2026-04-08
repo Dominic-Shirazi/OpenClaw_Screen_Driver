@@ -350,7 +350,7 @@ async def run_routine_endpoint(
 
     run_id = manager.start_run(routine_id)
 
-    active = manager.get_run(run_id)
+    active = manager.get_active_run_internal(run_id)
     callback = _make_run_callback(manager, run_id)
 
     config = get_config()
@@ -446,19 +446,30 @@ async def get_screenshot(run_id: str) -> Response:
 )
 async def abort_run(run_id: str) -> dict[str, str]:
     """Request pause of a running routine."""
-    run = _get_run_or_404(run_id)
-    if run.status not in (RunStatus.RUNNING, RunStatus.WAITING):
+    # Use snapshot for the status check (read-only).
+    snapshot = _get_run_or_404(run_id)
+    if snapshot.status not in (RunStatus.RUNNING, RunStatus.WAITING):
         raise HTTPException(
             status_code=400,
             detail=ErrorResponse(
                 code="INVALID_PARAMS",
                 message=(
                     f"Run {run_id} cannot be aborted "
-                    f"(status={run.status.value})"
+                    f"(status={snapshot.status.value})"
                 ),
             ).model_dump(),
         )
-    run.abort_event.set()
+    # Use live ActiveRun to set the abort event.
+    active = manager.get_active_run_internal(run_id)
+    if active is None:
+        raise HTTPException(
+            status_code=409,
+            detail=ErrorResponse(
+                code="RUN_NOT_ACTIVE",
+                message=f"Run {run_id} is no longer active and cannot be aborted",
+            ).model_dump(),
+        )
+    active.abort_event.set()
     return {"status": "pause_requested", "run_id": run_id}
 
 

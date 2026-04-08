@@ -165,6 +165,25 @@ class RunManager:
             hist = self._history.get(run_id)
             return hist.snapshot() if hist is not None else None
 
+    def get_active_run_internal(self, run_id: str) -> ActiveRun | None:
+        """Get the live mutable ActiveRun for internal server use.
+
+        This returns the actual ``ActiveRun`` object (not a snapshot) so that
+        control-plane code can access mutable fields like ``abort_event`` and
+        ``thread``.  **Only use this inside server.py for mutation**; read-only
+        callers should use :meth:`get_run` which returns a frozen snapshot.
+
+        Args:
+            run_id: The run identifier to look up.
+
+        Returns:
+            The live ActiveRun if it is the current active run, None otherwise.
+        """
+        with self._lock:
+            if self._active is not None and self._active.run_id == run_id:
+                return self._active
+            return None
+
     def update_step(self, run_id: str, step_index: int, total_steps: int) -> None:
         """Update the current step progress for an active run.
 
