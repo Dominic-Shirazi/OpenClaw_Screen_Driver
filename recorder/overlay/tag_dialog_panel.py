@@ -979,23 +979,21 @@ class TagDialogPanel(QGraphicsObject):
             else "unknown"
         )
 
-        # Conditional fields — include if widget is visible
+        # Conditional fields — include if proxy exists (not gated on
+        # visibility because dismiss() may have already hidden the proxy
+        # by the time the toolbar confirm action reads form data).
         for key in (
             "text_to_type", "direction_amount", "condition_timeout",
             "drag_target_hint", "vlm_prompt", "question_text",
         ):
             proxy = self._proxies.get(key)
             w = self._widgets.get(key)
-            if proxy is not None and proxy.isVisible() and isinstance(w, QLineEdit):
+            if proxy is not None and isinstance(w, QLineEdit):
                 data[key] = w.text()
 
         press_proxy = self._proxies.get("press_enter")
         press_w = self._widgets.get("press_enter")
-        if (
-            press_proxy is not None
-            and press_proxy.isVisible()
-            and isinstance(press_w, QCheckBox)
-        ):
+        if press_proxy is not None and isinstance(press_w, QCheckBox):
             data["press_enter"] = press_w.isChecked()
 
         return data
