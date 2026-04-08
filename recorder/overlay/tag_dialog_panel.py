@@ -444,6 +444,9 @@ class TagDialogPanel(QGraphicsObject):
         proxy_enter.setFlag(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
         )
+        proxy_enter.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
+        )
         self._proxies["press_enter"] = proxy_enter
         self._tips["press_enter"] = self._create_tip(
             _HELPER_TIPS["press_enter"], pad, y + 80, field_w,
