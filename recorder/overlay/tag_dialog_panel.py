@@ -4,8 +4,9 @@ QWidget-based floating panel with direct form fields (no proxy widgets),
 typewriter VLM fill, conditional action-type fields, and card border
 glow animation.  This is the primary data capture UI during recording.
 
-Uses a solid dark background (no WA_TranslucentBackground) so that child
-popup windows (QComboBox dropdowns) render correctly on Windows.  The card
+Uses a custom _DropdownButton widget instead of QComboBox to avoid the
+Windows transparency bug where QComboBox popups are always transparent
+when the parent widget tree has had any transparency attributes.  The card
 glow paints outside the rounded-rect clip region; fade-in/out uses
 setWindowOpacity() which works independently of translucency attributes.
 """
@@ -27,11 +28,12 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -153,26 +155,6 @@ QLineEdit {
     font-weight: 400;
     font-size: 14px;
 }
-QComboBox {
-    background-color: rgba(20, 20, 35, 220);
-    color: #ffffff;
-    border: 1px solid rgba(50, 200, 50, 60);
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-weight: 400;
-    font-size: 14px;
-}
-QComboBox::drop-down {
-    border: none;
-}
-QComboBox QAbstractItemView {
-    background-color: rgb(30, 34, 42);
-    color: #ffffff;
-    selection-background-color: rgba(60, 140, 200, 200);
-    border: 1px solid rgba(100, 200, 255, 120);
-    font-size: 14px;
-    padding: 4px;
-}
 QLabel {
     color: #c0c8d0;
     background: transparent;
@@ -196,6 +178,321 @@ QCheckBox::indicator:checked {
     background-color: rgba(50, 200, 50, 180);
 }
 """
+
+
+# ---------------------------------------------------------------------------
+# Custom dropdown widget — replaces QComboBox to avoid Windows transparency bug
+# ---------------------------------------------------------------------------
+
+class _DropdownPopup(QWidget):
+    """Frameless popup containing a QListWidget for item selection.
+
+    Uses its own top-level window flags with a solid background so it
+    is never affected by parent widget transparency attributes.
+    """
+
+    item_selected = pyqtSignal(int)  # index of selected item
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the popup widget.
+
+        Args:
+            parent: Optional parent widget (used for positioning only).
+        """
+        super().__init__(parent=None)  # No Qt parent — independent window
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Popup
+        )
+        # Explicitly do NOT set WA_TranslucentBackground
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
+
+        # Force solid background via palette
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), QColor(30, 34, 42))
+        self.setPalette(pal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            "QListWidget {"
+            "  background-color: rgb(30, 34, 42);"
+            "  color: #ffffff;"
+            "  border: 1px solid rgba(100, 200, 255, 120);"
+            "  font-size: 14px;"
+            "  padding: 4px;"
+            "  outline: none;"
+            "}"
+            "QListWidget::item {"
+            "  padding: 4px 8px;"
+            "}"
+            "QListWidget::item:selected {"
+            "  background-color: rgb(60, 140, 200);"
+            "  color: #ffffff;"
+            "}"
+            "QListWidget::item:hover {"
+            "  background-color: rgba(60, 140, 200, 120);"
+            "}"
+        )
+        # Force solid background on list too
+        list_pal = self._list.palette()
+        list_pal.setColor(self._list.backgroundRole(), QColor(30, 34, 42))
+        self._list.setPalette(list_pal)
+        self._list.setAutoFillBackground(True)
+
+        self._list.itemClicked.connect(self._on_item_clicked)
+        layout.addWidget(self._list)
+
+    @property
+    def list_widget(self) -> QListWidget:
+        """Return the internal QListWidget."""
+        return self._list
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        """Handle click on a list item.
+
+        Args:
+            item: The clicked QListWidgetItem.
+        """
+        # Skip disabled (header) items
+        if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            return
+        row = self._list.row(item)
+        self.item_selected.emit(row)
+        self.hide()
+
+
+class _DropdownButton(QWidget):
+    """Custom dropdown replacing QComboBox to avoid Windows transparency bugs.
+
+    Presents a QPushButton showing the current selection with a down-arrow
+    indicator.  When clicked, shows a _DropdownPopup with a QListWidget
+    for item selection.
+
+    Provides a QComboBox-compatible API subset.
+    """
+
+    currentIndexChanged = pyqtSignal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the dropdown button.
+
+        Args:
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._items: list[tuple[str, Any]] = []  # (text, data)
+        self._current_index: int = -1
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._button = QPushButton()
+        self._button.setStyleSheet(
+            "QPushButton {"
+            "  background-color: rgb(40, 44, 52);"
+            "  color: #ffffff;"
+            "  border: 1px solid rgba(100, 200, 255, 60);"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  font-size: 14px;"
+            "  text-align: left;"
+            "}"
+            "QPushButton:hover {"
+            "  border: 1px solid rgba(100, 200, 255, 120);"
+            "}"
+        )
+        self._button.clicked.connect(self._show_popup)
+        layout.addWidget(self._button)
+
+        self._popup = _DropdownPopup(self)
+        self._popup.item_selected.connect(self._on_popup_selected)
+
+        self._update_button_text()
+
+    def addItem(self, text: str, data: Any = None) -> None:
+        """Add an item to the dropdown.
+
+        Args:
+            text: Display text.
+            data: Associated data (defaults to None).
+        """
+        self._items.append((text, data))
+        list_item = QListWidgetItem(text)
+        self._popup.list_widget.addItem(list_item)
+        if self._current_index < 0 and data is not None:
+            # Auto-select first enabled item
+            self.setCurrentIndex(len(self._items) - 1)
+
+    def addItems(self, texts: list[str]) -> None:
+        """Add multiple items to the dropdown.
+
+        Args:
+            texts: List of display text strings (data = text).
+        """
+        for t in texts:
+            self.addItem(t, t)
+
+    def addGroupHeader(self, text: str) -> None:
+        """Add a disabled header item for visual grouping.
+
+        Args:
+            text: Header text.
+        """
+        self._items.append((text, None))
+        list_item = QListWidgetItem(text)
+        list_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Disabled
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(8)
+        list_item.setFont(font)
+        list_item.setForeground(QColor(140, 150, 160))
+        self._popup.list_widget.addItem(list_item)
+
+    def setMaxVisibleItems(self, count: int) -> None:
+        """Set max visible items hint (controls popup height).
+
+        Args:
+            count: Number of visible items.
+        """
+        # Store for popup sizing
+        self._max_visible = count
+
+    def currentText(self) -> str:
+        """Return the display text of the current selection.
+
+        Returns:
+            Current item text, or empty string if nothing selected.
+        """
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index][0]
+        return ""
+
+    def currentData(self) -> Any:
+        """Return the data of the current selection.
+
+        Returns:
+            Current item data, or None if nothing selected.
+        """
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index][1]
+        return None
+
+    def currentIndex(self) -> int:
+        """Return the current selection index.
+
+        Returns:
+            Zero-based index, or -1 if nothing selected.
+        """
+        return self._current_index
+
+    def setCurrentIndex(self, index: int) -> None:
+        """Set the current selection by index.
+
+        Args:
+            index: Zero-based index to select.
+        """
+        if 0 <= index < len(self._items):
+            old = self._current_index
+            self._current_index = index
+            self._update_button_text()
+            if old != index:
+                self.currentIndexChanged.emit(index)
+
+    def setCurrentText(self, text: str) -> None:
+        """Set the current selection by matching display text.
+
+        Args:
+            text: Text to search for.
+        """
+        for i, (t, _d) in enumerate(self._items):
+            if t == text:
+                self.setCurrentIndex(i)
+                return
+
+    def findData(self, data: Any) -> int:
+        """Find the index of an item by its data value.
+
+        Args:
+            data: Data value to search for.
+
+        Returns:
+            Index of matching item, or -1 if not found.
+        """
+        for i, (_t, d) in enumerate(self._items):
+            if d == data:
+                return i
+        return -1
+
+    def count(self) -> int:
+        """Return the total number of items.
+
+        Returns:
+            Item count.
+        """
+        return len(self._items)
+
+    def itemData(self, index: int) -> Any:
+        """Return the data for an item at a given index.
+
+        Args:
+            index: Zero-based index.
+
+        Returns:
+            Item data, or None if index is out of range.
+        """
+        if 0 <= index < len(self._items):
+            return self._items[index][1]
+        return None
+
+    def model(self) -> None:
+        """Compatibility stub — returns None (no Qt model).
+
+        Returns:
+            None.
+        """
+        return None
+
+    def _update_button_text(self) -> None:
+        """Update the button label to show current selection + arrow."""
+        text = self.currentText() or "(select)"
+        self._button.setText(f"  {text}  \u25BC")
+
+    def _show_popup(self) -> None:
+        """Show the dropdown popup below the button."""
+        # Compute popup size
+        popup_w = max(self.width(), 200)
+        max_vis = getattr(self, "_max_visible", 12)
+        item_h = 28  # approximate per-item height
+        popup_h = min(len(self._items), max_vis) * item_h + 8
+        popup_h = max(popup_h, 60)
+
+        self._popup.setFixedSize(popup_w, popup_h)
+        self._popup.list_widget.setFixedSize(popup_w - 2, popup_h - 2)
+
+        # Position below the button in global coords
+        global_pos = self._button.mapToGlobal(self._button.rect().bottomLeft())
+        self._popup.move(global_pos)
+
+        # Highlight current selection
+        if 0 <= self._current_index < self._popup.list_widget.count():
+            self._popup.list_widget.setCurrentRow(self._current_index)
+
+        self._popup.show()
+
+    def _on_popup_selected(self, index: int) -> None:
+        """Handle selection from the popup list.
+
+        Args:
+            index: Index of the selected item.
+        """
+        self.setCurrentIndex(index)
 
 
 class TagDialogPanel(QWidget):
@@ -302,7 +599,7 @@ class TagDialogPanel(QWidget):
         Args:
             key: Unique key for lookup.
             label_text: Label text above the field.
-            widget: The form widget (QLineEdit, QComboBox, etc.).
+            widget: The form widget (QLineEdit, _DropdownButton, etc.).
             tip_text: Optional helper tip below the field.
 
         Returns:
@@ -355,24 +652,24 @@ class TagDialogPanel(QWidget):
             self._make_field_row("caption", "Caption", caption_edit),
         )
 
-        # -- Action Type combo --
-        action_combo = QComboBox()
+        # -- Action Type dropdown --
+        action_dropdown = _DropdownButton()
         for at in _ACTION_TYPES:
-            action_combo.addItem(at, at)
-        action_combo.currentIndexChanged.connect(self._on_action_type_changed)
+            action_dropdown.addItem(at, at)
+        action_dropdown.currentIndexChanged.connect(self._on_action_type_changed)
         main_layout.addWidget(
-            self._make_field_row("action_type", "Action Type", action_combo),
+            self._make_field_row("action_type", "Action Type", action_dropdown),
         )
 
-        # -- Element Type combo (grouped with separator headers) --
-        elem_combo = QComboBox()
-        elem_combo.setMaxVisibleItems(20)
-        self._populate_element_type_combo(elem_combo)
+        # -- Element Type dropdown (grouped with separator headers) --
+        elem_dropdown = _DropdownButton()
+        elem_dropdown.setMaxVisibleItems(20)
+        self._populate_element_type_dropdown(elem_dropdown)
         main_layout.addWidget(
-            self._make_field_row("element_type", "Element Type", elem_combo),
+            self._make_field_row("element_type", "Element Type", elem_dropdown),
         )
         # Select "unknown" as default
-        self._select_element_type(elem_combo, "unknown")
+        self._select_element_type(elem_dropdown, "unknown")
 
         # -- Conditional fields --
 
@@ -493,38 +790,29 @@ class TagDialogPanel(QWidget):
         # Initial layout: hide all conditional fields
         self._on_action_type_changed(0)
 
-    def _populate_element_type_combo(self, combo: QComboBox) -> None:
-        """Fill element type combo with grouped items and separator headers.
+    def _populate_element_type_dropdown(self, dropdown: _DropdownButton) -> None:
+        """Fill element type dropdown with grouped items and separator headers.
 
         Args:
-            combo: The QComboBox to populate.
+            dropdown: The _DropdownButton to populate.
         """
         for group_label, values in _TYPE_GROUPS:
-            combo.addItem(group_label, None)
-            idx = combo.count() - 1
-            model = combo.model()
-            if model is not None:
-                item = model.item(idx)
-                if item is not None:
-                    item.setEnabled(False)
-                    font = QFont()
-                    font.setBold(True)
-                    font.setPointSize(8)
-                    item.setFont(font)
+            dropdown.addGroupHeader(group_label)
             for val in values:
-                combo.addItem(val, val)
+                dropdown.addItem(val, val)
 
-    def _select_element_type(self, combo: QComboBox, value: str) -> None:
-        """Select an element type in the combo by value string.
+    def _select_element_type(
+        self, dropdown: _DropdownButton, value: str,
+    ) -> None:
+        """Select an element type in the dropdown by value string.
 
         Args:
-            combo: The QComboBox to search.
+            dropdown: The _DropdownButton to search.
             value: The element type string to select.
         """
-        for i in range(combo.count()):
-            if combo.itemData(i) == value:
-                combo.setCurrentIndex(i)
-                return
+        idx = dropdown.findData(value)
+        if idx >= 0:
+            dropdown.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
     # Action type change handler
@@ -538,10 +826,10 @@ class TagDialogPanel(QWidget):
         Args:
             index: New combo index (unused, reads current data).
         """
-        action_combo = self._widgets.get("action_type")
-        if not isinstance(action_combo, QComboBox):
+        action_w = self._widgets.get("action_type")
+        if not isinstance(action_w, _DropdownButton):
             return
-        current_action = action_combo.currentData()
+        current_action = action_w.currentData()
 
         # Determine which conditional field keys to show
         visible_keys: set[str] = set()
@@ -606,9 +894,9 @@ class TagDialogPanel(QWidget):
             self._set_form_visible(True)
             self._populate_fields(vlm_data, edit_mode)
             # Re-apply conditional field visibility
-            action_combo = self._widgets.get("action_type")
-            if isinstance(action_combo, QComboBox):
-                self._on_action_type_changed(action_combo.currentIndex())
+            action_w = self._widgets.get("action_type")
+            if isinstance(action_w, _DropdownButton):
+                self._on_action_type_changed(action_w.currentIndex())
 
         # Compute position and show
         self.adjustSize()
@@ -657,18 +945,18 @@ class TagDialogPanel(QWidget):
         if not vlm_data:
             return
 
-        # Set combo fields instantly (dropdowns don't typewrite)
+        # Set dropdown fields instantly (dropdowns don't typewrite)
         if "action_type" in vlm_data:
-            combo = self._widgets.get("action_type")
-            if isinstance(combo, QComboBox):
-                idx = combo.findData(vlm_data["action_type"])
+            dropdown = self._widgets.get("action_type")
+            if isinstance(dropdown, _DropdownButton):
+                idx = dropdown.findData(vlm_data["action_type"])
                 if idx >= 0:
-                    combo.setCurrentIndex(idx)
+                    dropdown.setCurrentIndex(idx)
 
         if "element_type" in vlm_data:
-            combo = self._widgets.get("element_type")
-            if isinstance(combo, QComboBox):
-                self._select_element_type(combo, vlm_data["element_type"])
+            dropdown = self._widgets.get("element_type")
+            if isinstance(dropdown, _DropdownButton):
+                self._select_element_type(dropdown, vlm_data["element_type"])
 
         # Set conditional field values if present
         for key in (
@@ -727,9 +1015,9 @@ class TagDialogPanel(QWidget):
         self._set_form_visible(True)
 
         # Re-apply conditional field visibility
-        action_combo = self._widgets.get("action_type")
-        if isinstance(action_combo, QComboBox):
-            self._on_action_type_changed(action_combo.currentIndex())
+        action_w = self._widgets.get("action_type")
+        if isinstance(action_w, _DropdownButton):
+            self._on_action_type_changed(action_w.currentIndex())
 
         self.adjustSize()
         self.update()
@@ -812,14 +1100,14 @@ class TagDialogPanel(QWidget):
         action_w = self._widgets.get("action_type")
         data["action_type"] = (
             action_w.currentData()
-            if isinstance(action_w, QComboBox)
+            if isinstance(action_w, _DropdownButton)
             else "click"
         )
 
         elem_w = self._widgets.get("element_type")
         data["element_type"] = (
             elem_w.currentData()
-            if isinstance(elem_w, QComboBox)
+            if isinstance(elem_w, _DropdownButton)
             else "unknown"
         )
 
