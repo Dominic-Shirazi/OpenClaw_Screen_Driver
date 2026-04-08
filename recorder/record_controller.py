@@ -308,8 +308,10 @@ def _trigger_smart_detect(
         logger.warning("Smart detect: could not capture screen: %s", e)
         return
 
-    # Create signal bridge on the main thread (must be created here, not in bg thread)
+    # Create signal bridge on the main thread (must be created here, not in bg thread).
+    # Store on the overlay to prevent GC before the background thread emits.
     bridge = _SignalBridge()
+    overlay._signal_bridge = bridge  # prevent garbage collection
 
     def _set_and_review(candidates: list[dict]) -> None:
         logger.debug(

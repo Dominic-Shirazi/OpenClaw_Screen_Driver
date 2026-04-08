@@ -339,6 +339,10 @@ class WaitDialog(QGraphicsObject):
         self._param_label_proxy.setVisible(visible)
         self._param_proxy.setVisible(visible)
 
+    def _cleanup(self) -> None:
+        """Unregister the tick callback from the animation clock."""
+        self._clock.unregister(self._tick)
+
     def _on_confirm(self) -> None:
         """Validate inputs and emit confirmed signal with config dict."""
         # Validate timeout
@@ -375,11 +379,13 @@ class WaitDialog(QGraphicsObject):
         }
 
         logger.info("Wait dialog confirmed: %s", condition_type)
+        self._cleanup()
         self.confirmed.emit(config)
 
     def _on_cancel(self) -> None:
         """Emit dismissed signal."""
         logger.info("Wait dialog cancelled")
+        self._cleanup()
         self.dismissed.emit()
 
 
@@ -520,6 +526,10 @@ class PromptDialog(QGraphicsObject):
         self._glow_phase += dt * 0.5
         self.update()
 
+    def _cleanup(self) -> None:
+        """Unregister the tick callback from the animation clock."""
+        self._clock.unregister(self._tick)
+
     def _on_confirm(self) -> None:
         """Validate and emit confirmed signal with question text."""
         question = self._question_input.text().strip()
@@ -527,11 +537,13 @@ class PromptDialog(QGraphicsObject):
             logger.warning("Prompt dialog: question text is empty")
             return
         logger.info("Prompt dialog confirmed: %s", question[:50])
+        self._cleanup()
         self.confirmed.emit({"question_text": question})
 
     def _on_cancel(self) -> None:
         """Emit dismissed signal."""
         logger.info("Prompt dialog cancelled")
+        self._cleanup()
         self.dismissed.emit()
 
 
@@ -855,9 +867,15 @@ class LoopDialog(QGraphicsObject):
             "Loop dialog confirmed: steps %d-%d, exit=%s",
             start_idx + 1, end_idx + 1, ctype,
         )
+        self._cleanup()
         self.confirmed.emit(config)
+
+    def _cleanup(self) -> None:
+        """Unregister the tick callback from the animation clock."""
+        self._clock.unregister(self._tick)
 
     def _on_cancel(self) -> None:
         """Emit dismissed signal."""
         logger.info("Loop dialog cancelled")
+        self._cleanup()
         self.dismissed.emit()

@@ -72,6 +72,8 @@ class RunManager:
     to track run state transitions.
     """
 
+    _MAX_HISTORY: int = 100
+
     def __init__(self) -> None:
         """Initialize the RunManager with an empty state."""
         self._lock = threading.Lock()
@@ -180,13 +182,20 @@ class RunManager:
                 self._archive(self._active)
 
     def _archive(self, run: ActiveRun) -> None:
-        """Move a run from active to history.
+        """Move a run from active to history, evicting oldest if at capacity.
 
         Args:
             run: The run to archive.
         """
         self._history[run.run_id] = run
         self._active = None
+        # Evict oldest entries when history exceeds the cap
+        if len(self._history) > self._MAX_HISTORY:
+            excess = len(self._history) - self._MAX_HISTORY
+            oldest_keys = list(self._history.keys())[:excess]
+            for key in oldest_keys:
+                del self._history[key]
+            logger.debug("Evicted %d old run(s) from history", excess)
         logger.info(
             "Archived run %s (status=%s)", run.run_id, run.status.value
         )

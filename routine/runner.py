@@ -797,200 +797,202 @@ def run_routine(
         "run_dir": str(run_dir),
     })
 
-    # Step loop
+    # Step loop — wrapped in try/finally to guarantee handler cleanup
     step_results: list[dict[str, Any]] = []
     steps_completed = 0
     failure_step: int | None = None
     failure_reason: str | None = None
 
-    for i, step in enumerate(routine.steps):
-        # Check abort flag between steps
-        if abort_event is not None and abort_event.is_set():
-            logger.info("Abort requested, pausing run at step %d", i)
-            _emit(callback, RunEvent.RUN_PAUSED, {
-                "routine_name": routine.name,
-                "paused_step": i,
-                "reason": "Aborted by user/agent",
+    try:
+        for i, step in enumerate(routine.steps):
+            # Check abort flag between steps
+            if abort_event is not None and abort_event.is_set():
+                logger.info("Abort requested, pausing run at step %d", i)
+                _emit(callback, RunEvent.RUN_PAUSED, {
+                    "routine_name": routine.name,
+                    "paused_step": i,
+                    "reason": "Aborted by user/agent",
+                })
+                failure_step = i
+                failure_reason = "Paused by user/agent"
+                break
+
+            action = step.get("action", "click")
+            label = step.get("label", f"step_{i}")
+
+            # Handle loop steps inline
+            if action == "loop":
+                _handle_loop_step(
+                    step, routine, routine_dir, run_dir, i,
+                    callback, dry_run, step_results,
+                    abort_event=abort_event,
+                    prompt_timeout_s=prompt_timeout_s,
+                )
+                steps_completed += 1
+                continue
+
+            _emit(callback, RunEvent.STEP_START, {
+                "step_index": i,
+                "total_steps": total_steps,
+                "label": label,
+                "action": action,
             })
-            failure_step = i
-            failure_reason = "Paused by user/agent"
-            break
 
-        action = step.get("action", "click")
-        label = step.get("label", f"step_{i}")
+            # Locate element (skip for actions that don't need location)
+            locate_result: LocateResult | None = None
+            if action in ("wait", "prompt_user"):
+                locate_result = LocateResult(
+                    point=Point(0, 0), confidence=1.0, method="none",
+                )
+            else:
+                try:
+                    locate_result = locate_element_from_step(step, routine_dir)
+                    _emit(callback, RunEvent.ELEMENT_LOCATED, {
+                        "step_index": i,
+                        "point": {"x": locate_result.point.x, "y": locate_result.point.y},
+                        "method": locate_result.method,
+                        "confidence": locate_result.confidence,
+                    })
+                except ElementNotFoundError:
+                    # Enter failure cascade
+                    locate_result = _failure_cascade(
+                        step, routine, routine_dir, run_dir, callback, i,
+                    )
+                    if locate_result is None:
+                        # ABORT -- never blind-click
+                        failure_step = i
+                        failure_reason = (
+                            f"Could not find element '{label}' after full cascade"
+                        )
+                        _emit(callback, RunEvent.STEP_FAILED, {
+                            "step_index": i,
+                            "label": label,
+                            "reason": failure_reason,
+                        })
+                        break
 
-        # Handle loop steps inline
-        if action == "loop":
-            _handle_loop_step(
-                step, routine, routine_dir, run_dir, i,
-                callback, dry_run, step_results,
-                abort_event=abort_event,
-                prompt_timeout_s=prompt_timeout_s,
+            # Screenshot before action
+            before_img: np.ndarray | None = None
+            if action not in ("wait", "prompt_user"):
+                before_img = screenshot_full()
+                if callback:
+                    callback(RunEvent.SCREENSHOT_TAKEN, {
+                        "purpose": "before_action", "step_index": i,
+                    })
+
+            # Execute action
+            action_result = _dispatch_action(step, locate_result, dry_run=dry_run, prompt_timeout_s=prompt_timeout_s)
+            _emit(callback, RunEvent.ACTION_EXECUTED, {
+                "step_index": i,
+                "action": action,
+                "result": action_result,
+            })
+
+            # Post-action validation
+            skip_validation = action in (
+                "wait", "prompt_user", "read", "snip_and_search", "select_all_extract",
             )
+            if not skip_validation and before_img is not None:
+                after_img = screenshot_full()
+                if callback:
+                    callback(RunEvent.SCREENSHOT_TAKEN, {
+                        "purpose": "after_action", "step_index": i,
+                    })
+
+                try:
+                    from mapper.validator import validate_action
+
+                    validation = validate_action(
+                        before_img, after_img,
+                        f"{action} on '{label}'",
+                    )
+                    if not validation.success:
+                        _emit(callback, RunEvent.VALIDATION_FAILED, {
+                            "step_index": i,
+                            "confidence": validation.confidence,
+                            "notes": validation.notes,
+                        })
+                        logger.warning(
+                            "Step %d validation failed: %s", i, validation.notes,
+                        )
+                    else:
+                        _emit(callback, RunEvent.VALIDATION_PASSED, {
+                            "step_index": i,
+                            "confidence": validation.confidence,
+                        })
+                except Exception as exc:
+                    logger.debug("Validation error (non-fatal): %s", exc)
+
+            _emit(callback, RunEvent.STEP_COMPLETE, {
+                "step_index": i,
+                "label": label,
+                "action": action,
+                "result": action_result,
+            })
             steps_completed += 1
-            continue
+            step_results.append({
+                "step_index": i,
+                "action": action,
+                "label": label,
+                "result": action_result,
+                "located_method": locate_result.method if locate_result else None,
+            })
 
-        _emit(callback, RunEvent.STEP_START, {
-            "step_index": i,
-            "total_steps": total_steps,
-            "label": label,
-            "action": action,
-        })
+        # Build final result
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        success = failure_reason is None
+        completed_at = datetime.now(timezone.utc).isoformat()
 
-        # Locate element (skip for actions that don't need location)
-        locate_result: LocateResult | None = None
-        if action in ("wait", "prompt_user"):
-            locate_result = LocateResult(
-                point=Point(0, 0), confidence=1.0, method="none",
-            )
-        else:
-            try:
-                locate_result = locate_element_from_step(step, routine_dir)
-                _emit(callback, RunEvent.ELEMENT_LOCATED, {
-                    "step_index": i,
-                    "point": {"x": locate_result.point.x, "y": locate_result.point.y},
-                    "method": locate_result.method,
-                    "confidence": locate_result.confidence,
-                })
-            except ElementNotFoundError:
-                # Enter failure cascade
-                locate_result = _failure_cascade(
-                    step, routine, routine_dir, run_dir, callback, i,
-                )
-                if locate_result is None:
-                    # ABORT -- never blind-click
-                    failure_step = i
-                    failure_reason = (
-                        f"Could not find element '{label}' after full cascade"
-                    )
-                    _emit(callback, RunEvent.STEP_FAILED, {
-                        "step_index": i,
-                        "label": label,
-                        "reason": failure_reason,
-                    })
-                    break
-
-        # Screenshot before action
-        before_img: np.ndarray | None = None
-        if action not in ("wait", "prompt_user"):
-            before_img = screenshot_full()
-            if callback:
-                callback(RunEvent.SCREENSHOT_TAKEN, {
-                    "purpose": "before_action", "step_index": i,
-                })
-
-        # Execute action
-        action_result = _dispatch_action(step, locate_result, dry_run=dry_run, prompt_timeout_s=prompt_timeout_s)
-        _emit(callback, RunEvent.ACTION_EXECUTED, {
-            "step_index": i,
-            "action": action,
-            "result": action_result,
-        })
-
-        # Post-action validation
-        skip_validation = action in (
-            "wait", "prompt_user", "read", "snip_and_search", "select_all_extract",
+        run_result = RunResult(
+            success=success,
+            routine_name=routine.name,
+            run_id=run_dir.name,
+            run_dir=run_dir,
+            steps_completed=steps_completed,
+            total_steps=total_steps,
+            duration_ms=duration_ms,
+            failure_step=failure_step,
+            failure_reason=failure_reason,
+            step_results=step_results,
         )
-        if not skip_validation and before_img is not None:
-            after_img = screenshot_full()
-            if callback:
-                callback(RunEvent.SCREENSHOT_TAKEN, {
-                    "purpose": "after_action", "step_index": i,
-                })
 
-            try:
-                from mapper.validator import validate_action
-
-                validation = validate_action(
-                    before_img, after_img,
-                    f"{action} on '{label}'",
-                )
-                if not validation.success:
-                    _emit(callback, RunEvent.VALIDATION_FAILED, {
-                        "step_index": i,
-                        "confidence": validation.confidence,
-                        "notes": validation.notes,
-                    })
-                    logger.warning(
-                        "Step %d validation failed: %s", i, validation.notes,
-                    )
-                else:
-                    _emit(callback, RunEvent.VALIDATION_PASSED, {
-                        "step_index": i,
-                        "confidence": validation.confidence,
-                    })
-            except Exception as exc:
-                logger.debug("Validation error (non-fatal): %s", exc)
-
-        _emit(callback, RunEvent.STEP_COMPLETE, {
-            "step_index": i,
-            "label": label,
-            "action": action,
-            "result": action_result,
-        })
-        steps_completed += 1
-        step_results.append({
-            "step_index": i,
-            "action": action,
-            "label": label,
-            "result": action_result,
-            "located_method": locate_result.method if locate_result else None,
-        })
-
-    # Build final result
-    duration_ms = int((time.monotonic() - start_time) * 1000)
-    success = failure_reason is None
-    completed_at = datetime.now(timezone.utc).isoformat()
-
-    run_result = RunResult(
-        success=success,
-        routine_name=routine.name,
-        run_id=run_dir.name,
-        run_dir=run_dir,
-        steps_completed=steps_completed,
-        total_steps=total_steps,
-        duration_ms=duration_ms,
-        failure_step=failure_step,
-        failure_reason=failure_reason,
-        step_results=step_results,
-    )
-
-    # Save run result
-    save_run_result(run_dir, {
-        "run_id": run_dir.name,
-        "routine_name": routine.name,
-        "status": "success" if success else "failed",
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "duration_ms": duration_ms,
-        "steps_completed": steps_completed,
-        "total_steps": total_steps,
-        "failure_step": failure_step,
-        "failure_reason": failure_reason,
-    })
-
-    # Emit final event
-    if success:
-        _emit(callback, RunEvent.RUN_COMPLETE, {
+        # Save run result
+        save_run_result(run_dir, {
+            "run_id": run_dir.name,
             "routine_name": routine.name,
-            "steps_completed": steps_completed,
+            "status": "success" if success else "failed",
+            "started_at": started_at,
+            "completed_at": completed_at,
             "duration_ms": duration_ms,
-        })
-    else:
-        _emit(callback, RunEvent.RUN_FAILED, {
-            "routine_name": routine.name,
+            "steps_completed": steps_completed,
+            "total_steps": total_steps,
             "failure_step": failure_step,
             "failure_reason": failure_reason,
         })
 
-    # Cleanup
-    logging.getLogger().removeHandler(handler)
-    handler.close()
+        # Emit final event
+        if success:
+            _emit(callback, RunEvent.RUN_COMPLETE, {
+                "routine_name": routine.name,
+                "steps_completed": steps_completed,
+                "duration_ms": duration_ms,
+            })
+        else:
+            _emit(callback, RunEvent.RUN_FAILED, {
+                "routine_name": routine.name,
+                "failure_step": failure_step,
+                "failure_reason": failure_reason,
+            })
 
-    # Prune old runs
-    try:
-        prune_old_runs(routine_dir)
-    except Exception:
-        logger.debug("Prune error (non-fatal)", exc_info=True)
+        # Prune old runs
+        try:
+            prune_old_runs(routine_dir)
+        except Exception:
+            logger.debug("Prune error (non-fatal)", exc_info=True)
 
-    return run_result
+        return run_result
+
+    finally:
+        # Always remove and close the run logger handler to prevent leaks
+        logging.getLogger().removeHandler(handler)
+        handler.close()

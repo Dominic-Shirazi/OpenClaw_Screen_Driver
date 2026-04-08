@@ -294,6 +294,10 @@ class OverlayView(QGraphicsView):
             )
             self.scene().addItem(self._toolbar)
         if on_action is not None:
+            try:
+                self._toolbar.button_clicked.disconnect()
+            except TypeError:
+                pass  # No existing connections — safe to ignore
             self._toolbar.button_clicked.connect(on_action)
         self._toolbar.show_toolbar()
         self._update_avoidance_rects()
@@ -496,6 +500,10 @@ class OverlayView(QGraphicsView):
             bbox: Optional BboxLayer whose corners will morph when
                 AI result arrives.
         """
+        # Remove stale scan layer to prevent scene item leak
+        if self._scan_layer is not None:
+            self._clock.unregister(self._scan_layer.tick)
+            self.scene().removeItem(self._scan_layer)
         self._scan_layer = ScanLayer(x, y, w, h)
         self.scene().addItem(self._scan_layer)
         self._clock.register(self._scan_layer.tick)
@@ -551,6 +559,10 @@ class OverlayView(QGraphicsView):
             center_y: Cloud center Y coordinate.
             radius: Cloud radius (used for both rx and ry).
         """
+        # Remove stale donut cloud to prevent scene item leak
+        if self._donut_cloud is not None:
+            self._clock.unregister(self._donut_cloud.tick)
+            self.scene().removeItem(self._donut_cloud)
         self._donut_cloud = DonutCloudLayer(center_x, center_y, radius, radius)
         self.scene().addItem(self._donut_cloud)
         self._clock.register(self._donut_cloud.tick)

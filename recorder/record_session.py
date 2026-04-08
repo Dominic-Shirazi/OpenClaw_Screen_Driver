@@ -395,6 +395,15 @@ class RecordSession:
             )
             panel = self._controller.show_abort_confirm(len(self._steps))
             if panel is not None:
+                # Disconnect before connect to prevent signal accumulation
+                try:
+                    panel.discard_clicked.disconnect(self._on_abort_confirmed)
+                except TypeError:
+                    pass  # No existing connection -- that's fine
+                try:
+                    panel.keep_clicked.disconnect(self._on_abort_cancelled)
+                except TypeError:
+                    pass  # No existing connection -- that's fine
                 panel.discard_clicked.connect(self._on_abort_confirmed)
                 panel.keep_clicked.connect(self._on_abort_cancelled)
         else:
@@ -425,6 +434,15 @@ class RecordSession:
 
         dialog = self._controller.show_wait_dialog()
         if dialog is not None:
+            # Disconnect before connect to prevent signal accumulation
+            try:
+                dialog.confirmed.disconnect(self._on_wait_configured)
+            except TypeError:
+                pass  # No existing connection -- that's fine
+            try:
+                dialog.dismissed.disconnect(self._on_wait_dismissed)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             dialog.confirmed.connect(self._on_wait_configured)
             dialog.dismissed.connect(self._on_wait_dismissed)
         logger.info("Add Wait: showing configuration dialog")
@@ -475,6 +493,15 @@ class RecordSession:
 
         dialog = self._controller.show_loop_dialog(self._steps)
         if dialog is not None:
+            # Disconnect before connect to prevent signal accumulation
+            try:
+                dialog.confirmed.disconnect(self._on_loop_configured)
+            except TypeError:
+                pass  # No existing connection -- that's fine
+            try:
+                dialog.dismissed.disconnect(self._on_loop_dismissed)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             dialog.confirmed.connect(self._on_loop_configured)
             dialog.dismissed.connect(self._on_loop_dismissed)
         logger.info(
@@ -542,6 +569,15 @@ class RecordSession:
 
         dialog = self._controller.show_prompt_dialog()
         if dialog is not None:
+            # Disconnect before connect to prevent signal accumulation
+            try:
+                dialog.confirmed.disconnect(self._on_prompt_configured)
+            except TypeError:
+                pass  # No existing connection -- that's fine
+            try:
+                dialog.dismissed.disconnect(self._on_prompt_dismissed)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             dialog.confirmed.connect(self._on_prompt_configured)
             dialog.dismissed.connect(self._on_prompt_dismissed)
         logger.info("Add Prompt: showing question dialog")

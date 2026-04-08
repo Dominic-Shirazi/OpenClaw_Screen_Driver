@@ -724,6 +724,11 @@ class TagDialogPanel(QGraphicsObject):
 
         self._fading_out = False
 
+        # Re-register tick callback (unregistered on dismiss fade-out completion).
+        # Unregister first to avoid duplicates if show_dialog is called while visible.
+        self._clock.unregister(self._tick)
+        self._clock.register(self._tick)
+
         # Re-enable mouse acceptance and focus (dismiss() disables them)
         self.setAcceptedMouseButtons(
             Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton,
@@ -1066,6 +1071,7 @@ class TagDialogPanel(QGraphicsObject):
         if self._fading_out and self._opacity < 0.01:
             self._opacity = 0.0
             self._fading_out = False
+            self._clock.unregister(self._tick)
             self.dismissed.emit({})
 
         self.update()
