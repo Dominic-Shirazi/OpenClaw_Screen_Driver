@@ -144,40 +144,43 @@ QWidget#TagDialog {
 }
 QLineEdit {
     background-color: rgba(20, 20, 35, 220);
-    color: rgba(240, 240, 245, 230);
+    color: #ffffff;
     border: 1px solid rgba(50, 200, 50, 60);
     border-radius: 4px;
     padding: 4px 6px;
-    font-weight: 300;
-    font-size: 13px;
+    font-weight: 400;
+    font-size: 14px;
 }
 QComboBox {
     background-color: rgba(20, 20, 35, 220);
-    color: rgba(240, 240, 245, 230);
+    color: #ffffff;
     border: 1px solid rgba(50, 200, 50, 60);
     border-radius: 4px;
     padding: 4px 6px;
-    font-weight: 300;
-    font-size: 13px;
+    font-weight: 400;
+    font-size: 14px;
 }
 QComboBox::drop-down {
     border: none;
 }
 QComboBox QAbstractItemView {
-    background-color: rgba(20, 20, 35, 240);
-    color: rgba(240, 240, 245, 230);
-    border: 1px solid rgba(50, 200, 50, 60);
-    selection-background-color: rgba(50, 200, 50, 80);
+    background-color: rgb(30, 34, 42);
+    color: #ffffff;
+    selection-background-color: rgba(60, 140, 200, 200);
+    border: 1px solid rgba(100, 200, 255, 120);
+    font-size: 14px;
+    padding: 4px;
 }
 QLabel {
-    color: rgba(200, 200, 210, 150);
+    color: #c0c8d0;
     background: transparent;
-    font-size: 12px;
+    font-size: 14px;
+    font-weight: 500;
 }
 QCheckBox {
-    color: rgba(240, 240, 245, 230);
+    color: #ffffff;
     background: transparent;
-    font-size: 13px;
+    font-size: 14px;
     spacing: 6px;
 }
 QCheckBox::indicator {
@@ -464,10 +467,9 @@ class TagDialogPanel(QWidget):
         confirm_btn.setStyleSheet(
             f"background: rgba({CONFIRM_BG.red()}, {CONFIRM_BG.green()}, "
             f"{CONFIRM_BG.blue()}, {CONFIRM_BG.alpha()}); "
-            f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
-            f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
+            "color: #ffffff; "
             "border-radius: 4px; padding: 6px 12px; "
-            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 400;"
+            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 500;"
         )
         confirm_btn.clicked.connect(self.confirm)
         self._widgets["confirm_btn"] = confirm_btn
@@ -477,10 +479,9 @@ class TagDialogPanel(QWidget):
         dismiss_btn.setStyleSheet(
             f"background: rgba({DISMISS_BG.red()}, {DISMISS_BG.green()}, "
             f"{DISMISS_BG.blue()}, {DISMISS_BG.alpha()}); "
-            f"color: rgba({DISMISS_TEXT.red()}, {DISMISS_TEXT.green()}, "
-            f"{DISMISS_TEXT.blue()}, {DISMISS_TEXT.alpha()}); "
+            "color: #e8e8e8; "
             "border-radius: 4px; padding: 6px 12px; "
-            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 400;"
+            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 500;"
         )
         dismiss_btn.clicked.connect(self.dismiss)
         self._widgets["dismiss_btn"] = dismiss_btn
