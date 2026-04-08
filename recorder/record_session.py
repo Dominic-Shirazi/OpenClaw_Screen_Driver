@@ -126,6 +126,7 @@ class RecordSession:
         self._click_x: int = 0
         self._click_y: int = 0
         self._on_session_complete: Callable[[bool], None] | None = None
+        self._save_in_progress: bool = False
 
         logger.info(
             "RecordSession created: routine=%s, start_from=%s",
@@ -370,7 +371,15 @@ class RecordSession:
         logger.info("Tag dismissed, returning to AWAITING_CLICK")
 
     def on_save_requested(self) -> None:
-        """Handle Ctrl+Q -- save all accumulated steps."""
+        """Handle Ctrl+Q -- save all accumulated steps.
+
+        Guarded by ``_save_in_progress`` to prevent signal accumulation
+        from triggering multiple concurrent save threads (Bug #12).
+        """
+        if self._save_in_progress:
+            logger.debug("Save already in progress, ignoring duplicate request")
+            return
+
         logger.info("Save requested with %d steps", len(self._steps))
 
         if len(self._steps) == 0:
@@ -379,6 +388,8 @@ class RecordSession:
             if self._on_session_complete is not None:
                 self._on_session_complete(False)
             return
+
+        self._save_in_progress = True
 
         # Save in background thread
         thread = threading.Thread(
@@ -1662,6 +1673,7 @@ class RecordSession:
         Args:
             path: Directory path where routine was saved.
         """
+        self._save_in_progress = False
         logger.info("Routine saved successfully to %s", path)
         self._controller.close()
         if self._on_session_complete is not None:
@@ -1673,6 +1685,7 @@ class RecordSession:
         Args:
             error: Error message string.
         """
+        self._save_in_progress = False
         logger.error("Routine save failed: %s", error)
         # Don't lose session data -- user can retry
 

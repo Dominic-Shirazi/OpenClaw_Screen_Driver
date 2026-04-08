@@ -47,10 +47,24 @@ class _Win32PollingHotkeyListener:
         self._on_toggle = on_toggle
         self._on_close = on_close
         self._timer: QTimer | None = None
+        self._suppressed: bool = False
         self._prev_r = False
         self._prev_q = False
         self._prev_f2 = False
         self._prev_esc = False
+
+    def set_suppressed(self, suppressed: bool) -> None:
+        """Suppress or resume hotkey callbacks.
+
+        While suppressed the polling timer keeps running (so key-state
+        tracking stays accurate) but no callbacks are fired.  This
+        prevents hotkeys from interrupting text input in dialogs.
+
+        Args:
+            suppressed: True to suppress callbacks, False to resume.
+        """
+        self._suppressed = suppressed
+        logger.debug("Win32 hotkeys suppressed=%s", suppressed)
 
     def start(self) -> None:
         """Starts the polling timer."""
@@ -85,15 +99,18 @@ class _Win32PollingHotkeyListener:
         f2_down = bool(get(self.VK_F2) & 0x8000)
         esc_down = bool(get(self.VK_ESCAPE) & 0x8000)
 
-        if ctrl and r_down and not self._prev_r:
-            self._on_toggle()
-        if f2_down and not self._prev_f2:
-            self._on_toggle()
+        # Always track key state so edge detection stays accurate,
+        # but only fire callbacks when not suppressed.
+        if not self._suppressed:
+            if ctrl and r_down and not self._prev_r:
+                self._on_toggle()
+            if f2_down and not self._prev_f2:
+                self._on_toggle()
 
-        if ctrl and q_down and not self._prev_q:
-            self._on_close()
-        if esc_down and not self._prev_esc:
-            self._on_close()
+            if ctrl and q_down and not self._prev_q:
+                self._on_close()
+            if esc_down and not self._prev_esc:
+                self._on_close()
 
         self._prev_r = ctrl and r_down
         self._prev_q = ctrl and q_down
@@ -118,6 +135,20 @@ class _PynputHotkeyListener:
         self._on_close = on_close
         self._listener: Any = None
         self._key_listener: Any = None
+        self._suppressed: bool = False
+
+    def set_suppressed(self, suppressed: bool) -> None:
+        """Suppress or resume hotkey callbacks.
+
+        While suppressed the listeners stay running but callbacks are
+        not fired.  This prevents hotkeys from interrupting text input
+        in dialogs.
+
+        Args:
+            suppressed: True to suppress callbacks, False to resume.
+        """
+        self._suppressed = suppressed
+        logger.debug("pynput hotkeys suppressed=%s", suppressed)
 
     @staticmethod
     def _invoke_on_main_thread(callback: Callable[[], None]) -> None:
@@ -149,10 +180,12 @@ class _PynputHotkeyListener:
             from pynput import keyboard
 
             def on_activate_toggle() -> None:
-                self._invoke_on_main_thread(self._on_toggle)
+                if not self._suppressed:
+                    self._invoke_on_main_thread(self._on_toggle)
 
             def on_activate_close() -> None:
-                self._invoke_on_main_thread(self._on_close)
+                if not self._suppressed:
+                    self._invoke_on_main_thread(self._on_close)
 
             hotkeys = keyboard.GlobalHotKeys({
                 "<ctrl>+r": on_activate_toggle,
@@ -162,6 +195,8 @@ class _PynputHotkeyListener:
             self._listener = hotkeys
 
             def _on_press(key: Any) -> None:
+                if self._suppressed:
+                    return
                 try:
                     if key == keyboard.Key.f2:
                         self._invoke_on_main_thread(self._on_toggle)

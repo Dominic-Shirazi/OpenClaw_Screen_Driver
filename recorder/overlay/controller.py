@@ -157,6 +157,24 @@ class OverlayController:
             self._view.clear_bboxes()
 
     # ------------------------------------------------------------------
+    # Hotkey suppression (for text-input dialogs)
+    # ------------------------------------------------------------------
+
+    def suppress_hotkeys(self) -> None:
+        """Suppress global hotkey callbacks while a dialog has keyboard focus.
+
+        The polling timer (or pynput listener) keeps running so key-state
+        tracking stays accurate, but no toggle/close callbacks are fired.
+        """
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.set_suppressed(True)
+
+    def resume_hotkeys(self) -> None:
+        """Resume global hotkey callbacks after a dialog closes."""
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.set_suppressed(False)
+
+    # ------------------------------------------------------------------
     # HUD panel API
     # ------------------------------------------------------------------
 
@@ -175,6 +193,7 @@ class OverlayController:
         """
         if self._view is not None:
             self._view.show_tag_dialog(element_rect, vlm_data, edit_mode)
+            self.suppress_hotkeys()
 
     def update_tag_dialog_data(self, vlm_data: dict) -> None:
         """Populate an already-visible tag dialog with VLM results.
@@ -191,6 +210,7 @@ class OverlayController:
         """Dismiss the tag dialog."""
         if self._view is not None:
             self._view.dismiss_tag_dialog()
+        self.resume_hotkeys()
 
     def get_tag_data(self) -> dict | None:
         """Return current tag dialog form data.
@@ -351,6 +371,7 @@ class OverlayController:
         if self._view is not None:
             from recorder.overlay.mini_dialogs import WaitDialog
 
+            self.suppress_hotkeys()
             return self._view.show_mini_dialog(WaitDialog)
         return None
 
@@ -358,6 +379,7 @@ class OverlayController:
         """Remove the wait dialog from the scene."""
         if self._view is not None:
             self._view.hide_mini_dialog("wait")
+        self.resume_hotkeys()
 
     def show_prompt_dialog(self) -> Any:
         """Create and show the prompt question dialog.
@@ -368,6 +390,7 @@ class OverlayController:
         if self._view is not None:
             from recorder.overlay.mini_dialogs import PromptDialog
 
+            self.suppress_hotkeys()
             return self._view.show_mini_dialog(PromptDialog)
         return None
 
@@ -375,6 +398,7 @@ class OverlayController:
         """Remove the prompt dialog from the scene."""
         if self._view is not None:
             self._view.hide_mini_dialog("prompt")
+        self.resume_hotkeys()
 
     def show_loop_dialog(self, steps: list[dict[str, Any]]) -> Any:
         """Create and show the loop definition dialog.
@@ -388,6 +412,7 @@ class OverlayController:
         if self._view is not None:
             from recorder.overlay.mini_dialogs import LoopDialog
 
+            self.suppress_hotkeys()
             # LoopDialog needs extra 'steps' arg, so instantiate directly
             self._view.hide_mini_dialog("")
             dialog = LoopDialog(
@@ -407,6 +432,7 @@ class OverlayController:
         """Remove the loop dialog from the scene."""
         if self._view is not None:
             self._view.hide_mini_dialog("loop")
+        self.resume_hotkeys()
 
     def flash_success(self, bbox_rect: QRectF) -> None:
         """Show a brief green flash on the given bbox rect.
