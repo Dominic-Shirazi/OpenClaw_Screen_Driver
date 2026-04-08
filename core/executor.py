@@ -467,9 +467,10 @@ def select_all_extract(dry_run: bool = False) -> str:
     except Exception:
         pass
 
-    hotkey("ctrl", "a")
+    _mod = "command" if sys.platform == "darwin" else "ctrl"
+    hotkey(_mod, "a")
     _hsleep(0.15)
-    hotkey("ctrl", "c")
+    hotkey(_mod, "c")
     _hsleep(0.3)  # Wait for clipboard update
 
     new_clipboard = ""

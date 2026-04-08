@@ -5,21 +5,25 @@ sine waves.  Multiple noise octaves create realistic grouping where
 small waves merge into larger swells.  Waves surge inward/outward
 (not laterally) because time drives depth, not position.
 
-Mouse position is polled via Win32 GetCursorPos (works even when the
-overlay is click-through) so waves properly retreat from the cursor.
+Mouse position is polled via Win32 GetCursorPos on Windows (works even
+when the overlay is click-through) and via QCursor.pos() on macOS/Linux,
+so waves properly retreat from the cursor on all platforms.
 """
 
 from __future__ import annotations
 
-import ctypes
-import ctypes.wintypes
 import logging
 import math
 import sys
 
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -65,9 +69,11 @@ if sys.platform == "win32":
 
 
 def _get_cursor_pos() -> tuple[int, int]:
-    """Get global cursor position via Win32 API.
+    """Get global cursor position in a cross-platform manner.
 
-    Works even when the overlay window is click-through.
+    Win32: Uses GetCursorPos (works even when overlay is click-through).
+    macOS/Linux: Uses QCursor.pos() from PyQt6 (requires a running
+    QApplication, which is always present when the overlay is active).
 
     Returns:
         (x, y) screen coordinates.
@@ -76,8 +82,9 @@ def _get_cursor_pos() -> tuple[int, int]:
         pt = _POINT()
         _user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
-    # Fallback for non-Windows (mouse tracking may not work in click-through)
-    return -1000, -1000
+    # Cross-platform fallback via Qt — works on macOS and Linux
+    pos = QCursor.pos()
+    return pos.x(), pos.y()
 
 
 class ShimmerLayer(QGraphicsObject):

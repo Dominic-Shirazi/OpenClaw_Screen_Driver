@@ -11,7 +11,7 @@ import logging
 import sys
 from typing import Any, Callable
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QMetaObject, Qt, QTimer
 
 logger = logging.getLogger(__name__)
 
@@ -119,16 +119,40 @@ class _PynputHotkeyListener:
         self._listener: Any = None
         self._key_listener: Any = None
 
+    @staticmethod
+    def _invoke_on_main_thread(callback: Callable[[], None]) -> None:
+        """Safely invoke a callback on the Qt main thread.
+
+        pynput listeners run on background threads. Calling Qt APIs
+        (including QTimer.singleShot) from non-Qt threads is unsafe and
+        can cause crashes on macOS/Linux. QMetaObject.invokeMethod with
+        QueuedConnection posts the call to the main thread's event loop.
+
+        Args:
+            callback: Zero-argument callable to run on the main thread.
+        """
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            QMetaObject.invokeMethod(
+                app,
+                callback,
+                Qt.ConnectionType.QueuedConnection,
+            )
+        else:
+            logger.warning("No QApplication instance — hotkey callback dropped")
+
     def start(self) -> None:
         """Starts the pynput key listener."""
         try:
             from pynput import keyboard
 
             def on_activate_toggle() -> None:
-                QTimer.singleShot(0, self._on_toggle)
+                self._invoke_on_main_thread(self._on_toggle)
 
             def on_activate_close() -> None:
-                QTimer.singleShot(0, self._on_close)
+                self._invoke_on_main_thread(self._on_close)
 
             hotkeys = keyboard.GlobalHotKeys({
                 "<ctrl>+r": on_activate_toggle,
@@ -140,9 +164,9 @@ class _PynputHotkeyListener:
             def _on_press(key: Any) -> None:
                 try:
                     if key == keyboard.Key.f2:
-                        QTimer.singleShot(0, self._on_toggle)
+                        self._invoke_on_main_thread(self._on_toggle)
                     elif key == keyboard.Key.esc:
-                        QTimer.singleShot(0, self._on_close)
+                        self._invoke_on_main_thread(self._on_close)
                 except Exception:
                     pass
 
