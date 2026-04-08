@@ -1,12 +1,13 @@
-"""Frosted-glass tag dialog panel for the overlay HUD.
+"""Tag dialog panel for the overlay HUD.
 
 QWidget-based floating panel with direct form fields (no proxy widgets),
 typewriter VLM fill, conditional action-type fields, and card border
 glow animation.  This is the primary data capture UI during recording.
 
-Replaces the former QGraphicsObject + QGraphicsProxyWidget approach to
-eliminate focus, visibility, and click-through issues inherent in proxy
-embedding inside a QGraphicsScene.
+Uses a solid dark background (no WA_TranslucentBackground) so that child
+popup windows (QComboBox dropdowns) render correctly on Windows.  The card
+glow paints outside the rounded-rect clip region; fade-in/out uses
+setWindowOpacity() which works independently of translucency attributes.
 """
 from __future__ import annotations
 
@@ -140,7 +141,8 @@ _ALL_CONDITIONAL: set[str] = {
 
 _DIALOG_QSS: str = """
 QWidget#TagDialog {
-    background: transparent;
+    background: rgb(20, 22, 28);
+    border-radius: 12px;
 }
 QLineEdit {
     background-color: rgba(20, 20, 35, 220);
@@ -196,25 +198,12 @@ QCheckBox::indicator:checked {
 """
 
 
-class _OpaqueComboBox(QComboBox):
-    """QComboBox that forces opaque popup even under WA_TranslucentBackground parent."""
-
-    def showPopup(self) -> None:
-        """Re-apply opacity fix every time the popup opens."""
-        super().showPopup()
-        popup = self.view().window()
-        popup.setAutoFillBackground(True)
-        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        # Force a repaint so the background is visible immediately
-        popup.update()
-
-
 class TagDialogPanel(QWidget):
-    """Frosted-glass tag dialog with form fields, typewriter fill, and card glow.
+    """Tag dialog with form fields, typewriter fill, and card glow.
 
-    This is a top-level QWidget (frameless, translucent, always-on-top)
-    that floats over the QGraphicsView overlay.  Form fields are direct
-    QWidget children -- no QGraphicsProxyWidget wrappers.
+    This is a top-level QWidget (frameless, opaque dark background,
+    always-on-top) that floats over the QGraphicsView overlay.  Form
+    fields are direct QWidget children -- no QGraphicsProxyWidget wrappers.
 
     Signals:
         confirmed: Emitted with form data dict when user confirms.
@@ -242,7 +231,6 @@ class TagDialogPanel(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setStyleSheet(_DIALOG_QSS)
 
         self._panel_width: int = 400
@@ -368,7 +356,7 @@ class TagDialogPanel(QWidget):
         )
 
         # -- Action Type combo --
-        action_combo = _OpaqueComboBox()
+        action_combo = QComboBox()
         for at in _ACTION_TYPES:
             action_combo.addItem(at, at)
         action_combo.currentIndexChanged.connect(self._on_action_type_changed)
@@ -377,7 +365,7 @@ class TagDialogPanel(QWidget):
         )
 
         # -- Element Type combo (grouped with separator headers) --
-        elem_combo = _OpaqueComboBox()
+        elem_combo = QComboBox()
         elem_combo.setMaxVisibleItems(20)
         self._populate_element_type_combo(elem_combo)
         main_layout.addWidget(
@@ -866,7 +854,7 @@ class TagDialogPanel(QWidget):
     # ------------------------------------------------------------------
 
     def paintEvent(self, event: Any) -> None:
-        """Paint frosted glass background, highlight gradient, card glow, and spinner.
+        """Paint card glow, highlight gradient, and loading spinner.
 
         Args:
             event: The paint event.
