@@ -147,6 +147,7 @@ def cmd_execute(args: Any) -> int:
             start_id=entry_id,
             goal_id=target_id,
             dry_run=args.dry_run,
+            event_callback=step_callback,
         )
 
     # Save replay log

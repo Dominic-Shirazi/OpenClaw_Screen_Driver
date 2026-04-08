@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import logging
 import socket
+from datetime import datetime, timezone
 from typing import Any
 
 from routine.checksum import calculate_routine_checksum
@@ -61,7 +62,8 @@ def upgrade_v0_to_v1(data: dict[str, Any]) -> dict[str, Any]:
     d.setdefault("programs", [])
     d.setdefault("platform", _detect_platform())
     d.setdefault("theme", None)
-    d["updated_at"] = d.get("created_at", d.get("updated_at", ""))
+    if "updated_at" not in d or not d["updated_at"]:
+        d["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     # Upgrade each step
     for step in d.get("steps", []):

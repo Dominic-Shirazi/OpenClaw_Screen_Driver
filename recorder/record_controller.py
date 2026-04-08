@@ -573,7 +573,7 @@ def _save_recording(
         node_id = graph.add_node(
             element_type=et_str,
             label=elem.get("label", ""),
-            ocr_text=elem.get("label", ""),
+            ocr_text=elem.get("ocr_text", ""),
             x_pct=elem["x"] / screen_w,
             y_pct=elem["y"] / screen_h,
             w_pct=w_pct,
@@ -650,7 +650,7 @@ def cmd_record(args: Any) -> int:
     from PyQt6.QtWidgets import QApplication
 
     from recorder.dialog import TagDialog
-    from recorder.overlay import OverlayController, OverlayMode
+    from recorder.overlay import OverlayController, OverlayState
 
     is_diagram = getattr(args, "diagram", False)
     mode_label = "diagram" if is_diagram else "workflow"
@@ -662,7 +662,7 @@ def cmd_record(args: Any) -> int:
 
     recorded_elements: list[dict] = []
 
-    def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> bool:
+    def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None = None) -> bool:
         """Handle an element selection (click or bbox) during recording.
 
         Flow: auto-snip/refine bbox → VLM label the refined crop → TagDialog.
@@ -786,9 +786,9 @@ def cmd_record(args: Any) -> int:
                 return True
         return False
 
-    def on_mode_changed(mode: OverlayMode) -> None:
-        logger.info("Overlay mode: %s", mode.name)
-        if mode == OverlayMode.RECORD:
+    def on_state_changed(state: OverlayState) -> None:
+        logger.info("Overlay state: %s", state.name)
+        if state == OverlayState.RECORDING:
             _trigger_smart_detect(
                 overlay, recorded_elements, refine_mode, on_element_clicked,
             )
@@ -813,9 +813,9 @@ def cmd_record(args: Any) -> int:
         logger.warning("Florence-2 not available: %s", e)
 
     overlay = OverlayController(
-        on_element_clicked=on_element_clicked,
-        on_mode_changed=on_mode_changed,
-        on_close=on_close,
+        on_selection=on_element_clicked,
+        on_state_changed=on_state_changed,
+        on_save=on_close,
     )
     overlay.show()  # starts in PASSTHROUGH — Ctrl+R when ready to record
 

@@ -225,10 +225,11 @@ class OverlayView(QGraphicsView):
     def show_after_capture(self) -> None:
         """Restore the overlay window after a screenshot capture."""
         self.show()
-        # Restore HUD panels visibility
-        if self._tag_dialog is not None and self._tag_dialog._opacity > 0:
+        # Restore HUD panels visibility (check _target_opacity to avoid
+        # re-showing panels that were mid-fade-out when capture started)
+        if self._tag_dialog is not None and self._tag_dialog._target_opacity > 0:
             self._tag_dialog.setVisible(True)
-        if self._toolbar is not None and self._toolbar._opacity > 0:
+        if self._toolbar is not None and self._toolbar._target_opacity > 0:
             self._toolbar.setVisible(True)
         if self._countdown is not None and self._countdown._remaining > 0:
             self._countdown.setVisible(True)
@@ -367,11 +368,19 @@ class OverlayView(QGraphicsView):
         from recorder.overlay.toolbar_panel import ToolbarPanel
         from recorder.overlay.tag_dialog_panel import TagDialogPanel
         from recorder.overlay.abort_panel import AbortPanel
+        from recorder.overlay.countdown_widget import CountdownWidget
+        from recorder.overlay.status_badge import StatusBadge
 
         # Walk up the parent chain — proxy widgets are children of panels
         current = item
         while current is not None:
-            if isinstance(current, (ToolbarPanel, TagDialogPanel, AbortPanel)):
+            if isinstance(current, (
+                ToolbarPanel, TagDialogPanel, AbortPanel,
+                CountdownWidget, StatusBadge,
+            )):
+                return True
+            # Also check for mini dialogs (WaitDialog, PromptDialog) stored dynamically
+            if self._mini_dialog is not None and current is self._mini_dialog:
                 return True
             current = current.parentItem()
         return False
@@ -613,7 +622,7 @@ class OverlayView(QGraphicsView):
             The panel for signal connection.
         """
         if self._abort_panel is None:
-            self._abort_panel = AbortPanel()
+            self._abort_panel = AbortPanel(self._clock)
             self._abort_panel.set_screen_size(self._screen_w, self._screen_h)
             self.scene().addItem(self._abort_panel)
         self._abort_panel.show_panel(step_count)

@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from recorder.overlay.animation_clock import AnimationClock
 from recorder.overlay.card_glow import paint_card_glow
 from recorder.overlay.hud_common import (
     CORNER_RADIUS,
@@ -91,12 +92,14 @@ class AbortPanel(QGraphicsObject):
 
     def __init__(
         self,
+        clock: AnimationClock,
         parent: QGraphicsObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.setZValue(Z_ABORT_PANEL)
         self.setVisible(False)
 
+        self._clock = clock
         self._width: float = _PANEL_WIDTH
         self._height: float = 140.0
         self._corner_radius: float = CORNER_RADIUS
@@ -112,6 +115,9 @@ class AbortPanel(QGraphicsObject):
         self._discard_proxy: QGraphicsProxyWidget | None = None
         self._keep_proxy: QGraphicsProxyWidget | None = None
         self._create_widgets()
+
+        # Register tick for glow animation
+        self._clock.register(self._tick)
 
         logger.debug("AbortPanel created (z=%d)", Z_ABORT_PANEL)
 
@@ -306,3 +312,23 @@ class AbortPanel(QGraphicsObject):
         painter.drawPath(card_path)
 
         painter.restore()
+
+    # ------------------------------------------------------------------
+    # Animation tick
+    # ------------------------------------------------------------------
+
+    def _tick(self, dt: float) -> None:
+        """Advance glow animation phase.
+
+        Args:
+            dt: Elapsed seconds since last tick.
+        """
+        if not self.isVisible():
+            return
+        self._glow_phase += dt * 0.8
+        self.update()
+
+    def cleanup(self) -> None:
+        """Unregister tick callback from animation clock."""
+        self._clock.unregister(self._tick)
+        logger.debug("AbortPanel cleanup: tick unregistered")

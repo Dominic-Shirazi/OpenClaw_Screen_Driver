@@ -359,7 +359,7 @@ def _failure_cascade(
         prompt = _build_ai_fallback_prompt(routine, step_index, step, screenshot_b64)
         config = get_config()
         litellm_cfg = config.get("recovery", {})
-        model = litellm_cfg.get("model", "claude-opus")
+        model = litellm_cfg.get("model", config.get("vlm", {}).get("model", "openai/gpt-4o"))
 
         response = litellm.completion(
             model=model,

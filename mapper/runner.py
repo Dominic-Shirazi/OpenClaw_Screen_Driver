@@ -301,6 +301,7 @@ def run_skill(
     goal_id: str,
     dry_run: bool = False,
     execution_params: dict[str, str] | None = None,
+    event_callback: EventCallback | None = None,
 ) -> ReplayLog:
     """Executes a full skill from start node to goal node.
 
@@ -313,6 +314,7 @@ def run_skill(
         goal_id: The goal/destination node ID.
         dry_run: If True, simulates without actual input.
         execution_params: Optional variable->value mappings for textbox resolution.
+        event_callback: Optional callback for execution events (step preview, locate, etc.).
 
     Returns:
         ReplayLog with complete execution history and timing.
@@ -342,6 +344,14 @@ def run_skill(
         len(branches),
     )
 
+    # Helper to emit events if a callback was provided
+    def emit(event_type: RunnerEventType, data: dict[str, Any]) -> None:
+        if event_callback:
+            try:
+                event_callback(event_type, data)
+            except Exception as e:
+                logger.error("Event callback error: %s", e)
+
     # Execute every node in the path (click each element in sequence)
     for i, node_id in enumerate(path):
         next_id = path[i + 1] if i < len(path) - 1 else None
@@ -354,6 +364,13 @@ def run_skill(
             node_label,
         )
 
+        emit(RunnerEventType.STEP_PREVIEW, {
+            "node_id": node_id,
+            "label": node_label,
+            "step": i,
+            "element_type": graph.get_node(node_id).get("element_type", ""),
+        })
+
         step = execute_node(
             graph, node_id, next_node_id=next_id,
             prev_node_id=prev_id,  # Added: incoming edge for action_payload — fix P1.5 — 2026-04-07
@@ -361,6 +378,14 @@ def run_skill(
             execution_params=execution_params,  # Updated: forward execution_params to execute_node — was silently dropped — 2026-04-03
         )
         replay_log.append_step(step)
+
+        if step.success and step.located_at:
+            emit(RunnerEventType.ELEMENT_LOCATED, {
+                "node_id": node_id,
+                "point": (step.located_at.x, step.located_at.y),
+                "method": step.locate_method,
+                "confidence": step.vlm_confidence,
+            })
 
         if not step.success:
             logger.error(
@@ -393,6 +418,7 @@ def run_path(
     dry_run: bool = False,
     event_callback: EventCallback | None = None,
     skip_vlm_validation: bool = False,
+    execution_params: dict[str, str] | None = None,
 ) -> ReplayLog:
     """Executes a sequence of nodes with event callbacks.
 
@@ -405,6 +431,7 @@ def run_path(
         dry_run: If True, log actions without executing them.
         event_callback: Optional callback for execution events.
         skip_vlm_validation: If True, skip VLM for faster execution.
+        execution_params: Optional variable->value mappings for textbox resolution.
 
     Returns:
         ReplayLog with step-by-step results.
@@ -478,6 +505,7 @@ def run_path(
             graph, node_id, next_node_id=next_id,
             prev_node_id=prev_id,  # Added: incoming edge for action_payload — fix P1.5 — 2026-04-07
             dry_run=False, skill_id=graph.skill_id,
+            execution_params=execution_params,  # fix P8.11: forward execution_params — 2026-04-07
         )
         replay_log.append_step(step)
 

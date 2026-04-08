@@ -877,6 +877,9 @@ class TagDialogPanel(QGraphicsObject):
         for proxy in self._labels.values():
             if proxy is not None:
                 proxy.setVisible(False)
+        for proxy in self._tips.values():
+            if proxy is not None:
+                proxy.setVisible(False)
         logger.debug("TagDialogPanel dismissing")
 
     def confirm(self) -> None:

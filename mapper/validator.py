@@ -26,6 +26,43 @@ from core.vision import confirm_action, analyze_crop
 logger = logging.getLogger(__name__)
 
 
+def _threshold_for_action(intended_action: str, default: float) -> float:
+    """Returns the pixel-diff threshold appropriate for the action type.
+
+    Subtle actions (typing, toggling, checking) produce very small visual
+    changes.  Navigation and window-level actions produce large changes.
+    The default threshold is used when the action doesn't match a known
+    category.
+
+    Args:
+        intended_action: Free-text description of the action.
+        default: Fallback threshold from config.
+
+    Returns:
+        A float threshold in the range [0.0, 1.0].
+    """
+    action_lower = intended_action.lower()
+
+    # Subtle actions — single character, checkbox, toggle, radio
+    _SUBTLE_KEYWORDS = (
+        "type", "typing", "key", "keystroke", "character",
+        "toggle", "checkbox", "check", "uncheck",
+        "radio", "switch", "select option",
+    )
+    if any(kw in action_lower for kw in _SUBTLE_KEYWORDS):
+        return min(default, 0.005)
+
+    # Medium actions — dropdown open, tooltip, hover state
+    _MEDIUM_KEYWORDS = (
+        "dropdown", "expand", "collapse", "hover",
+        "tooltip", "focus", "highlight", "scroll",
+    )
+    if any(kw in action_lower for kw in _MEDIUM_KEYWORDS):
+        return min(default, 0.01)
+
+    return default
+
+
 def validate_action(
     before_screenshot: np.ndarray,
     after_screenshot: np.ndarray,
@@ -48,9 +85,10 @@ def validate_action(
     """
     config = get_config()
     exec_cfg = config.get("execution", {})
-    threshold = float(exec_cfg.get("pixel_diff_threshold", 0.08))
+    base_threshold = float(exec_cfg.get("pixel_diff_threshold", 0.02))
     vlm_confirm = bool(exec_cfg.get("vlm_confirm", True))
 
+    threshold = _threshold_for_action(intended_action, base_threshold)
     diff = pixel_diff(before_screenshot, after_screenshot)
 
     # No visible change — action likely failed
@@ -58,7 +96,7 @@ def validate_action(
         return ConfirmResult(
             success=False,
             confidence=0.9,
-            notes="No visible change detected",
+            notes=f"No visible change detected (diff {diff:.3%} < threshold {threshold:.3%})",
         )
 
     # Change detected but VLM disabled — trust the pixel diff
@@ -123,7 +161,7 @@ def quick_check(
     """
     config = get_config()
     threshold = float(
-        config.get("execution", {}).get("pixel_diff_threshold", 0.08)
+        config.get("execution", {}).get("pixel_diff_threshold", 0.02)
     )
     diff = pixel_diff(before_screenshot, after_screenshot)
     return diff >= threshold

@@ -156,10 +156,17 @@ class ConditionChecker:
                 return False
 
     def _check_fixed_timer(self) -> bool:
-        """Sleep for the specified duration, then return True."""
+        """Sleep for the specified duration, then return True.
+
+        Sleeps in small intervals so cancellation can interrupt promptly.
+        """
         seconds = self.params.get("seconds", self.timeout)
-        time.sleep(seconds)
-        return True
+        chunk = 0.5
+        remaining = seconds
+        while remaining > 0 and not self._cancelled:
+            time.sleep(min(chunk, remaining))
+            remaining -= chunk
+        return not self._cancelled
 
     def _check_screen_change(self) -> bool:
         """Compare current screenshot against baseline using pixel diff."""

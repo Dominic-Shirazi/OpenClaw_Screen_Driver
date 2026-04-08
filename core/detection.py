@@ -18,6 +18,7 @@ from core.types import LocateResult
 logger = logging.getLogger(__name__)
 
 _detector_instance: Any = None
+_detector_config_key: tuple[str, float] | None = None
 _detector_lock = threading.Lock()
 
 # Lazy top-level reference so patch("core.detection.OmniParserProvider") works.
@@ -78,6 +79,17 @@ class DetectionProvider(Protocol):
         ...
 
 
+def reset_detector() -> None:
+    """Reset the cached detector singleton.
+
+    Useful in tests or when config changes require a fresh instance.
+    """
+    global _detector_instance, _detector_config_key
+    with _detector_lock:
+        _detector_instance = None
+        _detector_config_key = None
+
+
 def get_detector(config: dict | None = None) -> DetectionProvider:
     """Factory that returns the configured detection provider.
 
@@ -94,20 +106,24 @@ def get_detector(config: dict | None = None) -> DetectionProvider:
     Raises:
         ValueError: If the detector name in config is not recognized.
     """
-    global _detector_instance
+    global _detector_instance, _detector_config_key
 
-    if _detector_instance is not None:
+    if config is None:
+        config = get_config()
+
+    detector_name = config.get("models", {}).get("detector", "omniparser")
+    conf_threshold = config.get("detection", {}).get(
+        "confidence_threshold", 0.3
+    )
+    requested_key = (detector_name, conf_threshold)
+
+    if _detector_instance is not None and _detector_config_key == requested_key:
         return _detector_instance
 
     with _detector_lock:
         # Double-checked locking pattern.
-        if _detector_instance is not None:
+        if _detector_instance is not None and _detector_config_key == requested_key:
             return _detector_instance
-
-        if config is None:
-            config = get_config()
-
-        detector_name = config.get("models", {}).get("detector", "omniparser")
 
         if detector_name == "omniparser":
             if OmniParserProvider is None:
@@ -116,9 +132,6 @@ def get_detector(config: dict | None = None) -> DetectionProvider:
                     "not be imported. Ensure OmniParser and its dependencies "
                     "are installed (pip install ocsd[omniparser])."
                 )
-            conf_threshold = config.get("detection", {}).get(
-                "confidence_threshold", 0.3
-            )
             _detector_instance = OmniParserProvider(
                 confidence_threshold=conf_threshold
             )
@@ -128,5 +141,6 @@ def get_detector(config: dict | None = None) -> DetectionProvider:
                 f"Supported: 'omniparser'"
             )
 
-        logger.info("Initialized detector: %s", detector_name)
+        _detector_config_key = requested_key
+        logger.info("Initialized detector: %s (threshold=%.2f)", detector_name, conf_threshold)
         return _detector_instance

@@ -631,23 +631,27 @@ class RecordSession:
         self._controller.hide_for_capture()
         cfg = get_config()
         delay_ms = cfg.get("overlay", {}).get("capture_delay_ms", 80)
-        time.sleep(delay_ms / 1000)
-        try:
-            from core.capture import screenshot_full
 
-            self._screenshot = screenshot_full()
-        except Exception as e:
-            logger.error("Screenshot failed: %s", e)
-            self._screenshot = None
+        # P8.1 fix: use QTimer instead of time.sleep() to keep Qt event loop responsive
+        def _after_compositor_wait() -> None:
+            try:
+                from core.capture import screenshot_full
+
+                self._screenshot = screenshot_full()
+            except Exception as e:
+                logger.error("Screenshot failed: %s", e)
+                self._screenshot = None
+                self._controller.show_after_capture()
+                self._set_phase(RecordPhase.AWAITING_CLICK)
+                return
             self._controller.show_after_capture()
-            self._set_phase(RecordPhase.AWAITING_CLICK)
-            return
-        self._controller.show_after_capture()
-        self._set_phase(RecordPhase.VLM_ANALYZING)
-        if hasattr(self._controller, "start_card_glow_pulse"):
-            self._controller.start_card_glow_pulse()
-        if self._screenshot is not None:
-            self._start_vlm(self._screenshot, (x, y, w, h))
+            self._set_phase(RecordPhase.VLM_ANALYZING)
+            if hasattr(self._controller, "start_card_glow_pulse"):
+                self._controller.start_card_glow_pulse()
+            if self._screenshot is not None:
+                self._start_vlm(self._screenshot, (x, y, w, h))
+
+        QTimer.singleShot(delay_ms, _after_compositor_wait)
 
     def _handle_drag_target_selection(
         self, x: int, y: int, w: int, h: int,
@@ -664,46 +668,52 @@ class RecordSession:
         self._controller.hide_for_capture()
         cfg = get_config()
         delay_ms = cfg.get("overlay", {}).get("capture_delay_ms", 80)
-        time.sleep(delay_ms / 1000)
-        try:
-            from core.capture import screenshot_full
 
-            screenshot_full()  # take screenshot for visual record
-        except Exception as e:
-            logger.error("Target screenshot failed: %s", e)
-            self._controller.show_after_capture()
-            self._set_phase(RecordPhase.AWAITING_CLICK)
-            return
-        self._controller.show_after_capture()
-
-        # Use click position or drag center as target bbox
-        if w > 0 and h > 0:
-            target_bbox = {"x": x, "y": y, "w": w, "h": h}
-        else:
-            target_bbox = {"x": x - 30, "y": y - 30, "w": 60, "h": 60}
-
-        # Store drag target in current step
-        if self._current_step is not None:
-            node_id = self._current_step.get("node_id", str(uuid4()))
-            self._current_step["drag_target"] = {
-                "bbox": target_bbox,
-                "anchors": {
-                    "visual_match": f"snippets/{node_id}_target.png",
-                },
-            }
-            logger.info("Drag target captured: %s", target_bbox)
-
-        # Now proceed to countdown/dry-run
-        self._set_phase(RecordPhase.COUNTDOWN)
-        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
-        widget = self._controller.show_countdown(3)
-        if widget is not None:
-            # Updated: disconnect before connect to prevent signal accumulation
+        # P8.1 fix: use QTimer instead of time.sleep() to keep Qt event loop responsive
+        # P8.2 fix: store screenshot return value for drag-target visual reference
+        def _after_compositor_wait() -> None:
             try:
-                widget.countdown_finished.disconnect(self._on_countdown_finished)
-            except TypeError:
-                pass  # No existing connection -- that's fine
-            widget.countdown_finished.connect(self._on_countdown_finished)
+                from core.capture import screenshot_full
+
+                target_screenshot = screenshot_full()
+            except Exception as e:
+                logger.error("Target screenshot failed: %s", e)
+                self._controller.show_after_capture()
+                self._set_phase(RecordPhase.AWAITING_CLICK)
+                return
+            self._controller.show_after_capture()
+
+            # Use click position or drag center as target bbox
+            if w > 0 and h > 0:
+                target_bbox = {"x": x, "y": y, "w": w, "h": h}
+            else:
+                target_bbox = {"x": x - 30, "y": y - 30, "w": 60, "h": 60}
+
+            # Store drag target and its screenshot in current step
+            if self._current_step is not None:
+                node_id = self._current_step.get("node_id", str(uuid4()))
+                self._current_step["drag_target"] = {
+                    "bbox": target_bbox,
+                    "screenshot": target_screenshot,
+                    "anchors": {
+                        "visual_match": f"snippets/{node_id}_target.png",
+                    },
+                }
+                logger.info("Drag target captured: %s", target_bbox)
+
+            # Now proceed to countdown/dry-run
+            self._set_phase(RecordPhase.COUNTDOWN)
+            self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+            widget = self._controller.show_countdown(3)
+            if widget is not None:
+                # Updated: disconnect before connect to prevent signal accumulation
+                try:
+                    widget.countdown_finished.disconnect(self._on_countdown_finished)
+                except TypeError:
+                    pass  # No existing connection -- that's fine
+                widget.countdown_finished.connect(self._on_countdown_finished)
+
+        QTimer.singleShot(delay_ms, _after_compositor_wait)
 
     # ------------------------------------------------------------------
     # Private: pipeline methods
@@ -739,44 +749,47 @@ class RecordSession:
 
         cfg = get_config()
         delay_ms = cfg.get("overlay", {}).get("capture_delay_ms", 80)
-        time.sleep(delay_ms / 1000)
 
-        try:
-            from core.capture import screenshot_full
+        # P8.1 fix: use QTimer instead of time.sleep() to keep Qt event loop responsive
+        def _after_compositor_wait() -> None:
+            try:
+                from core.capture import screenshot_full
 
-            self._screenshot = screenshot_full()
-        except Exception as e:
-            logger.error("Screenshot failed: %s", e)
-            self._screenshot = None
+                self._screenshot = screenshot_full()
+            except Exception as e:
+                logger.error("Screenshot failed: %s", e)
+                self._screenshot = None
+                self._controller.show_after_capture()
+                self._set_phase(RecordPhase.AWAITING_CLICK)
+                return
+
             self._controller.show_after_capture()
-            self._set_phase(RecordPhase.AWAITING_CLICK)
-            return
 
-        self._controller.show_after_capture()
+            self._set_phase(RecordPhase.DETECTING)
 
-        self._set_phase(RecordPhase.DETECTING)
+            # Start scan animation immediately at selection rect (don't wait for AI)
+            if self._is_drag_capture and self._original_drag_rect is not None:
+                dx, dy, dw, dh = self._original_drag_rect
+                self._controller.start_scan(dx, dy, dw, dh)
+            else:
+                # For clicks, scan a 60x60 region around the click point
+                self._controller.start_scan(
+                    self._click_x - 30, self._click_y - 30, 60, 60,
+                )
 
-        # Start scan animation immediately at selection rect (don't wait for AI)
-        if self._is_drag_capture and self._original_drag_rect is not None:
-            dx, dy, dw, dh = self._original_drag_rect
-            self._controller.start_scan(dx, dy, dw, dh)
-        else:
-            # For clicks, scan a 60x60 region around the click point
-            self._controller.start_scan(
-                self._click_x - 30, self._click_y - 30, 60, 60,
+            # Start card glow pulsing during detection
+            if hasattr(self._controller, "start_card_glow_pulse"):
+                self._controller.start_card_glow_pulse()
+
+            # Start background detection thread
+            self._start_detection(
+                self._screenshot,
+                self._click_x,
+                self._click_y,
+                self._is_drag_capture,
             )
 
-        # Start card glow pulsing during detection
-        if hasattr(self._controller, "start_card_glow_pulse"):
-            self._controller.start_card_glow_pulse()
-
-        # Start background detection thread
-        self._start_detection(
-            self._screenshot,
-            self._click_x,
-            self._click_y,
-            self._is_drag_capture,
-        )
+        QTimer.singleShot(delay_ms, _after_compositor_wait)
 
     def _start_detection(
         self,
@@ -1328,10 +1341,10 @@ class RecordSession:
                     )
                     logger.info("Dry-run prompt_user: would pause and wait for /respond")
                 case _:
+                    # P8.3 fix: skip execution for unknown actions instead of falling through to click
                     logger.warning(
-                        "Unknown action type for dry-run: %s", action,
+                        "Unknown action type for dry-run: %s — skipping execution", action,
                     )
-                    exec_click(center_x, center_y)
 
             logger.info(
                 "Dry-run %s executed at (%d, %d)", action, center_x, center_y,

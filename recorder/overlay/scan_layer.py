@@ -74,6 +74,7 @@ class ScanLayer(QGraphicsObject):
         self._phase_progress: float = 0.0
         self._ai_ready: bool = False
         self.setZValue(60)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
 
         # Red glow colour from STATE_COLORS[RECORDING]
         self._glow_color = QColor(255, 50, 50)
@@ -360,15 +361,21 @@ class ScanLayer(QGraphicsObject):
                 QPointF(p1.x(), p1.y() - 10),
                 QPointF(p1.x(), p1.y() + 10),
             )
+            grad_rect = QRectF(p1.x(), p1.y() - 10, p2.x() - p1.x(), 20)
         else:
             # Vertical line (horizontal sweep) - gradient left/right
             grad = QLinearGradient(
                 QPointF(p1.x() - 10, p1.y()),
                 QPointF(p1.x() + 10, p1.y()),
             )
+            grad_rect = QRectF(p1.x() - 10, p1.y(), 20, p2.y() - p1.y())
         grad.setColorAt(0.0, QColor(255, 50, 50, 0))
         grad.setColorAt(0.5, QColor(255, 50, 50, 40))
         grad.setColorAt(1.0, QColor(255, 50, 50, 0))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(grad)
+        painter.drawRect(grad_rect)
 
     def _paint_snap_to_fitted(self, painter: QPainter) -> None:
         """Interpolate corners from scan_rect to fitted_rect."""

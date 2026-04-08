@@ -290,6 +290,11 @@ def _make_run_callback(mgr: RunManager, run_id: str) -> Callable:
                 data.get("step_index", 0),
                 data.get("total_steps", 0),
             )
+            if data.get("action") == "prompt_user":
+                mgr.mark_waiting(
+                    run_id,
+                    data.get("label", "Waiting for user input"),
+                )
         elif event == RunEvent.RUN_COMPLETE:
             mgr.mark_complete(run_id)
         elif event == RunEvent.RUN_PAUSED:
@@ -343,17 +348,7 @@ async def run_routine_endpoint(
             ).model_dump(),
         )
 
-    try:
-        run_id = manager.start_run(routine_id)
-    except RunAlreadyActiveError:
-        raise HTTPException(
-            status_code=409,
-            detail=ErrorResponse(
-                code="RUN_ALREADY_ACTIVE",
-                message="A routine is already executing",
-                suggestion="Wait for current run to finish or POST /runs/{run_id}/abort",
-            ).model_dump(),
-        )
+    run_id = manager.start_run(routine_id)
 
     active = manager.get_run(run_id)
     callback = _make_run_callback(manager, run_id)

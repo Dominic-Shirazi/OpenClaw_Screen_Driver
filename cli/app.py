@@ -133,6 +133,10 @@ def run_command(
     param: Optional[list[str]] = typer.Option(None, "--param", help="Parameters as key=value"),
 ) -> None:
     """Run (replay) a recorded routine."""
+    if speed <= 0:
+        show_error("Invalid Speed", f"--speed must be greater than 0 (got {speed})")
+        raise typer.Exit(code=1)
+
     try:
         path = resolve_routine_path(name)
     except FileNotFoundError as exc:
@@ -141,12 +145,15 @@ def run_command(
 
     params = parse_params(param or [])
 
-    # Wire --speed to runner via config human_delay override
+    # Wire --speed to runner via a shallow copy of execution config
+    import copy as _copy
+
     from core.config import get_config
 
     cfg = get_config()
-    original_delay = cfg.get("execution", {}).get("human_delay", 1.0)
-    cfg.setdefault("execution", {})["human_delay"] = 1.0 / speed
+    original_execution = cfg.get("execution", {})
+    cfg["execution"] = _copy.copy(original_execution)
+    cfg["execution"]["human_delay"] = original_execution.get("human_delay", 1.0) / speed
 
     # Collect variables and prepare temp copy if needed
     all_params = collect_variables(path, params)
@@ -201,11 +208,11 @@ def run_command(
             raise run_exc_holder[0]
         result = run_result_holder[0]
     except Exception as exc:
-        cfg["execution"]["human_delay"] = original_delay
+        cfg["execution"] = original_execution
         show_error("Run Failed", str(exc))
         raise typer.Exit(code=1) from exc
     finally:
-        cfg["execution"]["human_delay"] = original_delay
+        cfg["execution"] = original_execution
         if temp_dir is not None:
             import shutil
 

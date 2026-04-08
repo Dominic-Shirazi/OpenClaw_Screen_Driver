@@ -12,8 +12,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Position hints that suggest OS-level UI (taskbar, system tray, etc.)
+# Restricted to bottom edge — where taskbars/docks actually live on
+# Windows, macOS, and most Linux desktops.  Top-edge and side positions
+# are far more likely to be app chrome (toolbars, sidebars, tab bars).
 _OS_UI_POSITION_HINTS = frozenset({
-    "top_left", "top_center", "top_right",
     "bottom_left", "bottom_center", "bottom_right",
 })
 
@@ -31,8 +33,8 @@ _APP_PERSISTENT_ELEMENT_TYPES = frozenset({
 })
 
 # Position hints for edges of the screen (where OS UI typically lives)
+# Matches _OS_UI_POSITION_HINTS — only bottom edge qualifies.
 _EDGE_POSITION_HINTS = frozenset({
-    "top_left", "top_center", "top_right",
     "bottom_left", "bottom_center", "bottom_right",
 })
 
@@ -76,9 +78,11 @@ def classify_layer(element_type: str, position_hint: str) -> Layer:
         )
         return Layer.OS_UI
 
-    # Elements at screen edges with generic types may be OS UI
+    # Elements at the bottom screen edge with OS-like generic types may be OS UI.
+    # Only "icon" and "image" qualify — "button" and "label" are too common in
+    # app chrome (toolbars, status bars) and cause widespread misclassification.
     if position_lower in _EDGE_POSITION_HINTS and element_lower in {
-        "button", "icon", "label", "image",
+        "icon", "image",
     }:
         logger.debug(
             "Classified '%s' at '%s' as OS_UI (edge position heuristic)",
