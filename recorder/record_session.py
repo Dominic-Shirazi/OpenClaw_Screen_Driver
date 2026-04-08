@@ -1042,6 +1042,16 @@ class RecordSession:
         if hasattr(self._controller, "start_card_glow_pulse"):
             self._controller.start_card_glow_pulse()
 
+        # Show tag dialog immediately in loading state (spinner)
+        if self._current_bbox is not None:
+            bx, by, bw, bh = self._current_bbox
+            element_rect = QRectF(bx, by, bw, bh)
+        else:
+            element_rect = QRectF(
+                self._click_x - 30, self._click_y - 30, 60, 60,
+            )
+        self._controller.show_tag_dialog(element_rect, vlm_data=None)
+
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
         if self._screenshot is not None and self._current_bbox is not None:
@@ -1146,12 +1156,12 @@ class RecordSession:
     def _on_vlm_ready(self, result: dict) -> None:
         """Handle successful VLM analysis on main thread.
 
-        Opens tag dialog with VLM data and element rect.
+        Populates the already-visible tag dialog with VLM data.
 
         Args:
             result: VLM analysis result dict.
         """
-        logger.info("VLM ready, opening tag dialog: %s", result.get("element_type", "?"))
+        logger.info("VLM ready, populating tag dialog: %s", result.get("element_type", "?"))
         # Stop card glow pulsing
         if hasattr(self._controller, "stop_card_glow_pulse"):
             self._controller.stop_card_glow_pulse()
@@ -1166,21 +1176,14 @@ class RecordSession:
             "ocr_text": result.get("ocr_text"),
         }
 
-        if self._current_bbox is not None:
-            bx, by, bw, bh = self._current_bbox
-            element_rect = QRectF(bx, by, bw, bh)
-        else:
-            element_rect = QRectF(
-                self._click_x - 30, self._click_y - 30, 60, 60,
-            )
-
-        self._controller.show_tag_dialog(element_rect, vlm_data=vlm_data)
+        self._controller.update_tag_dialog_data(vlm_data)
         self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
     def _on_vlm_failed(self, error: str) -> None:
         """Handle VLM failure on main thread.
 
-        Opens tag dialog with partial data so user can still tag manually.
+        Populates the already-visible tag dialog with empty data so user
+        can tag manually.
 
         Args:
             error: Error message string.
@@ -1191,7 +1194,7 @@ class RecordSession:
 
         self._set_phase(RecordPhase.TAG_DIALOG)
 
-        logger.warning("VLM failed: %s — opening tag dialog with partial data", error)
+        logger.warning("VLM failed: %s — populating tag dialog for manual entry", error)
 
         partial_data = {
             "element_type": "unknown",
@@ -1201,17 +1204,7 @@ class RecordSession:
             "ocr_text": None,
         }
 
-        if self._current_bbox is not None:
-            bx, by, bw, bh = self._current_bbox
-            element_rect = QRectF(bx, by, bw, bh)
-        else:
-            element_rect = QRectF(
-                self._click_x - 30, self._click_y - 30, 60, 60,
-            )
-
-        self._controller.show_tag_dialog(
-            element_rect, vlm_data=partial_data,
-        )
+        self._controller.update_tag_dialog_data(partial_data)
         self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
     # ------------------------------------------------------------------

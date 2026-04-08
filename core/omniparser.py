@@ -101,6 +101,15 @@ class OmniParserProvider:
             if self._model is None:
                 self._load_model()
 
+    def warmup(self) -> None:
+        """Pre-load the YOLO model so first detect() is fast.
+
+        Safe to call from any thread; uses the same lock as detect().
+        """
+        logger.debug("OmniParser warmup starting")
+        self._ensure_model()
+        logger.debug("OmniParser warmup complete")
+
     def detect(self, screenshot: np.ndarray) -> list[dict[str, Any]]:
         """Run YOLOv8 icon_detect on screenshot.
 

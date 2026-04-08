@@ -98,6 +98,30 @@ _cached_client: Any = None
 _cached_client_key: tuple[str, str] | None = None
 
 
+def warmup_vlm() -> None:
+    """Pre-check VLM proxy reachability so first VLM call is faster.
+
+    Reads LiteLLM config and performs a TCP connect check, caching the
+    result.  Safe to call from any thread (uses _vlm_lock internally).
+    """
+    logger.debug("VLM warmup starting")
+    try:
+        from urllib.parse import urlparse  # noqa: PLC0415
+
+        config = get_config()
+        litellm_cfg = config.get("litellm", {})
+        base_url = litellm_cfg.get("base_url", "http://localhost:4000/v1")
+
+        parsed = urlparse(base_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 4000
+
+        reachable = _check_vlm_reachable(host, port)
+        logger.debug("VLM warmup complete — reachable=%s", reachable)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("VLM warmup failed: %s", exc)
+
+
 def _get_client():
     """Returns a cached OpenAI client pointing at the LiteLLM proxy.
 

@@ -176,6 +176,17 @@ class OverlayController:
         if self._view is not None:
             self._view.show_tag_dialog(element_rect, vlm_data, edit_mode)
 
+    def update_tag_dialog_data(self, vlm_data: dict) -> None:
+        """Populate an already-visible tag dialog with VLM results.
+
+        Transitions the dialog from loading spinner to populated fields.
+
+        Args:
+            vlm_data: VLM analysis result dict (may be empty for manual entry).
+        """
+        if self._view is not None:
+            self._view.update_tag_dialog_data(vlm_data)
+
     def dismiss_tag_dialog(self) -> None:
         """Dismiss the tag dialog."""
         if self._view is not None:

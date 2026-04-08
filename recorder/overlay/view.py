@@ -277,6 +277,17 @@ class OverlayView(QGraphicsView):
         )
         self._update_avoidance_rects()
 
+    def update_tag_dialog_data(self, vlm_data: dict) -> None:
+        """Populate an already-visible tag dialog with VLM results.
+
+        Transitions the dialog from loading spinner to populated fields.
+
+        Args:
+            vlm_data: VLM analysis result dict (may be empty for manual entry).
+        """
+        if self._tag_dialog is not None:
+            self._tag_dialog.populate_data(vlm_data)
+
     def dismiss_tag_dialog(self) -> None:
         """Dismiss the tag dialog with fade-out animation."""
         if self._tag_dialog is not None:

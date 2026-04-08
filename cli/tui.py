@@ -8,6 +8,7 @@ operation and offers searchable routine management.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +149,57 @@ def show_loading_screen() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Model warmup (fire-and-forget background threads)
+# ---------------------------------------------------------------------------
+
+
+def _start_model_warmup() -> None:
+    """Spawn daemon threads to pre-load AI models in background.
+
+    Called when the user selects "record" so models are warm by the
+    time recording actually starts.  Each thread swallows all errors
+    so missing optional models never block the TUI.
+    """
+
+    def _warmup_omniparser() -> None:
+        try:
+            from core.omniparser import OmniParserProvider  # noqa: PLC0415
+            provider = OmniParserProvider()
+            provider.warmup()
+        except Exception:  # noqa: BLE001
+            logger.debug("OmniParser warmup skipped (not available)")
+
+    def _warmup_florence() -> None:
+        try:
+            from core.florence import load_model  # noqa: PLC0415
+            logger.debug("Florence-2 warmup starting")
+            load_model()
+            logger.debug("Florence-2 warmup complete")
+        except Exception:  # noqa: BLE001
+            logger.debug("Florence-2 warmup skipped (not available)")
+
+    def _warmup_clip() -> None:
+        try:
+            from core.embeddings import warmup as warmup_clip  # noqa: PLC0415
+            warmup_clip()
+        except Exception:  # noqa: BLE001
+            logger.debug("CLIP warmup skipped (not available)")
+
+    def _warmup_vlm() -> None:
+        try:
+            from core.vision import warmup_vlm  # noqa: PLC0415
+            warmup_vlm()
+        except Exception:  # noqa: BLE001
+            logger.debug("VLM warmup skipped (not available)")
+
+    for target in (_warmup_omniparser, _warmup_florence, _warmup_clip, _warmup_vlm):
+        t = threading.Thread(target=target, daemon=True)
+        t.start()
+
+    logger.debug("Model warmup threads launched")
+
+
+# ---------------------------------------------------------------------------
 # Arrow-key menu
 # ---------------------------------------------------------------------------
 
@@ -220,6 +272,7 @@ def _show_menu(include_routine_actions: bool = True) -> tuple[str, dict[str, Any
             return "quit", {}
         kwargs["routine_path"] = path
     elif command == "record":
+        _start_model_warmup()  # fire-and-forget background threads
         name = Prompt.ask("Routine name")
         kwargs["routine_name"] = name
 

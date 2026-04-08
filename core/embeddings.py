@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -7,6 +10,8 @@ import numpy as np
 from PIL import Image
 
 from core.config import get_config
+
+logger = logging.getLogger(__name__)
 
 # Global state for lazy loading
 _clip_model = None
@@ -45,6 +50,17 @@ def _load_model():
 
     _clip_processor = CLIPProcessor.from_pretrained(model_name)
     _clip_model = CLIPModel.from_pretrained(model_name).to(_device)
+
+def warmup() -> None:
+    """Pre-load the CLIP model so first embedding call is fast.
+
+    Safe to call from any thread; _load_model guards against
+    double-loading internally.
+    """
+    logger.debug("CLIP warmup starting")
+    _load_model()
+    logger.debug("CLIP warmup complete")
+
 
 def generate_embedding(img: np.ndarray) -> np.ndarray:
     """Generates a normalized 512-dim CLIP embedding from an image.

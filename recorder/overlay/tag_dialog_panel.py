@@ -16,6 +16,7 @@ from PyQt6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPen,
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -227,6 +228,7 @@ class TagDialogPanel(QGraphicsObject):
         self._typewriter.finished.connect(self._on_typewriter_done)
 
         self._fading_out: bool = False
+        self._loading: bool = False
 
         # Field index mapping for typewriter interruption
         self._typewriter_field_map: dict[QLineEdit, int] = {}
@@ -729,6 +731,63 @@ class TagDialogPanel(QGraphicsObject):
             QGraphicsObject.GraphicsItemFlag.ItemIsFocusable, True,
         )
 
+        # Clear fields for fresh dialog
+        for key in ("label", "caption"):
+            w = self._widgets.get(key)
+            if isinstance(w, QLineEdit):
+                w.clear()
+
+        if vlm_data is None:
+            # Loading state — show spinner, hide all form fields
+            self._loading = True
+            for proxy in self._proxies.values():
+                if proxy is not None:
+                    proxy.setVisible(False)
+            for proxy in self._labels.values():
+                if proxy is not None:
+                    proxy.setVisible(False)
+            for proxy in self._tips.values():
+                if proxy is not None:
+                    proxy.setVisible(False)
+        else:
+            # Data available — populate immediately
+            self._loading = False
+            self._populate_fields(vlm_data, edit_mode)
+
+            # Restore proxy visibility (hidden on dismiss)
+            for proxy in self._proxies.values():
+                if proxy is not None:
+                    proxy.setVisible(True)
+            for proxy in self._labels.values():
+                if proxy is not None:
+                    proxy.setVisible(True)
+            # Re-apply conditional field visibility
+            action_combo = self._widgets.get("action_type")
+            if isinstance(action_combo, QComboBox):
+                self._on_action_type_changed(action_combo.currentIndex())
+
+        # Fade in
+        self._opacity = 0.0
+        self._target_opacity = 1.0
+
+        logger.debug(
+            "TagDialogPanel shown at (%.0f, %.0f), edit_mode=%s, loading=%s",
+            x, y, edit_mode, self._loading,
+        )
+
+    def _populate_fields(
+        self,
+        vlm_data: dict,
+        edit_mode: bool = False,
+    ) -> None:
+        """Fill form fields from VLM data dict.
+
+        Extracted from show_dialog so it can be reused by populate_data.
+
+        Args:
+            vlm_data: VLM-predicted field values dict.
+            edit_mode: If True, pre-fill instantly without typewriter.
+        """
         if vlm_data:
             # Set combo fields instantly (dropdowns don't typewrite)
             if "action_type" in vlm_data:
@@ -785,33 +844,36 @@ class TagDialogPanel(QGraphicsObject):
                     self._typewriter_field_map[caption_w] = 1
                 if tw_fields:
                     self._typewriter.start(tw_fields)
-        else:
-            # No VLM data — show empty fields
-            for key in ("label", "caption"):
-                w = self._widgets.get(key)
-                if isinstance(w, QLineEdit):
-                    w.clear()
 
-        # Restore proxy visibility (hidden on dismiss)
+    def populate_data(self, vlm_data: dict) -> None:
+        """Transition from loading state to populated fields.
+
+        Called when VLM results arrive after the dialog was shown in
+        loading mode.  Hides the spinner, reveals form fields, and
+        fills them with vlm_data.
+
+        Args:
+            vlm_data: VLM analysis result dict (may be empty for manual entry).
+        """
+        self._loading = False
+
+        # Populate field values
+        self._populate_fields(vlm_data, edit_mode=False)
+
+        # Show all proxies and labels
         for proxy in self._proxies.values():
             if proxy is not None:
                 proxy.setVisible(True)
         for proxy in self._labels.values():
             if proxy is not None:
                 proxy.setVisible(True)
+
         # Re-apply conditional field visibility
         action_combo = self._widgets.get("action_type")
         if isinstance(action_combo, QComboBox):
             self._on_action_type_changed(action_combo.currentIndex())
 
-        # Fade in
-        self._opacity = 0.0
-        self._target_opacity = 1.0
-
-        logger.debug(
-            "TagDialogPanel shown at (%.0f, %.0f), edit_mode=%s",
-            x, y, edit_mode,
-        )
+        logger.debug("TagDialogPanel populated with VLM data, loading=False")
 
     def _compute_position(
         self,
@@ -857,6 +919,7 @@ class TagDialogPanel(QGraphicsObject):
         """Fade out and emit dismissed signal."""
         self._target_opacity = 0.0
         self._fading_out = True
+        self._loading = False
         # Updated: immediately stop accepting mouse/keyboard during fade-out
         # so the invisible panel doesn't swallow clicks (fixes dry-run double-click)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -1012,7 +1075,65 @@ class TagDialogPanel(QGraphicsObject):
         painter.setBrush(gradient)
         painter.drawPath(card_path)
 
+        # Loading spinner
+        if self._loading:
+            self._paint_spinner(painter, rect)
+
         painter.restore()
+
+    def _paint_spinner(self, painter: QPainter, rect: QRectF) -> None:
+        """Paint a spinning arc loader in the center of the dialog.
+
+        Args:
+            painter: Active QPainter (already has opacity set).
+            rect: The panel content rect.
+        """
+        # Spinner geometry
+        radius = 40.0
+        stroke = 3.0
+        cx = rect.width() / 2.0
+        cy = rect.height() / 2.0 - 12.0  # offset up to leave room for text
+
+        spinner_rect = QRectF(
+            cx - radius, cy - radius,
+            radius * 2.0, radius * 2.0,
+        )
+
+        # Rotation angle: 1.5 revolutions per second driven by _glow_phase
+        # _glow_phase increments at dt * 0.8, so multiply to get desired speed
+        rotation_deg = self._glow_phase * 360.0 * 1.875  # ~1.5 rev/s at 0.8x rate
+
+        # Accent color: cyan/teal for visibility on dark frosted glass
+        accent = QColor(0, 200, 220)
+
+        # Subtle glow behind spinner (larger, lower opacity)
+        glow_pen = QPen(QColor(0, 200, 220, 50))
+        glow_pen.setWidthF(stroke + 4.0)
+        glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(glow_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        # Qt drawArc uses 1/16th degree units
+        start_angle_16 = int(rotation_deg * 16.0) % (360 * 16)
+        span_16 = 270 * 16  # 270-degree arc
+        painter.drawArc(spinner_rect, start_angle_16, span_16)
+
+        # Main spinner arc
+        arc_pen = QPen(accent)
+        arc_pen.setWidthF(stroke)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(arc_pen)
+        painter.drawArc(spinner_rect, start_angle_16, span_16)
+
+        # "Analyzing element..." text below spinner
+        painter.setPen(QColor(200, 200, 210, 180))
+        font = QFont()
+        if FONT_FAMILY:
+            font.setFamily(FONT_FAMILY)
+        font.setPixelSize(FONT_SIZE_HELPER)
+        font.setWeight(QFont.Weight(FONT_WEIGHT_LIGHT))
+        painter.setFont(font)
+        text_rect = QRectF(0, cy + radius + 12.0, rect.width(), 20.0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter, "Analyzing element...")
 
     # ------------------------------------------------------------------
     # Animation tick
