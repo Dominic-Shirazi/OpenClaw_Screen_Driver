@@ -209,6 +209,12 @@ class _OverlayView(QGraphicsView):
             box.reset_highlight()
         self.viewport().update()
 
+    def remove_candidate(self, index: int) -> None:
+        """Removes a candidate's visual elements from the scene."""
+        if 0 <= index < len(self._element_boxes):
+            self._element_boxes[index].remove_from_scene()
+            self.viewport().update()
+
     def get_candidate_rect(self, index: int) -> tuple[int, int, int, int] | None:
         """Returns the (possibly resized) rect for candidate at index."""
         if 0 <= index < len(self._element_boxes):

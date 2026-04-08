@@ -189,6 +189,9 @@ class ConditionChecker:
 
         from core.locate import locate_element_from_step
 
+        # Updated: increment _iteration_count here — was only incremented by
+        # _check_n_iterations, so VLM escalation never fired — 2026-04-03
+        self._iteration_count += 1
         # Adaptive: first 3 polls skip VLM (stages 1-3 only), then include VLM
         use_vlm = self._iteration_count >= 3
         try:

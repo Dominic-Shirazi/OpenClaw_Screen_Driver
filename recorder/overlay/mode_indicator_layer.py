@@ -38,6 +38,7 @@ class ModeIndicatorLayer(QGraphicsItemGroup):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: decorative layer, pass clicks through
         self.setZValue(100)
 
         # Background rectangle

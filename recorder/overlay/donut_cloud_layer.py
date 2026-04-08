@@ -81,6 +81,7 @@ class DonutCloudLayer(QGraphicsObject):
         radius_y: float = 60.0,
     ) -> None:
         super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: decorative layer, pass clicks through
         self._center = QPointF(center_x, center_y)
         self._radius_x: float = radius_x
         self._radius_y: float = radius_y

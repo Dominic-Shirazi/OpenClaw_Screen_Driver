@@ -54,9 +54,9 @@ fingerprinting:
 
 litellm:
   # LiteLLM proxy endpoint (override with LITELLM_BASE_URL in .env)
-  base_url: "http://localhost:4000/v1"
+  base_url: "http://192.168.0.2:4000/v1"
   # API key for LiteLLM (override with LITELLM_API_KEY in .env)
-  api_key: ""
+  api_key: "sk-uzdzspc12"
 
 paths:
   skills_dir: "./skills"

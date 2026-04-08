@@ -1,8 +1,17 @@
 """Card border glow painting helper.
 
-Renders soft radial gradient lights around a rectangular perimeter
-using the same additive blending technique (CompositionMode_Plus)
-as ShimmerLayer.  Used by both the tag dialog and toolbar panels.
+Renders a continuous ambient underglow around a rectangular perimeter.
+All edges glow simultaneously — no sweep or trailing.  Organic motion
+comes from layered sine waves that vary each point's intensity/reach
+over time, like fire or aurora.
+
+The effect: a panel sitting on a glowing surface, light leaking from
+all edges at once.  Some spots reach further than others, and those
+spots shift over time for a living, breathing quality.
+
+IMPORTANT — callers MUST:
+    1. Clip painting to OUTSIDE the card rect (QPainterPath subtraction)
+    2. Paint glow BEFORE the card body
 """
 from __future__ import annotations
 
@@ -16,19 +25,14 @@ from recorder.overlay.hud_common import ACCENT_GREEN
 
 logger = logging.getLogger(__name__)
 
-# Fraction of perimeter that is lit at once (same as ShimmerLayer)
-_ACTIVE_SPAN: float = 0.35
-
-# How far outside the card edge light centers are pushed
-_OUTWARD_DEPTH: float = 15.0
+# How far outside the card edge blob centers sit
+_OUTWARD_OFFSET: float = 4.0
 
 
 def _edge_point(
     distance: float, rect: QRectF,
 ) -> tuple[float, float, float, float]:
     """Compute edge position and outward normal for a perimeter distance.
-
-    Traversal order matches ShimmerLayer: top -> right -> bottom -> left.
 
     Args:
         distance: Distance along the perimeter (0 to perimeter length).
@@ -44,41 +48,42 @@ def _edge_point(
 
     d = distance
     if d < w:
-        # Top edge: left to right
         return x0 + d, y0, 0.0, -1.0
     d -= w
     if d < h:
-        # Right edge: top to bottom
         return x0 + w, y0 + d, 1.0, 0.0
     d -= h
     if d < w:
-        # Bottom edge: right to left
         return x0 + w - d, y0 + h, 0.0, 1.0
     d -= w
-    # Left edge: bottom to top
     return x0, y0 + h - d, -1.0, 0.0
 
 
-def _sweep_brightness(frac: float, phase: float) -> float:
-    """Calculate brightness at a perimeter position based on sweep phase.
+def _flicker(frac: float, phase: float) -> float:
+    """Compute organic flicker intensity for a perimeter position.
 
-    Uses the same algorithm as ShimmerLayer._sweep_brightness.
+    Layers multiple sine waves at different frequencies to create
+    non-repeating, natural variation.  Every point always has a base
+    glow — the flicker just modulates how far the light reaches.
 
     Args:
         frac: Position around perimeter (0.0 to 1.0).
-        phase: Current sweep phase (0.0 to 1.0).
+        phase: Time-based animation phase (increments continuously).
 
     Returns:
-        Brightness factor from 0.0 to 1.0.
+        Intensity multiplier from 0.4 (dim) to 1.0 (bright).
     """
-    delta = abs(frac - phase)
-    if delta > 0.5:
-        delta = 1.0 - delta
+    # Three sine waves at different frequencies for organic feel
+    # Each uses a different prime multiplier to avoid repeating patterns
+    wave1 = math.sin(frac * 7.0 * math.pi + phase * 2.1)
+    wave2 = math.sin(frac * 13.0 * math.pi + phase * 3.7 + 1.3)
+    wave3 = math.sin(frac * 19.0 * math.pi + phase * 1.3 + 2.7)
 
-    if delta > _ACTIVE_SPAN:
-        return 0.0
-    t = delta / _ACTIVE_SPAN
-    return 0.5 * (1.0 + math.cos(t * math.pi))
+    # Combine: weighted average normalized to 0..1
+    combined = (wave1 * 0.5 + wave2 * 0.3 + wave3 * 0.2 + 1.0) / 2.0
+
+    # Map to 0.4..1.0 range so nothing ever goes fully dark
+    return 0.4 + combined * 0.6
 
 
 def paint_card_glow(
@@ -86,23 +91,24 @@ def paint_card_glow(
     rect: QRectF,
     brightness: float = 1.0,
     phase: float = 0.0,
-    light_count: int = 24,
-    glow_radius: float = 30.0,
+    light_count: int = 40,
+    glow_radius: float = 45.0,
     color: QColor | None = None,
 ) -> None:
-    """Paint additive-blended radial gradient lights around a rectangle.
+    """Paint continuous ambient underglow around a rectangle.
 
-    Each light is a radial gradient positioned just outside the card
-    edge, with only the inner spill visible.  Uses CompositionMode_Plus
-    for the same additive blending as ShimmerLayer.
+    All edges glow simultaneously.  Organic variation in intensity
+    and reach creates living, breathing motion without any directional
+    sweep.  Each blob is a large, soft ellipse stretched along the
+    edge tangent, fading smoothly to transparent.
 
     Args:
         painter: The QPainter to draw with (must be active).
         rect: The card rectangle to glow around.
-        brightness: Overall brightness multiplier (0.0 to 1.0).
-        phase: Sweep position around perimeter (0.0 to 1.0).
-        light_count: Number of light sources around the perimeter.
-        glow_radius: Radius of each radial gradient.
+        brightness: Overall brightness multiplier (0.0 to ~2.0).
+        phase: Time phase for organic flicker animation.
+        light_count: Number of blobs around the perimeter.
+        glow_radius: How far the glow reaches outward.
         color: Glow color.  Defaults to ACCENT_GREEN.
     """
     if brightness < 0.01:
@@ -126,32 +132,61 @@ def paint_card_glow(
 
         ex, ey, nx, ny = _edge_point(d, rect)
 
-        sweep = _sweep_brightness(frac, phase)
-        if sweep < 0.01:
-            continue
+        # Organic flicker: varies reach/intensity per position over time
+        flick = _flicker(frac, phase)
 
-        # Push center outside the card edge
-        cx = ex + nx * _OUTWARD_DEPTH
-        cy = ey + ny * _OUTWARD_DEPTH
-
-        # Core alpha: sweep * brightness * 0.5, capped at 1.0
-        peak_alpha = min(sweep * brightness * 0.5, 1.0)
-        if peak_alpha < 0.01:
-            continue
+        # Push center outside the edge
+        cx = ex + nx * _OUTWARD_OFFSET
+        cy = ey + ny * _OUTWARD_OFFSET
 
         center = QPointF(cx, cy)
-        gradient = QRadialGradient(center, glow_radius)
 
-        core = QColor(base_color)
-        core.setAlphaF(peak_alpha)
-        edge = QColor(base_color)
-        edge.setAlphaF(0.0)
+        # Scale radius by flicker — brighter spots reach further
+        this_radius = glow_radius * (0.7 + flick * 0.5)
 
-        gradient.setColorAt(0.0, core)
-        gradient.setColorAt(1.0, edge)
+        # Alpha: soft base, modulated by flicker and brightness
+        per_alpha = min(0.08 * flick * brightness, 1.0)
+
+        # Stretched ellipse along the edge tangent
+        # Tangent stretch ensures neighbors overlap into continuous band
+        r_tangent = this_radius * 1.6
+        r_outward = this_radius
+
+        # Gradient: very soft falloff — 5 stops for smooth fade to nothing
+        grad_r = max(r_outward, r_tangent)
+        gradient = QRadialGradient(center, grad_r)
+
+        c0 = QColor(base_color)
+        c0.setAlphaF(per_alpha)
+
+        c1 = QColor(base_color)
+        c1.setAlphaF(per_alpha * 0.7)
+
+        c2 = QColor(base_color)
+        c2.setAlphaF(per_alpha * 0.35)
+
+        c3 = QColor(base_color)
+        c3.setAlphaF(per_alpha * 0.1)
+
+        c4 = QColor(base_color)
+        c4.setAlphaF(0.0)
+
+        gradient.setColorAt(0.0, c0)
+        gradient.setColorAt(0.15, c1)
+        gradient.setColorAt(0.35, c2)
+        gradient.setColorAt(0.65, c3)
+        gradient.setColorAt(1.0, c4)
 
         painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(center, glow_radius, glow_radius)
+
+        if abs(nx) > abs(ny):
+            rx = r_outward
+            ry = r_tangent
+        else:
+            rx = r_tangent
+            ry = r_outward
+
+        painter.drawEllipse(center, rx, ry)
 
     painter.restore()

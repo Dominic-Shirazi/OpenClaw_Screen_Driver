@@ -38,16 +38,63 @@ def _get_model_name() -> str:
     return config.get("models", {}).get("vlm", "vision")
 
 
+_vlm_reachable: bool | None = None
+"""Cached result of VLM proxy reachability check."""
+
+
+def _check_vlm_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Fast TCP connect check. Cached after first call."""
+    global _vlm_reachable
+    if _vlm_reachable is not None:
+        return _vlm_reachable
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+        sock.close()
+        _vlm_reachable = True
+    except (OSError, socket.timeout):
+        _vlm_reachable = False
+        logger.warning("VLM proxy at %s:%d not reachable", host, port)
+    return _vlm_reachable
+
+
+def reset_vlm_cache() -> None:
+    """Clear the cached VLM reachability result."""
+    global _vlm_reachable
+    _vlm_reachable = None
+
+
 def _get_client():
-    """Returns a cached OpenAI client pointing at the LiteLLM proxy."""
+    """Returns a cached OpenAI client pointing at the LiteLLM proxy.
+
+    Raises:
+        ConnectionError: If the VLM proxy is not reachable.
+    """
     from openai import OpenAI
+    from urllib.parse import urlparse
 
     config = get_config()
     litellm_cfg = config.get("litellm", {})
     base_url = litellm_cfg.get("base_url", "http://localhost:4000/v1")
     api_key = litellm_cfg.get("api_key", "no-key")
 
-    return OpenAI(base_url=base_url, api_key=api_key)
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 4000
+
+    if not _check_vlm_reachable(host, port):
+        raise ConnectionError(
+            f"VLM proxy at {host}:{port} not reachable"
+        )
+
+    import httpx
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=httpx.Timeout(60.0, connect=5.0),
+    )
 
 
 def _encode_image_to_base64(img_path: str) -> str:
@@ -296,9 +343,25 @@ Analyze this UI element image and respond with ONLY a JSON object (no other text
 
 Context: {context_prompt}
 
+Element types and when to use each:
+- textbox: an input field the user types into (search bars, form fields, text areas)
+- button: a clickable action button (Submit, OK, Cancel, Save, Delete)
+- button_nav: a navigation link/button that takes the user to a different page or view (menu items, nav links, breadcrumbs, sidebar links)
+- toggle: a switch, checkbox, or radio button that flips between states
+- tab: a tab in a tab bar that switches visible content
+- dropdown: a select menu, combobox, or expandable menu
+- scrollbar: a scrollable area or scroll handle
+- read_here: static display text or label the user reads but doesn't interact with
+- drag_source: an element the user drags from (file icon, card, list item to reorder)
+- drag_target: a drop zone where dragged items land
+- image: a picture, icon, or graphic
+- modal: a dialog box, popup, or overlay window
+- notification: a toast, alert, banner, or snackbar message
+- unknown: cannot determine the element type
+
 Respond with exactly this JSON format:
 {{
-  "element_type": "one of: textbox, button, button_nav, toggle, tab, dropdown, scrollbar, read_here, drag_source, drag_target, image, modal, notification, unknown",
+  "element_type": "one of the types listed above",
   "label_guess": "short human-readable label for this element",
   "confidence": 0.85,
   "ocr_text": "any visible text in the element, or null if none"

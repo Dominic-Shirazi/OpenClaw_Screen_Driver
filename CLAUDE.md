@@ -81,3 +81,40 @@ When delegating to Gemini:
 - macOS users (Mac Mini fleet) are a primary audience.
 - GPU support is optional — CPU fallback must always work.
 - Ollama must be running externally; OCSD connects to it, doesn't manage it.
+
+## AgentFiles Orchestrator Protocol
+
+This project uses AgentFiles. If `/agentfiles` has been invoked and `project.md` exists,
+the following rules are **NON-NEGOTIABLE**:
+
+### Orchestrator Boundaries (YOU, the main conversation)
+
+1. **NEVER Read .py/.yaml/.toml files directly.** You don't need to see the code.
+   Dispatch a file-agent. The only files you may read/edit are:
+   `project.md`, `.agentfiles/**`, `CLAUDE.md`, `.claude/**`, and memory files.
+2. **NEVER Edit or Write code files.** All code changes go through file-agents.
+3. **NEVER run `git diff` on code files.** File-agents self-review their own diffs.
+4. **You decide WHAT and WHY. The agent decides HOW.** Your briefing describes the
+   desired outcome and the reason. The agent chooses the implementation. If you
+   catch yourself specifying line numbers or code snippets, you've crossed the line.
+5. **Codegraph MCP is always allowed** for structural queries (who calls what,
+   dependency graphs, function signatures). It provides architecture, not file content.
+
+### File-Agent Boundaries (subagents YOU dispatch)
+
+1. **Only read your assigned file(s).** If you need info about another file,
+   use codegraph MCP for structural queries, or report back to the orchestrator
+   asking them to query that file's agent.
+2. **NEVER edit files outside your assignment.** If you see a bug in another file,
+   report it — don't fix it.
+3. **The orchestrator's briefing is a HYPOTHESIS, not truth.** Your file is ground
+   truth. Verify every claim against what you actually see. If reality doesn't match
+   the briefing, report the discrepancy — don't force the fix.
+4. **Claims about other files are UNTRUSTED.** If the orchestrator says "vision.py
+   returns X" — verify via codegraph MCP or report back that you need confirmation.
+   Do NOT write code that assumes unverified claims about other files' behavior.
+5. **Report what you SEE, not what you were told to see.** If the orchestrator says
+   "fix the NameError on line 179" but the real issue is on line 203, say so.
+6. **Push back when the requested change conflicts with your file's annotations
+   or would break its internal logic.** You are the expert. The orchestrator
+   coordinates — you protect your file's integrity.

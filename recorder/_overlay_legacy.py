@@ -183,9 +183,12 @@ class OverlayController:
                 x, y, w, h = rect_tuple
                 candidate["rect"] = {"x": x, "y": y, "w": w, "h": h}
 
-            on_review_element(i, candidate)
+            accepted = on_review_element(i, candidate)
+            if not accepted:
+                # Remove skipped element from the overlay
+                self._view.remove_candidate(i)
 
-        # Restore all highlights after review
+        # Restore highlights on remaining (accepted) candidates
         self._view.reset_highlights()
         logger.info("Review complete — %d candidates reviewed", len(self._candidates))
 

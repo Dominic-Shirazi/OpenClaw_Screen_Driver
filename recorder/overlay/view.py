@@ -218,6 +218,7 @@ class OverlayView(QGraphicsView):
             self._target_highlight.setVisible(False)
         if self._camera_flash is not None:
             self._camera_flash.setVisible(False)
+        self.clear_rubber_band()
         self._clock.stop()
         self.hide()
 
@@ -278,13 +279,22 @@ class OverlayView(QGraphicsView):
             return self._tag_dialog.get_form_data()
         return None
 
-    def show_toolbar(self) -> None:
-        """Show the floating toolbar."""
+    def show_toolbar(
+        self,
+        on_action: Callable[[str], None] | None = None,
+    ) -> None:
+        """Show the floating toolbar.
+
+        Args:
+            on_action: Optional callback for toolbar button clicks.
+        """
         if self._toolbar is None:
             self._toolbar = ToolbarPanel(
                 self._clock, self._screen_w, self._screen_h,
             )
             self.scene().addItem(self._toolbar)
+        if on_action is not None:
+            self._toolbar.button_clicked.connect(on_action)
         self._toolbar.show_toolbar()
         self._update_avoidance_rects()
 
@@ -348,11 +358,37 @@ class OverlayView(QGraphicsView):
     # Mouse event handlers (drag-to-draw)
     # ------------------------------------------------------------------
 
+    def _is_hud_item(self, item: Any) -> bool:
+        """Check if a scene item belongs to a HUD panel (toolbar, dialog, etc.)."""
+        from recorder.overlay.toolbar_panel import ToolbarPanel
+        from recorder.overlay.tag_dialog_panel import TagDialogPanel
+        from recorder.overlay.abort_panel import AbortPanel
+
+        # Walk up the parent chain — proxy widgets are children of panels
+        current = item
+        while current is not None:
+            if isinstance(current, (ToolbarPanel, TagDialogPanel, AbortPanel)):
+                return True
+            current = current.parentItem()
+        return False
+
     def mousePressEvent(self, event: Any) -> None:
-        """Start a rubber-band drag in RECORDING mode."""
-        # Only react to left button in recording mode
+        """Start a rubber-band drag in RECORDING mode.
+
+        If the click lands on a HUD widget (toolbar, dialog, etc.),
+        delegate to the default handler so buttons receive the event.
+        In non-RECORDING states, ignore the event so it passes through.
+        """
         if self._click_catcher is not None:
-            self._drag_start = self.mapToScene(event.pos())
+            scene_pos = self.mapToScene(event.pos())
+            item = self.scene().itemAt(scene_pos, self.viewportTransform())
+            # Let HUD widgets handle their own clicks
+            if item is not None and self._is_hud_item(item):
+                logger.debug("HUD click detected on %s, delegating", type(item).__name__)
+                super().mousePressEvent(event)
+                return
+            logger.debug("Non-HUD click at (%.0f,%.0f) item=%s", scene_pos.x(), scene_pos.y(), type(item).__name__ if item else "None")
+            self._drag_start = scene_pos
             pen = QPen(QColor(255, 255, 0, 220))
             pen.setWidth(2)
             pen.setStyle(Qt.PenStyle.DashLine)
@@ -361,7 +397,10 @@ class OverlayView(QGraphicsView):
                 QRectF(self._drag_start, self._drag_start), pen, brush,
             )
             self._rubber_band.setZValue(200)
-        event.accept()
+            event.accept()
+            return
+        # Not recording — ignore so clicks pass through  # Updated: ignore mouse press in non-RECORDING states — fixes replay click passthrough — 2026-04-03
+        event.ignore()
 
     def mouseMoveEvent(self, event: Any) -> None:
         """Update the rubber-band rectangle during drag and feed mouse position to shimmer."""
@@ -381,10 +420,23 @@ class OverlayView(QGraphicsView):
             x2 = max(self._drag_start.x(), pos.x())
             y2 = max(self._drag_start.y(), pos.y())
             self._rubber_band.setRect(QRectF(x1, y1, x2 - x1, y2 - y1))
-        event.accept()
+            event.accept()
+            return
+        # Not dragging — ignore so moves pass through  # Updated: ignore mouse move when not dragging — fixes replay click passthrough — 2026-04-03
+        if self._click_catcher is None:
+            event.ignore()
+        else:
+            event.accept()
 
     def mouseReleaseEvent(self, event: Any) -> None:
         """Complete the rubber-band selection and fire the callback."""
+        # If no drag in progress, delegate or ignore  # Updated: ignore release in non-RECORDING states — fixes replay click passthrough — 2026-04-03
+        if self._drag_start is None:
+            if self._click_catcher is not None:
+                super().mouseReleaseEvent(event)
+            else:
+                event.ignore()
+            return
         if self._drag_start is not None:
             end = self.mapToScene(event.pos())
             x1 = min(self._drag_start.x(), end.x())
@@ -394,19 +446,33 @@ class OverlayView(QGraphicsView):
             w = x2 - x1
             h = y2 - y1
 
-            if self._rubber_band is not None:
-                self.scene().removeItem(self._rubber_band)
-                self._rubber_band = None
-
             if (
                 w >= self._min_drag_px
                 and h >= self._min_drag_px
                 and self._on_selection is not None
             ):
+                # Turn yellow box red to show it's been captured
+                if self._rubber_band is not None:
+                    pen = QPen(QColor(255, 50, 50, 220))
+                    pen.setWidth(2)
+                    pen.setStyle(Qt.PenStyle.SolidLine)
+                    self._rubber_band.setPen(pen)
+                    self._rubber_band.setBrush(QBrush(QColor(255, 50, 50, 20)))
                 self._on_selection(int(x1), int(y1), int(w), int(h))
+            else:
+                # Too small — remove the rubber band
+                if self._rubber_band is not None:
+                    self.scene().removeItem(self._rubber_band)
+                    self._rubber_band = None
 
             self._drag_start = None
         event.accept()
+
+    def clear_rubber_band(self) -> None:
+        """Remove the rubber band selection rectangle if present."""
+        if self._rubber_band is not None:
+            self.scene().removeItem(self._rubber_band)
+            self._rubber_band = None
 
     # ------------------------------------------------------------------
     # Scan layer lifecycle
@@ -713,5 +779,10 @@ class OverlayView(QGraphicsView):
     # ------------------------------------------------------------------
 
     def keyPressEvent(self, event: Any) -> None:
-        """Accept key events as fallback (controller handles via hotkeys)."""
+        """Route key events to focused proxy widgets, or accept as fallback."""
+        # If a proxy widget (text field) has focus, let it handle the key
+        focus_item = self.scene().focusItem() if self.scene() else None
+        if focus_item is not None:
+            super().keyPressEvent(event)
+            return
         event.accept()

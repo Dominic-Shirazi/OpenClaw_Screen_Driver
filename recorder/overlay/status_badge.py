@@ -51,6 +51,7 @@ class StatusBadge(QGraphicsObject):
 
     def __init__(self, clock: AnimationClock, screen_w: int, screen_h: int) -> None:
         super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: decorative layer, pass clicks through
         self._clock = clock
         self._screen_w = screen_w
         self._screen_h = screen_h

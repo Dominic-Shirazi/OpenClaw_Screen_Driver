@@ -429,17 +429,20 @@ def _dispatch_action(
     """
     action = step.get("action", "click")
     point = locate_result.point
+    # Pass bbox dims so doughnut offset scales to element size
+    bw = locate_result.rect.w if locate_result.rect else None
+    bh = locate_result.rect.h if locate_result.rect else None
 
     if action == "click":
-        click(point.x, point.y, dry_run=dry_run)
+        click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         return "clicked"
 
     elif action == "double_click":
-        double_click(point.x, point.y, dry_run=dry_run)
+        double_click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         return "double_clicked"
 
     elif action == "right_click":
-        right_click(point.x, point.y, dry_run=dry_run)
+        right_click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         return "right_clicked"
 
     elif action == "click_drag":
@@ -453,7 +456,7 @@ def _dispatch_action(
         return "dragged"
 
     elif action == "type":
-        click(point.x, point.y, dry_run=dry_run)
+        click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         text = step.get("text_to_type", "")
         type_text(text, dry_run=dry_run)
         if step.get("press_enter"):
@@ -486,7 +489,7 @@ def _dispatch_action(
             return "read_skipped"
 
     elif action == "select_all_extract":
-        click(point.x, point.y, dry_run=dry_run)
+        click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         text = select_all_extract(dry_run=dry_run)
         return text if text else "extract_empty"
 
@@ -518,7 +521,7 @@ def _dispatch_action(
 
     else:
         logger.warning("Unknown action '%s', defaulting to click", action)
-        click(point.x, point.y, dry_run=dry_run)
+        click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
         return f"clicked (unknown action: {action})"
 
 

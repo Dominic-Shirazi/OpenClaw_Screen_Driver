@@ -92,6 +92,7 @@ def execute_node(
     next_node_id: str | None = None,
     dry_run: bool = False,
     skill_id: str = "",
+    execution_params: dict[str, str] | None = None,  # Updated: accept execution_params — enables parameterized textbox resolution — 2026-04-03
 ) -> ReplayStep:
     """Executes an action on a single node.
 
@@ -104,6 +105,7 @@ def execute_node(
         next_node_id: The next node in the path (for edge stats tracking).
         dry_run: If True, logs actions without executing them.
         skill_id: Skill name for loading snippet PNGs during locate.
+        execution_params: Optional variable->value mappings for textbox resolution.
 
     Returns:
         ReplayStep with execution details and success status.
@@ -176,7 +178,8 @@ def execute_node(
     elif action_type == "textbox":
         click(point.x, point.y, dry_run=dry_run)
         # Resolve text from input_spec (variable/literal), fall back to edge payload
-        text_to_type = _resolve_input_text(node_data)
+        node_data = graph.get_node(node_id)  # Updated: fetch node_data in execute_node scope — was undefined NameError — 2026-04-03
+        text_to_type = _resolve_input_text(node_data, execution_params=execution_params)  # Updated: pass execution_params — enables parameterized routines — 2026-04-03
         if not text_to_type and action_payload:
             text_to_type = action_payload
         if text_to_type:
@@ -304,6 +307,7 @@ def run_skill(
         start_id: The starting node ID.
         goal_id: The goal/destination node ID.
         dry_run: If True, simulates without actual input.
+        execution_params: Optional variable->value mappings for textbox resolution.
 
     Returns:
         ReplayLog with complete execution history and timing.
@@ -347,6 +351,7 @@ def run_skill(
         step = execute_node(
             graph, node_id, next_node_id=next_id,
             dry_run=dry_run, skill_id=graph.skill_id,
+            execution_params=execution_params,  # Updated: forward execution_params to execute_node — was silently dropped — 2026-04-03
         )
         replay_log.append_step(step)
 

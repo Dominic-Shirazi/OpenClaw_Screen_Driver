@@ -52,3 +52,9 @@ docker-compose.override.yml
 
 # Claude Code
 .claude/
+
+# Codegraph (local index)
+.codegraph/
+
+# AgentFiles (local agent state)
+.agentfiles/

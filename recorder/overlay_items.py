@@ -329,6 +329,11 @@ class _ElementBoxGroup:
         for item in self._all_items():
             item.setOpacity(1.0)
 
+    def remove_from_scene(self) -> None:
+        """Removes all scene items owned by this group."""
+        for item in self._all_items():
+            self._scene.removeItem(item)
+
     def get_rect(self) -> tuple[int, int, int, int]:
         """Returns the current bbox as (x, y, w, h) after any resizing."""
         return (int(self._x), int(self._y), int(self._w), int(self._h))

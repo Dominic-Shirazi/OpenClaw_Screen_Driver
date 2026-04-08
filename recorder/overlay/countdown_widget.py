@@ -65,6 +65,7 @@ class CountdownWidget(QGraphicsObject):
         parent: QGraphicsObject | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: decorative layer, pass clicks through
         self.setZValue(Z_COUNTDOWN)
         self.setVisible(False)
 

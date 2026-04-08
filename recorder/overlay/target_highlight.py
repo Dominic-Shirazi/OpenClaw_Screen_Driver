@@ -31,6 +31,7 @@ class TargetHighlight(QGraphicsObject):
 
     def __init__(self, clock: AnimationClock) -> None:
         super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: click-through during replay
         self._clock = clock
         self._rect: QRectF | None = None
         self._opacity: float = 0.0

@@ -1,23 +1,29 @@
 """Mouse and keyboard automation with realistic human-like behavior.
 
-All mouse movements follow cubic Bézier curves with random control points.
-Click targets get a "doughnut" offset (never dead center, never outside
-element bounds). Typing simulates per-word speed variation, rhythm jitter,
-and occasional typos with immediate backspace correction.
+Mouse movement and click targeting are delegated to the ``human_mouse_moves``
+library which implements kinematic sub-movement models: Fitts's Law timing,
+quartic Bézier paths, skewed-Beta velocity profiles, overshoot/correction,
+bivariate-normal click targeting with approach-vector shortfall bias, and
+micro-shivers.
 
-All timing is scaled by the ``human_delay`` multiplier from config:
-  0   → instant (skip all sleeps — speed/test mode)
+Typing uses the bundled ``human_typing`` library for burst cadence, QWERTY
+neighbor typos with immediate correction, and fatigue modeling.
+
+The ``human_delay`` config multiplier maps to HumanMouse speed:
+  0   → instant (skip all human sim — speed/test mode)
   1.0 → normal human speed
   5.0 → very slow (useful for watching/debugging)
 
-Thread-safe: every PyAutoGUI call is serialized through a lock.
+Thread-safe: HumanMouse is not thread-safe, so all calls are serialized
+through a lock.
 """
 
 from __future__ import annotations
 
 import logging
-import math
+import os
 import random
+import sys
 import threading
 import time
 from typing import Any
@@ -39,23 +45,33 @@ pyautogui.FAILSAFE = True
 # Disable default pause between actions (we handle timing ourselves).
 pyautogui.PAUSE = 0
 
-# Thread lock — PyAutoGUI is NOT thread-safe.
+# Thread lock — HumanMouse and PyAutoGUI are NOT thread-safe.
 _lock = threading.Lock()
 
-# QWERTY physical-neighbor map for typo simulation.
-# Each key maps to adjacent keys a human finger might accidentally hit.
-_ADJACENT_KEYS: dict[str, str] = {
-    "q": "wa12", "w": "qeas23", "e": "wrsd34", "r": "etdf45",
-    "t": "ryfg56", "y": "tugh67", "u": "yijh78", "i": "uokj89",
-    "o": "iplk90", "p": "ol0",
-    "a": "qwsz", "s": "wedaxz", "d": "erfscx", "f": "rtgdcv",
-    "g": "tyhfvb", "h": "yujgbn", "j": "uikhbn", "k": "ioljm",
-    "l": "opk",
-    "z": "asx", "x": "zsdc", "c": "xdfv", "v": "cfgb",
-    "b": "vghn", "n": "bhjm", "m": "njk",
-    "1": "2q", "2": "13wq", "3": "24ew", "4": "35re", "5": "46tr",
-    "6": "57yt", "7": "68uy", "8": "79iu", "9": "80oi", "0": "9p",
-}
+
+# ---------------------------------------------------------------------------
+# human_mouse_moves integration
+# ---------------------------------------------------------------------------
+
+# Add the sibling project to sys.path so we can import it
+_HMM_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                 "..", "human_mouse_moves")
+)
+if _HMM_DIR not in sys.path:
+    sys.path.insert(0, _HMM_DIR)
+
+_hmm_instance: Any = None  # lazy HumanMouse singleton
+
+
+def _get_hmm() -> Any:
+    """Get or create the HumanMouse singleton, configured from human_delay."""
+    global _hmm_instance
+    hd = _exec_cfg()["human_delay"]
+    if _hmm_instance is None or _hmm_instance.speed != hd:
+        from human_mouse_moves import HumanMouse
+        _hmm_instance = HumanMouse(speed=max(hd, 0.1))
+    return _hmm_instance
 
 
 # ---------------------------------------------------------------------------
@@ -86,87 +102,10 @@ def _jitter(value: float, pct: float = 0.15) -> float:
     return value * random.uniform(1.0 - pct, 1.0 + pct)
 
 
-def _doughnut_offset(radius: int = 8) -> tuple[int, int]:
-    """Returns a (dx, dy) offset inside a fuzzy doughnut around (0, 0).
-
-    The distribution peaks at ~40 % of the radius, never hits dead center
-    (min 1 px away), and never exceeds *radius*.
-
-    Args:
-        radius: Maximum distance from center in pixels.
-
-    Returns:
-        Integer (dx, dy) offset to add to the click target.
-    """
-    angle = random.uniform(0, 2 * math.pi)
-    dist = random.gauss(radius * 0.4, radius * 0.25)
-    dist = max(1.0, min(float(radius), abs(dist)))
-    dx = int(round(dist * math.cos(angle)))
-    dy = int(round(dist * math.sin(angle)))
-    # Guarantee at least 1 px offset
-    if dx == 0 and dy == 0:
-        dx = random.choice([-1, 1])
-    return dx, dy
-
-
-def _bezier_point(
-    t: float,
-    p0: tuple[float, float],
-    p1: tuple[float, float],
-    p2: tuple[float, float],
-    p3: tuple[float, float],
-) -> tuple[float, float]:
-    """Evaluates a cubic Bézier curve at parameter *t* ∈ [0, 1]."""
-    u = 1.0 - t
-    x = u**3 * p0[0] + 3 * u**2 * t * p1[0] + 3 * u * t**2 * p2[0] + t**3 * p3[0]
-    y = u**3 * p0[1] + 3 * u**2 * t * p1[1] + 3 * u * t**2 * p2[1] + t**3 * p3[1]
-    return x, y
-
-
-def _bezier_move(target_x: int, target_y: int, duration: float | None = None) -> None:
-    """Moves the mouse to (*target_x*, *target_y*) along a cubic Bézier path.
-
-    Two random control points are placed ±10–30 % of the travel distance
-    away from the straight line, producing a natural arc.
-
-    Args:
-        target_x: Destination X.
-        target_y: Destination Y.
-        duration: Total movement time in seconds (before human_delay scaling).
-    """
-    cfg = _exec_cfg()
-    if duration is None:
-        duration = cfg["mouse_duration"]
-    hd = cfg["human_delay"]
-
+def _instant_move(x: int, y: int) -> None:
+    """Instant teleport for speed/test mode (human_delay=0)."""
     with _lock:
-        sx, sy = pyautogui.position()
-
-    dist = math.hypot(target_x - sx, target_y - sy)
-    if dist < 2:
-        with _lock:
-            pyautogui.moveTo(target_x, target_y)
-        return
-
-    # Random control-point offset perpendicular to the line
-    def _cp_off() -> float:
-        return random.uniform(0.1, 0.3) * dist * random.choice([-1, 1])
-
-    p0 = (float(sx), float(sy))
-    p1 = (sx + _cp_off(), sy + _cp_off())
-    p2 = (target_x + _cp_off(), target_y + _cp_off())
-    p3 = (float(target_x), float(target_y))
-
-    steps = random.randint(20, 40)
-    step_sleep = (duration * hd) / steps if hd > 0 else 0
-
-    for i in range(1, steps + 1):
-        t = i / steps
-        bx, by = _bezier_point(t, p0, p1, p2, p3)
-        with _lock:
-            pyautogui.moveTo(int(bx), int(by))
-        if step_sleep > 0:
-            time.sleep(step_sleep)
+        pyautogui.moveTo(x, y)
 
 
 # ---------------------------------------------------------------------------
@@ -178,50 +117,89 @@ def click(
     y: int,
     button: str = "left",
     radius: int = 8,
-    duration: float | None = None,
+    bbox_w: int | None = None,
+    bbox_h: int | None = None,
     dry_run: bool = False,
 ) -> None:
-    """Clicks at (*x*, *y*) with human-like Bézier movement and doughnut offset.
+    """Click at (*x*, *y*) with human-like movement and targeting.
+
+    When bbox dimensions are provided, ``human_mouse_moves`` handles
+    click targeting (bivariate normal with shortfall bias + edge repulsion)
+    and the full kinematic pipeline (ballistic + corrective sub-movements).
 
     Args:
-        x: Target X coordinate (center of element).
-        y: Target Y coordinate (center of element).
+        x: Target X coordinate (center of element, or bbox left if bbox given).
+        y: Target Y coordinate (center of element, or bbox top if bbox given).
         button: ``'left'``, ``'right'``, or ``'middle'``.
-        radius: Doughnut offset radius in pixels. Derive from element size
-                when available (e.g. min(w, h) // 4).
-        duration: Mouse-move duration in seconds (pre-human_delay scaling).
+        radius: Unused (kept for API compat). Targeting is bbox-driven.
+        bbox_w: Element bounding box width.
+        bbox_h: Element bounding box height.
         dry_run: Log the action without executing.
     """
-    dx, dy = _doughnut_offset(radius)
-    tx, ty = x + dx, y + dy
     logger.debug(
-        "click(%d, %d) → offset(%d, %d) button=%s", x, y, tx, ty, button,
+        "click(%d, %d) button=%s bbox=%s",
+        x, y, button,
+        f"{bbox_w}x{bbox_h}" if bbox_w else "none",
     )
     if dry_run:
         return
 
-    _bezier_move(tx, ty, duration)
+    hd = _exec_cfg()["human_delay"]
+    if hd <= 0:
+        _instant_move(x, y)
+        with _lock:
+            pyautogui.click(button=button)
+        return
+
+    hmm = _get_hmm()
     with _lock:
-        pyautogui.click(button=button)
-    _hsleep(random.uniform(0.03, 0.08))
+        if bbox_w and bbox_h:
+            # Pass bbox top-left + dimensions; HumanMouse handles targeting
+            bx = x - bbox_w // 2
+            by = y - bbox_h // 2
+            hmm.click(bx, by, w=bbox_w, h=bbox_h, button=button)
+        else:
+            hmm.click(x, y, button=button)
 
 
-def right_click(x: int, y: int, dry_run: bool = False) -> None:
+def right_click(
+    x: int,
+    y: int,
+    bbox_w: int | None = None,
+    bbox_h: int | None = None,
+    dry_run: bool = False,
+) -> None:
     """Right-clicks at (*x*, *y*) with human-like movement."""
-    click(x, y, button="right", dry_run=dry_run)
+    click(x, y, button="right", bbox_w=bbox_w, bbox_h=bbox_h, dry_run=dry_run)
 
 
-def double_click(x: int, y: int, dry_run: bool = False) -> None:
+def double_click(
+    x: int,
+    y: int,
+    bbox_w: int | None = None,
+    bbox_h: int | None = None,
+    dry_run: bool = False,
+) -> None:
     """Double-clicks at (*x*, *y*) with human-like movement."""
     logger.debug("double_click(%d, %d)", x, y)
     if dry_run:
         return
 
-    dx, dy = _doughnut_offset(8)
-    _bezier_move(x + dx, y + dy)
+    hd = _exec_cfg()["human_delay"]
+    if hd <= 0:
+        _instant_move(x, y)
+        with _lock:
+            pyautogui.doubleClick()
+        return
+
+    hmm = _get_hmm()
     with _lock:
-        pyautogui.doubleClick()
-    _hsleep(random.uniform(0.03, 0.08))
+        if bbox_w and bbox_h:
+            bx = x - bbox_w // 2
+            by = y - bbox_h // 2
+            hmm.double_click(bx, by, w=bbox_w, h=bbox_h)
+        else:
+            hmm.double_click(x, y)
 
 
 def drag(
@@ -232,26 +210,60 @@ def drag(
     duration: float = 0.3,
     dry_run: bool = False,
 ) -> None:
-    """Drags from (*x1*, *y1*) to (*x2*, *y2*) using Bézier paths.
+    """Drags from (*x1*, *y1*) to (*x2*, *y2*) with human-like movement.
 
     Args:
-        x1, y1: Start coordinates.
-        x2, y2: End coordinates.
-        duration: Drag travel time in seconds (pre-human_delay scaling).
+        x1, y1: Start coordinates (center of drag source element).
+        x2, y2: End coordinates (center of drop target).
+        duration: Unused (kept for API compat). Timing is Fitts-driven.
         dry_run: Log without executing.
     """
-    logger.debug("drag(%d,%d → %d,%d)", x1, y1, x2, y2)
+    logger.debug("drag(%d,%d -> %d,%d)", x1, y1, x2, y2)
     if dry_run:
         return
 
-    _bezier_move(x1, y1)
+    hd = _exec_cfg()["human_delay"]
+    if hd <= 0:
+        _instant_move(x1, y1)
+        with _lock:
+            pyautogui.mouseDown()
+        _instant_move(x2, y2)
+        with _lock:
+            pyautogui.mouseUp()
+        return
+
+    # Use HumanMouse drag with a small synthetic bbox around start/end
+    hmm = _get_hmm()
+    elem_w, elem_h = 20.0, 20.0  # assume small grab area
     with _lock:
-        pyautogui.mouseDown()
-    _hsleep(random.uniform(0.08, 0.15))
-    _bezier_move(x2, y2, duration)
-    with _lock:
-        pyautogui.mouseUp()
-    _hsleep(random.uniform(0.03, 0.08))
+        hmm.drag(
+            elem_x=x1 - elem_w / 2, elem_y=y1 - elem_h / 2,
+            elem_w=elem_w, elem_h=elem_h,
+            drop_x=float(x2), drop_y=float(y2),
+        )
+
+
+def _get_human_typer() -> Any:
+    """Lazy-load the HumanTyper from the bundled human_typing package.
+
+    Returns:
+        HumanTyper instance configured from human_typing-main/config.yaml.
+    """
+    global _human_typer
+    if _human_typer is not None:
+        return _human_typer
+
+    # Add the bundled human_typing package to path
+    ht_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "human_typing-main")
+    if ht_dir not in sys.path:
+        sys.path.insert(0, ht_dir)
+
+    from human_typer import HumanTyper
+    _human_typer = HumanTyper(config_path=os.path.join(ht_dir, "config.yaml"))
+    return _human_typer
+
+
+_human_typer: Any = None
 
 
 def type_text(
@@ -259,60 +271,31 @@ def type_text(
     interval: float | None = None,
     dry_run: bool = False,
 ) -> None:
-    """Types *text* with human-like rhythm, speed variation, and typo simulation.
+    """Types *text* using the human_typing library for realistic cadence.
 
-    Each word gets a slightly different overall speed. Within a word,
-    per-character timing varies with Gaussian jitter. Spaces get an extra
-    pause. With probability ``typo_chance``, a wrong adjacent key is typed,
-    immediately backspaced, and the correct key follows.
+    Uses burst typing (fast within words, pauses between), QWERTY neighbor
+    typos with immediate correction, and fatigue modeling.  When human_delay
+    is 0, types instantly via pyautogui.
 
     Args:
         text: The string to type.
-        interval: Base per-character interval (overrides config).
+        interval: Unused (kept for API compat). Timing is WPM-driven.
         dry_run: Log without executing.
     """
-    cfg = _exec_cfg()
-    base = interval if interval is not None else cfg["type_interval"]
-    typo_chance = cfg["typo_chance"]
-    hd = cfg["human_delay"]
-
-    logger.debug("type_text(%r, interval=%.3f, typo=%.2f)", text[:30], base, typo_chance)
+    hd = _exec_cfg()["human_delay"]
+    logger.debug("type_text(%r, hd=%.1f)", text[:30], hd)
     if dry_run:
         return
 
-    words = text.split(" ")
-    for wi, word in enumerate(words):
-        # Per-word speed variation
-        word_speed = base * max(0.3, random.gauss(1.0, 0.15))
+    if hd <= 0:
+        # Instant mode — no human simulation
+        with _lock:
+            pyautogui.write(text, interval=0)
+        return
 
-        for char in word:
-            # Typo simulation
-            lower = char.lower()
-            if (
-                hd > 0
-                and random.random() < typo_chance
-                and lower in _ADJACENT_KEYS
-            ):
-                wrong = random.choice(_ADJACENT_KEYS[lower])
-                with _lock:
-                    pyautogui.write(wrong, interval=0)
-                _hsleep(random.uniform(0.05, 0.15))
-                with _lock:
-                    pyautogui.press("backspace")
-                _hsleep(random.uniform(0.02, 0.08))
-
-            with _lock:
-                pyautogui.write(char, interval=0)
-
-            # Per-character rhythm jitter
-            char_sleep = word_speed * max(0.1, random.gauss(1.0, 0.2))
-            _hsleep(char_sleep)
-
-        # Space between words (except after last word)
-        if wi < len(words) - 1:
-            with _lock:
-                pyautogui.write(" ", interval=0)
-            _hsleep(random.uniform(0.05, 0.15))
+    typer = _get_human_typer()
+    with _lock:
+        typer.type(text)
 
 
 def scroll(
@@ -322,7 +305,7 @@ def scroll(
     amount: int,
     dry_run: bool = False,
 ) -> None:
-    """Scrolls at position (*x*, *y*) with Bézier movement to target first.
+    """Scrolls at position (*x*, *y*) with human-like movement to target first.
 
     Args:
         direction: ``'up'``, ``'down'``, ``'left'``, or ``'right'``.
@@ -333,7 +316,14 @@ def scroll(
     if dry_run:
         return
 
-    _bezier_move(x, y)
+    hd = _exec_cfg()["human_delay"]
+    if hd <= 0:
+        _instant_move(x, y)
+    else:
+        hmm = _get_hmm()
+        with _lock:
+            hmm.move_to(float(x), float(y))
+
     clicks = amount if direction in ("up", "right") else -amount
     with _lock:
         if direction in ("up", "down"):

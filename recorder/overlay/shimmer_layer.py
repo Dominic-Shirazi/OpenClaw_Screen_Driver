@@ -1,52 +1,91 @@
-"""Animated border shimmer glow replacing the static BorderLayer.
+"""Animated edge glow: ocean waves lapping at the screen edges.
 
-Renders soft lights that shine INWARD from behind the screen bezel.
-Each light source is positioned off-screen with its gradient center
-outside the visible area, so only the inner spill is seen.  Lights
-vary in size, overlap additively via QPainter.CompositionMode_Plus
-so they blend rather than stack, and sweep continuously around the
-perimeter.
+Uses OpenSimplex noise for organic, natural wave shapes instead of
+sine waves.  Multiple noise octaves create realistic grouping where
+small waves merge into larger swells.  Waves surge inward/outward
+(not laterally) because time drives depth, not position.
+
+Mouse position is polled via Win32 GetCursorPos (works even when the
+overlay is click-through) so waves properly retreat from the cursor.
 """
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import logging
 import math
-import random
+import sys
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QPainter, QRadialGradient
+from PyQt6.QtGui import (
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+)
 from PyQt6.QtWidgets import QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
+from opensimplex import OpenSimplex
 from recorder.overlay.state import STATE_COLORS, OverlayState
 
 logger = logging.getLogger(__name__)
 
-# How far inward the glow bleeds (base radius before per-light variance)
-_GLOW_READY: float = 140.0
-_GLOW_RECORDING: float = 120.0
-_RETREAT_RADIUS: float = 250.0
+# ---- Wave geometry ----
+_BASE_DEPTH: float = 14.0      # calm water line (px from edge)
+_PERMANENT_DEPTH: float = 5.0  # always-visible shoreline
+_MAX_DEPTH: float = 32.0       # gradient extent
+_SAMPLE_STEP: int = 8          # px between wave samples (perf: 8 is smooth enough)
 
-# How far off-screen the light centers sit (behind the bezel)
-_OFFSCREEN_DEPTH: float = 80.0
+# ---- Noise octaves: (spatial_scale, time_speed, amplitude) ----
+# Large scale = big grouped swells, small scale = tiny ripples
+_NOISE_OCTAVES: list[tuple[float, float, float]] = [
+    (0.003,  0.25,  8.0),   # large slow swells
+    (0.010,  0.50,  4.5),   # medium waves
+    (0.030,  0.90,  2.5),   # small choppy waves
+    (0.080,  1.50,  1.2),   # tiny ripples
+]
 
-# Number of light sources around the perimeter
-_LIGHT_COUNT: int = 48
-# Fraction of perimeter that is lit at once
-_ACTIVE_SPAN: float = 0.35
+# Per-edge seed offsets so edges look different
+_EDGE_SEEDS: list[int] = [0, 1, 2, 3]
 
-# Seed for deterministic per-light size variance
-_SIZE_SEED: int = 42
+# ---- Mouse retreat ----
+_RETREAT_START: float = 200.0   # waves start retreating
+_RETREAT_GONE: float = 35.0     # wave amplitude fully gone
+_BASE_FADE_DIST: float = 20.0   # permanent base starts fading
+_BASE_MIN_ALPHA: float = 0.25   # base never below this
+_MOUSE_SMOOTH: float = 6.0     # lerp speed for mouse tracking (higher = faster)
+
+# ---- Win32 cursor polling ----
+if sys.platform == "win32":
+    _user32 = ctypes.windll.user32
+
+    class _POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.wintypes.LONG), ("y", ctypes.wintypes.LONG)]
+
+
+def _get_cursor_pos() -> tuple[int, int]:
+    """Get global cursor position via Win32 API.
+
+    Works even when the overlay window is click-through.
+
+    Returns:
+        (x, y) screen coordinates.
+    """
+    if sys.platform == "win32":
+        pt = _POINT()
+        _user32.GetCursorPos(ctypes.byref(pt))
+        return pt.x, pt.y
+    # Fallback for non-Windows (mouse tracking may not work in click-through)
+    return -1000, -1000
 
 
 class ShimmerLayer(QGraphicsObject):
-    """Animated border shimmer glow indicating overlay state.
+    """Animated wave-edge glow indicating overlay state.
 
-    Renders soft radial gradient blobs along the screen perimeter,
-    creating a wide feathered glow that bleeds inward from the edges.
-    The glow sweep rotates continuously, with speed and color determined
-    by the current OverlayState.  Intensity is attenuated near the mouse
-    cursor and registered avoidance rects using smoothstep falloff.
+    Uses OpenSimplex noise for organic wave shapes that surge
+    inward/outward.  Polls cursor position directly so waves
+    retreat from mouse even in click-through mode.
 
     Args:
         screen_w: Logical screen width in pixels.
@@ -55,31 +94,34 @@ class ShimmerLayer(QGraphicsObject):
 
     def __init__(self, screen_w: int, screen_h: int) -> None:
         super().__init__()
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)  # Updated: decorative layer, pass clicks through
         self._screen_w = screen_w
         self._screen_h = screen_h
-        self._phase: float = 0.0  # 0.0 to 1.0, maps to position around perimeter
-        self._loop_duration: float = 5.0  # seconds for one full rotation
-        self._glow_radius: float = _GLOW_READY
-        self._target_glow_radius: float = _GLOW_READY
-        self._base_color: QColor = QColor(50, 200, 50)  # Green default
-        self._alpha_mult: float = 0.40  # Peak alpha multiplier
-        self._mouse_pos: QPointF = QPointF(-1000, -1000)  # Offscreen initially
+        self._time: float = 0.0
+        self._base_color: QColor = QColor(50, 200, 50)
+        self._alpha_mult: float = 0.90
+        # Raw polled position and smoothed position for gradual retreat
+        self._raw_mouse_x: float = -1000.0
+        self._raw_mouse_y: float = -1000.0
+        self._mouse_x: float = -1000.0
+        self._mouse_y: float = -1000.0
         self._avoidance_rects: list[QRectF] = []
-        self.setZValue(10)  # Same as old BorderLayer
+        self.setZValue(10)
         self.setFlag(
             QGraphicsObject.GraphicsItemFlag.ItemHasNoContents, False
         )
 
-    def boundingRect(self) -> QRectF:
-        """Return full screen rect as bounding box.
+        # Create separate noise generators per edge for variety
+        self._noise_gens: list[OpenSimplex] = [
+            OpenSimplex(seed=42 + s) for s in _EDGE_SEEDS
+        ]
 
-        Returns:
-            QRectF covering the entire screen area.
-        """
+    def boundingRect(self) -> QRectF:
+        """Return full screen rect as bounding box."""
         return QRectF(0, 0, self._screen_w, self._screen_h)
 
     def set_state(self, state: OverlayState) -> None:
-        """Update shimmer appearance based on overlay state.
+        """Update wave appearance based on overlay state.
 
         Args:
             state: The current overlay state.
@@ -87,29 +129,24 @@ class ShimmerLayer(QGraphicsObject):
         r, g, b, _a = STATE_COLORS[state]
         self._base_color = QColor(r, g, b)
         if state == OverlayState.RECORDING:
-            self._loop_duration = 2.0
-            self._target_glow_radius = _GLOW_RECORDING
-            self._alpha_mult = 0.55
+            self._alpha_mult = 1.0
         elif state == OverlayState.REPLAYING:
-            self._loop_duration = 3.0
-            self._target_glow_radius = _GLOW_READY
-            self._alpha_mult = 0.45
+            self._alpha_mult = 0.85
         else:
-            self._loop_duration = 5.0
-            self._target_glow_radius = _GLOW_READY
-            self._alpha_mult = 0.40
+            self._alpha_mult = 0.90
 
     def set_mouse_pos(self, x: float, y: float) -> None:
-        """Store the current mouse position for retreat calculation.
+        """Store mouse position (called from view, but we also poll directly).
 
         Args:
             x: Mouse X coordinate in scene space.
             y: Mouse Y coordinate in scene space.
         """
-        self._mouse_pos = QPointF(x, y)
+        self._raw_mouse_x = x
+        self._raw_mouse_y = y
 
     def set_avoidance_rects(self, rects: list[QRectF]) -> None:
-        """Set UI element rects that the shimmer should avoid.
+        """Set UI element rects that waves should avoid.
 
         Args:
             rects: List of QRectF bounding boxes for active UI elements.
@@ -117,110 +154,226 @@ class ShimmerLayer(QGraphicsObject):
         self._avoidance_rects = list(rects)
 
     def tick(self, dt: float) -> None:
-        """Advance the shimmer animation by one frame.
-
-        Called by AnimationClock each tick.  Advances the sweep
-        position and smoothly transitions glow radius.
+        """Advance wave animation and poll cursor position.
 
         Args:
             dt: Elapsed seconds since last tick.
         """
-        self._phase = (self._phase + dt / self._loop_duration) % 1.0
-        # Smooth glow radius transition
-        self._glow_radius += (
-            (self._target_glow_radius - self._glow_radius)
-            * min(1.0, dt * 4.0)
-        )
-        self.update()  # Schedule repaint (safe: called from tick, NOT from paint)
+        self._time += dt
 
-    def _retreat_factor(self, px: float, py: float) -> float:
-        """Calculate retreat factor at a point based on mouse/rect distance.
+        # Poll cursor directly — works even in click-through mode
+        mx, my = _get_cursor_pos()
+        self._raw_mouse_x = float(mx)
+        self._raw_mouse_y = float(my)
 
-        Returns 1.0 far from mouse/avoidance rects, 0.0 at the mouse
-        position, with smoothstep falloff in between.
+        # Smooth mouse position — waves pull back gradually, not jump
+        k = min(1.0, _MOUSE_SMOOTH * dt)
+        self._mouse_x += (self._raw_mouse_x - self._mouse_x) * k
+        self._mouse_y += (self._raw_mouse_y - self._mouse_y) * k
+
+        self.update()
+
+    # ------------------------------------------------------------------
+    # Wave noise
+    # ------------------------------------------------------------------
+
+    def _wave_depth(self, pos: float, edge_idx: int) -> float:
+        """Calculate wave depth at a position using layered simplex noise.
 
         Args:
-            px: Point X coordinate.
-            py: Point Y coordinate.
+            pos: Position along the edge in pixels.
+            edge_idx: Which edge (0=top, 1=right, 2=bottom, 3=left).
 
         Returns:
-            Factor from 0.0 (fully retreated) to 1.0 (full glow).
+            Depth in pixels from edge inward.
         """
-        dist = math.hypot(px - self._mouse_pos.x(), py - self._mouse_pos.y())
+        noise_gen = self._noise_gens[edge_idx]
+        t = self._time
+        depth = _BASE_DEPTH
+
+        for spatial_scale, time_speed, amplitude in _NOISE_OCTAVES:
+            # noise2 returns values in [-1, 1]
+            n = noise_gen.noise2(pos * spatial_scale, t * time_speed)
+            depth += amplitude * n
+
+        return max(_PERMANENT_DEPTH, min(depth, _MAX_DEPTH))
+
+    # ------------------------------------------------------------------
+    # Mouse retreat
+    # ------------------------------------------------------------------
+
+    def _mouse_retreat(self, edge_x: float, edge_y: float) -> tuple[float, float]:
+        """Calculate wave and base retreat from mouse proximity.
+
+        Args:
+            edge_x: X coordinate of point on screen edge.
+            edge_y: Y coordinate of point on screen edge.
+
+        Returns:
+            (wave_factor, base_factor) — both 0.0 to 1.0.
+        """
+        dist = math.hypot(edge_x - self._mouse_x, edge_y - self._mouse_y)
 
         for rect in self._avoidance_rects:
-            cx = max(rect.left(), min(px, rect.right()))
-            cy = max(rect.top(), min(py, rect.bottom()))
-            rect_dist = math.hypot(px - cx, py - cy)
+            cx = max(rect.left(), min(edge_x, rect.right()))
+            cy = max(rect.top(), min(edge_y, rect.bottom()))
+            rect_dist = math.hypot(edge_x - cx, edge_y - cy)
             dist = min(dist, rect_dist)
 
-        if dist >= _RETREAT_RADIUS:
-            return 1.0
-        t = dist / _RETREAT_RADIUS
-        return t * t * (3.0 - 2.0 * t)
+        # Wave amplitude retreat
+        if dist >= _RETREAT_START:
+            wave_f = 1.0
+        elif dist <= _RETREAT_GONE:
+            wave_f = 0.0
+        else:
+            t = (dist - _RETREAT_GONE) / (_RETREAT_START - _RETREAT_GONE)
+            wave_f = t * t * (3.0 - 2.0 * t)
 
-    def _build_lights(self) -> list[tuple[float, float, float, float, float]]:
-        """Build the fixed light source layout around the perimeter.
+        # Base opacity retreat (never fully gone)
+        if dist >= _RETREAT_START:
+            base_f = 1.0
+        elif dist <= _BASE_FADE_DIST:
+            base_f = _BASE_MIN_ALPHA
+        else:
+            t = (dist - _BASE_FADE_DIST) / (_RETREAT_START - _BASE_FADE_DIST)
+            base_f = _BASE_MIN_ALPHA + (1.0 - _BASE_MIN_ALPHA) * t * t * (3.0 - 2.0 * t)
 
-        Each light has its center pushed OFF-SCREEN by _OFFSCREEN_DEPTH
-        so only the inner spill is visible (light shining inward).
-        Sizes are varied deterministically per light.
+        return wave_f, base_f
 
-        Returns:
-            List of (center_x, center_y, radius, edge_x, edge_y, frac)
-            tuples.  center is off-screen, edge is the on-screen point.
-        """
-        lights: list[tuple[float, float, float, float, float]] = []
-        w = float(self._screen_w)
-        h = float(self._screen_h)
-        perimeter = 2.0 * (w + h)
-        rng = random.Random(_SIZE_SEED)
+    # ------------------------------------------------------------------
+    # Edge painting
+    # ------------------------------------------------------------------
 
-        for i in range(_LIGHT_COUNT):
-            frac = i / _LIGHT_COUNT
-            d = frac * perimeter
-
-            # Point on the screen edge and the outward normal direction
-            if d < w:
-                ex, ey = d, 0.0
-                nx, ny = 0.0, -1.0  # points up (off top edge)
-            elif d < w + h:
-                ex, ey = w, d - w
-                nx, ny = 1.0, 0.0   # points right (off right edge)
-            elif d < 2 * w + h:
-                ex, ey = 2 * w + h - d, h
-                nx, ny = 0.0, 1.0   # points down (off bottom edge)
-            else:
-                ex, ey = 0.0, perimeter - d
-                nx, ny = -1.0, 0.0  # points left (off left edge)
-
-            # Push center off-screen along the outward normal
-            cx = ex + nx * _OFFSCREEN_DEPTH
-            cy = ey + ny * _OFFSCREEN_DEPTH
-
-            # Vary size: 0.6x to 1.5x base radius
-            size_mult = 0.6 + rng.random() * 0.9
-
-            lights.append((cx, cy, size_mult, ex, ey, frac))
-        return lights
-
-    def _sweep_brightness(self, frac: float) -> float:
-        """Calculate brightness at a perimeter position based on sweep phase.
+    def _make_gradient(
+        self,
+        x0: float, y0: float,
+        x1: float, y1: float,
+        base_alpha: float,
+    ) -> QLinearGradient:
+        """Create edge-to-inward gradient (water thinning on sand).
 
         Args:
-            frac: Position around perimeter (0.0 to 1.0).
+            x0, y0: Start point (at screen edge).
+            x1, y1: End point (max wave depth inward).
+            base_alpha: Overall alpha multiplier.
 
         Returns:
-            Brightness factor 0.0 to 1.0.
+            QLinearGradient fading from bright at edge to transparent.
         """
-        delta = abs(frac - self._phase)
-        if delta > 0.5:
-            delta = 1.0 - delta
+        grad = QLinearGradient(QPointF(x0, y0), QPointF(x1, y1))
 
-        if delta > _ACTIVE_SPAN:
-            return 0.0
-        t = delta / _ACTIVE_SPAN
-        return 0.5 * (1.0 + math.cos(t * math.pi))
+        c0 = QColor(self._base_color)
+        c0.setAlphaF(min(0.75 * base_alpha, 1.0))
+
+        c1 = QColor(self._base_color)
+        c1.setAlphaF(min(0.50 * base_alpha, 1.0))
+
+        c2 = QColor(self._base_color)
+        c2.setAlphaF(min(0.18 * base_alpha, 1.0))
+
+        c3 = QColor(self._base_color)
+        c3.setAlphaF(0.0)
+
+        grad.setColorAt(0.0, c0)
+        grad.setColorAt(0.15, c1)
+        grad.setColorAt(0.50, c2)
+        grad.setColorAt(1.0, c3)
+
+        return grad
+
+    def _paint_top_edge(self, painter: QPainter) -> None:
+        """Paint waves along the top screen edge."""
+        w = self._screen_w
+        path = QPainterPath()
+        path.moveTo(0, 0)
+
+        pos = 0
+        while pos <= w:
+            wave_f, base_f = self._mouse_retreat(float(pos), 0.0)
+            raw_depth = self._wave_depth(float(pos), 0)
+            depth = _PERMANENT_DEPTH + (raw_depth - _PERMANENT_DEPTH) * wave_f
+            depth *= base_f
+            path.lineTo(pos, depth)
+            pos += _SAMPLE_STEP
+
+        path.lineTo(w, 0)
+        path.closeSubpath()
+
+        grad = self._make_gradient(0, 0, 0, _MAX_DEPTH, self._alpha_mult)
+        painter.setBrush(grad)
+        painter.drawPath(path)
+
+    def _paint_bottom_edge(self, painter: QPainter) -> None:
+        """Paint waves along the bottom screen edge."""
+        w = self._screen_w
+        h = float(self._screen_h)
+        path = QPainterPath()
+        path.moveTo(0, h)
+
+        pos = 0
+        while pos <= w:
+            wave_f, base_f = self._mouse_retreat(float(pos), h)
+            raw_depth = self._wave_depth(float(pos), 2)
+            depth = _PERMANENT_DEPTH + (raw_depth - _PERMANENT_DEPTH) * wave_f
+            depth *= base_f
+            path.lineTo(pos, h - depth)
+            pos += _SAMPLE_STEP
+
+        path.lineTo(w, h)
+        path.closeSubpath()
+
+        grad = self._make_gradient(0, h, 0, h - _MAX_DEPTH, self._alpha_mult)
+        painter.setBrush(grad)
+        painter.drawPath(path)
+
+    def _paint_left_edge(self, painter: QPainter) -> None:
+        """Paint waves along the left screen edge."""
+        h = self._screen_h
+        path = QPainterPath()
+        path.moveTo(0, 0)
+
+        pos = 0
+        while pos <= h:
+            wave_f, base_f = self._mouse_retreat(0.0, float(pos))
+            raw_depth = self._wave_depth(float(pos), 3)
+            depth = _PERMANENT_DEPTH + (raw_depth - _PERMANENT_DEPTH) * wave_f
+            depth *= base_f
+            path.lineTo(depth, pos)
+            pos += _SAMPLE_STEP
+
+        path.lineTo(0, h)
+        path.closeSubpath()
+
+        grad = self._make_gradient(0, 0, _MAX_DEPTH, 0, self._alpha_mult)
+        painter.setBrush(grad)
+        painter.drawPath(path)
+
+    def _paint_right_edge(self, painter: QPainter) -> None:
+        """Paint waves along the right screen edge."""
+        w = float(self._screen_w)
+        h = self._screen_h
+        path = QPainterPath()
+        path.moveTo(w, 0)
+
+        pos = 0
+        while pos <= h:
+            wave_f, base_f = self._mouse_retreat(w, float(pos))
+            raw_depth = self._wave_depth(float(pos), 1)
+            depth = _PERMANENT_DEPTH + (raw_depth - _PERMANENT_DEPTH) * wave_f
+            depth *= base_f
+            path.lineTo(w - depth, pos)
+            pos += _SAMPLE_STEP
+
+        path.lineTo(w, h)
+        path.closeSubpath()
+
+        grad = self._make_gradient(w, 0, w - _MAX_DEPTH, 0, self._alpha_mult)
+        painter.setBrush(grad)
+        painter.drawPath(path)
+
+    # ------------------------------------------------------------------
+    # Main paint
+    # ------------------------------------------------------------------
 
     def paint(
         self,
@@ -228,62 +381,20 @@ class ShimmerLayer(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
-        """Paint lights shining inward from behind the screen bezel.
-
-        Light centers are off-screen; only the inner spill is visible.
-        CompositionMode_Plus blends overlapping lights additively so
-        they merge rather than stack.
-
-        CRITICAL: No self.update() call in this method.
+        """Paint wave edges on all four screen sides.
 
         Args:
             painter: The QPainter to draw with.
             option: Style options (unused).
             widget: Target widget (unused).
         """
-        glow_r = self._glow_radius
-        if glow_r <= 0:
-            return
-
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        # Additive blending: overlapping lights merge into brighter glow
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
 
-        for cx, cy, size_mult, ex, ey, frac in self._build_lights():
-            brightness = self._sweep_brightness(frac)
-            if brightness < 0.01:
-                continue
-
-            # Retreat check at the on-screen edge point
-            retreat = self._retreat_factor(ex, ey)
-            if retreat < 0.01:
-                continue
-
-            # Effective radius for this light (varied size)
-            r = glow_r * size_mult + _OFFSCREEN_DEPTH
-
-            # Combined intensity — capped lower for additive blending
-            peak_alpha = brightness * retreat * self._alpha_mult
-            if peak_alpha < 0.01:
-                continue
-
-            center = QPointF(cx, cy)
-            gradient = QRadialGradient(center, r)
-
-            core = QColor(self._base_color)
-            core.setAlphaF(min(peak_alpha, 1.0))
-            mid = QColor(self._base_color)
-            mid.setAlphaF(min(peak_alpha * 0.35, 1.0))
-            edge = QColor(self._base_color)
-            edge.setAlphaF(0.0)
-
-            gradient.setColorAt(0.0, core)
-            gradient.setColorAt(0.35, mid)
-            gradient.setColorAt(1.0, edge)
-
-            painter.setBrush(gradient)
-            painter.drawEllipse(center, r, r)
+        self._paint_top_edge(painter)
+        self._paint_bottom_edge(painter)
+        self._paint_left_edge(painter)
+        self._paint_right_edge(painter)
 
         painter.restore()

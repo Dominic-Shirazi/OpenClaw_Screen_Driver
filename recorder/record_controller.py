@@ -373,7 +373,7 @@ def _start_review(
 
         dialog = TagDialog(
             element_type_guess=type_guess,
-            label_guess=florence_caption or label_guess,
+            label_guess=label_guess or florence_caption,
             ocr_text=candidate.get("ocr_text"),
             layer_guess=candidate.get("layer_guess", "page_specific"),
             uia_hint=candidate.get("uia_hint"),
@@ -655,42 +655,54 @@ def cmd_record(args: Any) -> int:
     def on_element_clicked(x: int, y: int, w: int, h: int, candidate: dict | None) -> bool:
         """Handle an element selection (click or bbox) during recording.
 
-        For point clicks with no matching candidate, auto-snip is triggered:
-        captures a region around the click, runs detection, and uses the
-        closest detected element with auto-adjusted borders.
+        Flow: auto-snip/refine bbox → VLM label the refined crop → TagDialog.
+        The user always sees the AI-adjusted bbox, not their rough selection.
 
         Returns:
             True if element was recorded, False if skipped/cancelled.
         """
-        # Auto-snip: if point click with no candidate, try to detect element
+        # --- Step 1: Auto-refine bbox BEFORE anything else ---
+        refinement_status = "original"
+
         if w == 0 and h == 0 and candidate is None:
+            # Point click with no candidate → auto-snip
             snipped = _auto_snip(x, y)
             if snipped:
                 candidate = snipped
                 r = snipped["rect"]
-                x, w, h = r["x"], r["w"], r["h"]
-                y = r["y"]
-                logger.info("Auto-snip adjusted click to bbox (%d,%d) %dx%d", x, y, w, h)
-
-        if w > 0 and h > 0:
-            logger.info("Bbox at (%d, %d) %dx%d, candidate=%s", x, y, w, h, candidate is not None)
+                x, y, w, h = r["x"], r["y"], r["w"], r["h"]
+                refinement_status = "inferred"
+                logger.info("Auto-snip: click → bbox (%d,%d) %dx%d", x, y, w, h)
+        elif w > 0 and h > 0:
+            # Drawn bbox → snap to nearest OmniParser detection
+            refined = _try_refine_bbox(x, y, w, h, "auto", candidate)
+            if refined is not None:
+                ox, oy, ow, oh = x, y, w, h
+                x, y, w, h = refined
+                refinement_status = "auto_refined"
+                logger.info(
+                    "Bbox refined: (%d,%d) %dx%d → (%d,%d) %dx%d",
+                    ox, oy, ow, oh, x, y, w, h,
+                )
+            else:
+                logger.info("Bbox at (%d,%d) %dx%d (no refinement match)", x, y, w, h)
         else:
-            logger.info("Click at (%d, %d), candidate=%s", x, y, candidate is not None)
+            logger.info("Click at (%d,%d), candidate=%s", x, y, candidate is not None)
 
-        # For bounding boxes, position the dialog at the center of the box
-        dialog_x = x + w // 2 if w > 0 else x
-        dialog_y = y + h // 2 if h > 0 else y
-
-        # VLM labeling: crop element + 30% buffer, ask VLM for label
+        # --- Step 2: VLM labeling on the (refined) crop ---
         vlm_label = ""
         vlm_type = ""
-        if candidate and candidate.get("rect"):
+        label_rect = candidate.get("rect") if candidate else None
+        if label_rect is None and w > 0 and h > 0:
+            label_rect = {"x": x, "y": y, "w": w, "h": h}
+
+        if label_rect:
             try:
-                from core.vision import analyze_crop_array
                 from core.capture import screenshot_full
+                from core.vision import analyze_crop_array
 
                 screen = screenshot_full()
-                r = candidate["rect"]
+                r = label_rect
                 buf_x = int(r["w"] * 0.30)
                 buf_y = int(r["h"] * 0.30)
                 sh, sw = screen.shape[:2]
@@ -701,7 +713,7 @@ def cmd_record(args: Any) -> int:
                 crop = screen[crop_y1:crop_y2, crop_x1:crop_x2]
 
                 if crop.size > 0:
-                    florence_label = candidate.get("florence_caption", "")
+                    florence_label = candidate.get("florence_caption", "") if candidate else ""
                     if florence_label:
                         context_prompt = (
                             f'A fast vision model identified this element as: '
@@ -723,7 +735,11 @@ def cmd_record(args: Any) -> int:
             except RuntimeError as e:
                 logger.debug("VLM labeling failed: %s", e)
 
+        # --- Step 3: Show TagDialog with refined bbox + VLM labels ---
+        dialog_x = x + w // 2 if w > 0 else x
+        dialog_y = y + h // 2 if h > 0 else y
         is_bbox = w > 0 and h > 0
+
         dialog = TagDialog(
             element_type_guess=vlm_type or (candidate.get("type_guess", "unknown") if candidate else "unknown"),
             label_guess=vlm_label or (candidate.get("label_guess", "") if candidate else ""),
@@ -737,35 +753,17 @@ def cmd_record(args: Any) -> int:
         if dialog.exec():
             result = dialog.get_result()
             if result:
-                # Store original coordinates
-                cur_x, cur_y, cur_w, cur_h = x, y, w, h
-                result["_refinement_status"] = "original"
-
-                # Attempt OmniParser bbox refinement (for all selections)
-                refined = _try_refine_bbox(
-                    cur_x, cur_y, cur_w, cur_h,
-                    refine_mode, candidate,
-                )
-                if refined is not None:
-                    cur_x, cur_y, cur_w, cur_h = refined
-                    if w == 0 and h == 0:
-                        result["_refinement_status"] = "inferred"
-                    elif refine_mode == "auto":
-                        result["_refinement_status"] = "auto_refined"
-                    else:
-                        result["_refinement_status"] = "reviewed"
-
-                # Store final coordinates
-                if cur_w > 0 and cur_h > 0:
-                    result["x"] = cur_x + cur_w // 2
-                    result["y"] = cur_y + cur_h // 2
-                    result["bbox_x"] = cur_x
-                    result["bbox_y"] = cur_y
-                    result["bbox_w"] = cur_w
-                    result["bbox_h"] = cur_h
+                result["_refinement_status"] = refinement_status
+                if w > 0 and h > 0:
+                    result["x"] = x + w // 2
+                    result["y"] = y + h // 2
+                    result["bbox_x"] = x
+                    result["bbox_y"] = y
+                    result["bbox_w"] = w
+                    result["bbox_h"] = h
                 else:
-                    result["x"] = cur_x
-                    result["y"] = cur_y
+                    result["x"] = x
+                    result["y"] = y
                     result["bbox_w"] = 0
                     result["bbox_h"] = 0
 
@@ -773,7 +771,7 @@ def cmd_record(args: Any) -> int:
                 logger.info(
                     "Recorded: %s (%s) bbox=%dx%d refine=%s",
                     result.get("label"), result.get("element_type"),
-                    cur_w, cur_h, result["_refinement_status"],
+                    w, h, refinement_status,
                 )
                 return True
         return False

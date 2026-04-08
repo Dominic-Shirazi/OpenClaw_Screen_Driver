@@ -20,6 +20,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QGraphicsItem,
     QGraphicsObject,
     QGraphicsProxyWidget,
     QLabel,
@@ -66,17 +67,48 @@ class _ProxyComboBox(QComboBox):
         self._proxy_key = proxy_key
         self._dialog_ref = parent
 
+    # ------------------------------------------------------------------
+    # Popup lifecycle
+    # ------------------------------------------------------------------
+
     def showPopup(self) -> None:
-        """Raise proxy z-value so popup renders above all siblings."""
+        """Open the dropdown popup above the overlay.
+
+        1. Raise proxy z-value so the popup renders above siblings.
+        2. Raise the native popup window with WindowStaysOnTopHint.
+        """
         if self._dialog_ref is not None:
             proxy = self._dialog_ref._proxies.get(self._proxy_key)
             if proxy is not None:
                 proxy.setZValue(50)
+
         super().showPopup()
 
+        # Raise the native popup window above the always-on-top overlay.
+        popup = self.view()
+        if popup:
+            popup_window = popup.window()
+            if popup_window:
+                popup_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+                popup_window.raise_()
+                popup_window.show()  # re-show required after flag change
+
     def hidePopup(self) -> None:
-        """Restore proxy z-value."""
+        """Close the dropdown popup and restore proxy z-value.
+
+        1. Remove WindowStaysOnTopHint from the popup.
+        2. Close the popup via super().
+        3. Reset proxy z-value.
+        """
+        # Remove WindowStaysOnTopHint before closing to avoid side effects.
+        popup = self.view()
+        if popup:
+            popup_window = popup.window()
+            if popup_window:
+                popup_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+
         super().hidePopup()
+
         if self._dialog_ref is not None:
             proxy = self._dialog_ref._proxies.get(self._proxy_key)
             if proxy is not None:
@@ -255,6 +287,9 @@ class TagDialogPanel(QGraphicsObject):
         proxy.setFlag(
             QGraphicsProxyWidget.GraphicsItemFlag.ItemIsPanel, True,
         )
+        proxy.setFlag(
+            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
+        )
         # Combo popups need higher z to render above sibling proxies
         if isinstance(widget, QComboBox):
             proxy.setZValue(10)
@@ -356,6 +391,12 @@ class TagDialogPanel(QGraphicsObject):
             action_combo, pad, y, field_w,
         )
         action_combo.currentIndexChanged.connect(self._on_action_type_changed)
+        action_combo.currentIndexChanged.connect(
+            lambda idx: logger.info(
+                "ACTION COMBO: index changed to %d = '%s'",
+                idx, action_combo.itemData(idx),
+            )
+        )
         y += 34
 
         # -- Element Type combo (grouped with separator headers) --
@@ -746,6 +787,18 @@ class TagDialogPanel(QGraphicsObject):
                 if isinstance(w, QLineEdit):
                     w.clear()
 
+        # Restore proxy visibility (hidden on dismiss)
+        for proxy in self._proxies.values():
+            if proxy is not None:
+                proxy.setVisible(True)
+        for proxy in self._labels.values():
+            if proxy is not None:
+                proxy.setVisible(True)
+        # Re-apply conditional field visibility
+        action_combo = self._widgets.get("action_type")
+        if isinstance(action_combo, QComboBox):
+            self._on_action_type_changed(action_combo.currentIndex())
+
         # Fade in
         self._opacity = 0.0
         self._target_opacity = 1.0
@@ -799,7 +852,18 @@ class TagDialogPanel(QGraphicsObject):
         """Fade out and emit dismissed signal."""
         self._target_opacity = 0.0
         self._fading_out = True
+        # Updated: immediately stop accepting mouse/keyboard during fade-out
+        # so the invisible panel doesn't swallow clicks (fixes dry-run double-click)
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsFocusable, False)
         self._typewriter.stop()
+        # Hide all proxy widgets immediately so they don't linger
+        for proxy in self._proxies.values():
+            if proxy is not None:
+                proxy.setVisible(False)
+        for proxy in self._labels.values():
+            if proxy is not None:
+                proxy.setVisible(False)
         logger.debug("TagDialogPanel dismissing")
 
     def confirm(self) -> None:
@@ -826,6 +890,11 @@ class TagDialogPanel(QGraphicsObject):
         )
 
         action_w = self._widgets.get("action_type")
+        if isinstance(action_w, QComboBox):
+            logger.info(
+                "GET_FORM_DATA: action_type currentIndex=%d, currentText='%s', currentData='%s'",
+                action_w.currentIndex(), action_w.currentText(), action_w.currentData(),
+            )
         data["action_type"] = (
             action_w.currentData()
             if isinstance(action_w, QComboBox)

@@ -35,6 +35,7 @@ class ScanPhase(Enum):
     LASER_HORIZONTAL = auto()
     WAITING_AI = auto()
     SNAP_TO_FITTED = auto()
+    HOLDING = auto()
     DONE = auto()
 
 
@@ -140,7 +141,7 @@ class ScanLayer(QGraphicsObject):
         Args:
             dt: Time elapsed since last tick in seconds.
         """
-        if self._phase in (ScanPhase.IDLE, ScanPhase.DONE):
+        if self._phase in (ScanPhase.IDLE, ScanPhase.DONE, ScanPhase.HOLDING):
             return
 
         # WAITING_AI is an instant transition phase (no duration)
@@ -166,7 +167,7 @@ class ScanLayer(QGraphicsObject):
             ScanPhase.LINE_DRAW: ScanPhase.FILL_INWARD,
             ScanPhase.FILL_INWARD: ScanPhase.LASER_VERTICAL,
             ScanPhase.LASER_VERTICAL: ScanPhase.LASER_HORIZONTAL,
-            ScanPhase.SNAP_TO_FITTED: ScanPhase.DONE,
+            ScanPhase.SNAP_TO_FITTED: ScanPhase.HOLDING,
         }
 
         if self._phase == ScanPhase.LASER_HORIZONTAL:
@@ -197,6 +198,11 @@ class ScanLayer(QGraphicsObject):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
+        if self._phase == ScanPhase.HOLDING:
+            self._paint_holding(painter)
+            painter.restore()
+            return
+
         if self._phase == ScanPhase.CORNER_GLOW:
             self._paint_corner_glow(painter)
         elif self._phase == ScanPhase.LINE_DRAW:
@@ -204,12 +210,13 @@ class ScanLayer(QGraphicsObject):
         elif self._phase == ScanPhase.FILL_INWARD:
             self._paint_fill_inward(painter)
         elif self._phase == ScanPhase.LASER_VERTICAL:
+            self._paint_box_outline(painter)
             self._paint_laser_vertical(painter)
         elif self._phase == ScanPhase.LASER_HORIZONTAL:
+            self._paint_box_outline(painter)
             self._paint_laser_horizontal(painter)
         elif self._phase == ScanPhase.WAITING_AI:
-            # Draw residual glow while waiting
-            self._paint_fill_inward(painter)
+            self._paint_box_outline(painter)
         elif self._phase == ScanPhase.SNAP_TO_FITTED:
             self._paint_snap_to_fitted(painter)
 
@@ -395,6 +402,24 @@ class ScanLayer(QGraphicsObject):
         painter.setPen(core_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(interp)
+
+    def _paint_box_outline(self, painter: QPainter) -> None:
+        """Draw a persistent red outline around the scan rect."""
+        r = self._scan_rect
+        pen = QPen(QColor(255, 50, 50, 180))
+        pen.setWidthF(2.0)
+        painter.setPen(pen)
+        painter.setBrush(QColor(255, 50, 50, 15))
+        painter.drawRect(r)
+
+    def _paint_holding(self, painter: QPainter) -> None:
+        """Draw a static red outline at the final fitted rect."""
+        rect = self._fitted_rect if self._fitted_rect is not None else self._scan_rect
+        core_pen = QPen(QColor(255, 50, 50, 200))
+        core_pen.setWidthF(2.0)
+        painter.setPen(core_pen)
+        painter.setBrush(QColor(255, 50, 50, 15))
+        painter.drawRect(rect)
 
     @staticmethod
     def _ease_in_out_cubic(t: float) -> float:

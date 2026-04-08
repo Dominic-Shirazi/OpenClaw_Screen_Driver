@@ -84,7 +84,13 @@ class OverlayController:
         # Lazy import to avoid circular dependency
         from recorder.overlay.view import OverlayView
 
-        self._view = OverlayView(on_selection=self._on_selection)
+        # Wrap so the view always calls through the controller's current
+        # callback — RecordSession sets _on_selection after show().
+        def _forward_selection(x: int, y: int, w: int, h: int) -> None:
+            if self._on_selection is not None:
+                self._on_selection(x, y, w, h)
+
+        self._view = OverlayView(on_selection=_forward_selection)
 
         # Size to primary screen
         from PyQt6.QtWidgets import QApplication
@@ -185,10 +191,17 @@ class OverlayController:
             return self._view.get_tag_data()
         return None
 
-    def show_toolbar(self) -> None:
-        """Show the floating toolbar."""
+    def show_toolbar(
+        self,
+        on_action: Callable[[str], None] | None = None,
+    ) -> None:
+        """Show the floating toolbar.
+
+        Args:
+            on_action: Optional callback for toolbar button clicks.
+        """
         if self._view is not None:
-            self._view.show_toolbar()
+            self._view.show_toolbar(on_action=on_action)
 
     def hide_toolbar(self) -> None:
         """Hide the floating toolbar."""

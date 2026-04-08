@@ -150,16 +150,29 @@ class RecordSession:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Wire controller callbacks, show toolbar, enter AWAITING_CLICK."""
+        """Wire controller callbacks, enter AWAITING_CLICK.
+
+        Toolbar is deferred until the first F2 press (RECORDING transition)
+        so it does not appear during the initial green passthrough.
+        """
         self._controller._on_selection = self.on_selection
         self._controller._on_save = self.on_save_requested
         self._controller._on_abort = self.on_abort_requested
+        self._controller._on_state_changed = self._on_overlay_state_changed
+        self._toolbar_shown = False
 
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
-        self._controller.show_toolbar()
         self._set_phase(RecordPhase.AWAITING_CLICK)
 
         logger.info("RecordSession started, awaiting first click")
+
+    def _on_overlay_state_changed(self, state: Any) -> None:
+        """Show toolbar on first transition to RECORDING."""
+        from recorder.overlay.state import OverlayState
+
+        if state == OverlayState.RECORDING and not self._toolbar_shown:
+            self._controller.show_toolbar(on_action=self.on_toolbar_action)
+            self._toolbar_shown = True
 
     def set_on_complete(self, callback: Callable[[bool], None]) -> None:
         """Register a session completion callback.
@@ -247,6 +260,8 @@ class RecordSession:
         elif action == "dismiss":
             tag_data = self._controller.get_tag_data()
             self.on_tag_dismissed(tag_data or {})
+        elif action == "accept_ai_bbox":
+            self._accept_bbox()
         elif action == "keep_drag":
             self._handle_keep_drag()
         elif action == "yes":
@@ -286,6 +301,14 @@ class RecordSession:
             return
 
         # Merge step data with tag dialog data
+        # Remap "action_type" from tag dialog form to "action" used by
+        # the rest of the pipeline (dry-run, save, runner).  The dialog's
+        # get_form_data() returns "action_type"; every consumer expects
+        # "action".  Without this, the user's dropdown selection is silently
+        # ignored and the VLM default ("click") is kept.
+        if "action_type" in data and "action" not in data:
+            data["action"] = data.pop("action_type")
+
         self._current_step = {
             **self._current_step,
             "tag_data": data,
@@ -300,6 +323,7 @@ class RecordSession:
             data.get("element_type", "?"),
             data.get("action", "click"),
         )
+        logger.info("Merged action: %s", data.get("action"))
 
         # click_drag needs a second bbox capture for the drag target
         action = data.get("action", "click")
@@ -318,6 +342,11 @@ class RecordSession:
 
         widget = self._controller.show_countdown(3)
         if widget is not None:
+            # Updated: disconnect before connect to prevent signal accumulation
+            try:
+                widget.countdown_finished.disconnect(self._on_countdown_finished)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             widget.countdown_finished.connect(self._on_countdown_finished)
 
     def on_tag_dismissed(self, data: dict) -> None:
@@ -329,6 +358,7 @@ class RecordSession:
         self._current_step = None
         self._current_bbox = None
         self._controller.dismiss_tag_dialog()
+        self._clear_scan()  # Updated: remove scan highlight — dismissed tag means step discarded — 2026-04-03
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
@@ -627,11 +657,29 @@ class RecordSession:
         self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
         widget = self._controller.show_countdown(3)
         if widget is not None:
+            # Updated: disconnect before connect to prevent signal accumulation
+            try:
+                widget.countdown_finished.disconnect(self._on_countdown_finished)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             widget.countdown_finished.connect(self._on_countdown_finished)
 
     # ------------------------------------------------------------------
     # Private: pipeline methods
     # ------------------------------------------------------------------
+
+    def _clear_scan(self) -> None:
+        """Remove the scan highlight from the overlay view.
+
+        Safely calls view.remove_scan() to tear down the ScanLayer
+        graphics item and unregister its animation tick.
+        """
+        # Updated: new helper — centralises scan cleanup after tag/validate/recapture — 2026-04-03
+        if (
+            self._controller._view is not None
+            and hasattr(self._controller._view, "remove_scan")
+        ):
+            self._controller._view.remove_scan()
 
     def _set_phase(self, phase: RecordPhase) -> None:
         """Update the current phase and log the transition.
@@ -666,6 +714,16 @@ class RecordSession:
         self._controller.show_after_capture()
 
         self._set_phase(RecordPhase.DETECTING)
+
+        # Start scan animation immediately at selection rect (don't wait for AI)
+        if self._is_drag_capture and self._original_drag_rect is not None:
+            dx, dy, dw, dh = self._original_drag_rect
+            self._controller.start_scan(dx, dy, dw, dh)
+        else:
+            # For clicks, scan a 60x60 region around the click point
+            self._controller.start_scan(
+                self._click_x - 30, self._click_y - 30, 60, 60,
+            )
 
         # Start card glow pulsing during detection
         if hasattr(self._controller, "start_card_glow_pulse"):
@@ -895,8 +953,8 @@ class RecordSession:
             bx, by, bw, bh = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
             self._current_bbox = (bx, by, bw, bh)
 
-            # Show scan animation
-            self._controller.start_scan(bx, by, bw, bh)
+            # Snap the already-running scan to the AI-fitted bbox
+            self._controller.finish_scan(bx, by, bw, bh)
 
             self._set_phase(RecordPhase.BBOX_EDITING)
 
@@ -906,14 +964,20 @@ class RecordSession:
                 # For click captures, auto-accept the bbox
                 self._accept_bbox()
         else:
-            # No bbox found: create default 60x60 around click
-            default_size = 60
-            bx = self._click_x - default_size // 2
-            by = self._click_y - default_size // 2
-            self._current_bbox = (bx, by, default_size, default_size)
+            # No bbox found: use drag rect or default 60x60 around click
+            if self._is_drag_capture and self._original_drag_rect is not None:
+                bx, by, bw, bh = self._original_drag_rect
+            else:
+                default_size = 60
+                bx = self._click_x - default_size // 2
+                by = self._click_y - default_size // 2
+                bw, bh = default_size, default_size
+            self._current_bbox = (bx, by, bw, bh)
+
+            # Snap scan to the selection rect (ends the laser loop)
+            self._controller.finish_scan(bx, by, bw, bh)
 
             self._set_phase(RecordPhase.BBOX_EDITING)
-            # Skip directly to VLM for no-bbox case
             self._accept_bbox()
 
     def _accept_bbox(self) -> None:
@@ -1005,7 +1069,6 @@ class RecordSession:
         try:
             from core.vision import analyze_crop_array
 
-            # First attempt with 15s timeout
             result = analyze_crop_array(crop, "Identify this UI element")
             if result is not None:
                 self._bridge.vlm_ready.emit(result)
@@ -1034,6 +1097,7 @@ class RecordSession:
         Args:
             result: VLM analysis result dict.
         """
+        logger.info("VLM ready, opening tag dialog: %s", result.get("element_type", "?"))
         # Stop card glow pulsing
         if hasattr(self._controller, "stop_card_glow_pulse"):
             self._controller.stop_card_glow_pulse()
@@ -1073,7 +1137,7 @@ class RecordSession:
 
         self._set_phase(RecordPhase.TAG_DIALOG)
 
-        logger.warning("VLM failed: %s", error)
+        logger.warning("VLM failed: %s — opening tag dialog with partial data", error)
 
         partial_data = {
             "element_type": "unknown",
@@ -1104,7 +1168,34 @@ class RecordSession:
         """Handle countdown completion -- execute dry-run action."""
         self._controller.hide_countdown()
         self._set_phase(RecordPhase.EXECUTING)
+        # Switch to purple shimmer + click-through during dry-run
+        if self._controller._view is not None:
+            from recorder.overlay.state import OverlayState
+            self._controller._view.apply_state(OverlayState.REPLAYING)
         self._controller.set_click_through(True)
+
+        # Nuclear option: hide the overlay entirely during dry-run execution
+        # so it CANNOT intercept clicks (e.g. second press of a double-click).
+        # The 150ms pre-delay in _execute_dry_run gives time for the hide to
+        # propagate through the compositor before any input is sent.
+        logger.info("DRY-RUN: calling hide_for_capture()")
+        self._controller.hide_for_capture()
+        logger.info("DRY-RUN: hide_for_capture() returned")
+
+        # Flush Qt event loop + Win32 compositor to ensure overlay is truly gone
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        import sys
+        if sys.platform == "win32":
+            try:
+                from recorder.overlay.platform_win32 import dwm_flush
+                dwm_flush()
+            except Exception:
+                import time as _time
+                _time.sleep(0.1)  # fallback: 100ms for compositor
+        else:
+            import time as _time
+            _time.sleep(0.1)  # non-Windows: sleep for compositor
 
         # Execute action in background thread
         thread = threading.Thread(
@@ -1120,6 +1211,11 @@ class RecordSession:
         Emits execution_complete signal via PipelineBridge (thread-safe
         Qt AutoConnection).
         """
+        # Safety margin after compositor flush (hide is already processed)
+        logger.info("DRY-RUN: pre-delay starting (0.05s)")
+        time.sleep(0.05)
+        logger.info("DRY-RUN: pre-delay done, executing action")
+
         try:
             if self._current_bbox is None or self._current_step is None:
                 logger.warning("No bbox/step for dry-run execution")
@@ -1130,6 +1226,7 @@ class RecordSession:
             center_y = by + bh // 2
             tag_data = self._current_step.get("tag_data", {})
             action = tag_data.get("action", "click")
+            logger.info("DRY-RUN: pre-delay done, executing action '%s'", action)
 
             from core.executor import (
                 click as exec_click,
@@ -1198,6 +1295,11 @@ class RecordSession:
             logger.info(
                 "Dry-run %s executed at (%d, %d)", action, center_x, center_y,
             )
+
+            # Updated: allow OS to fully process all input events before restoring overlay
+            logger.info("DRY-RUN: action complete, post-delay starting (0.3s)")
+            time.sleep(0.3)
+            logger.info("DRY-RUN: post-delay done, emitting execution_complete")
         except Exception as e:
             logger.error("Dry-run execution failed: %s", e)
         finally:
@@ -1206,9 +1308,23 @@ class RecordSession:
     def _on_execution_complete(self) -> None:
         """Handle dry-run completion on main thread.
 
-        Restores click-through and transitions to VALIDATING.
+        Restores overlay visibility, click-through, switches back to red,
+        transitions to VALIDATING.
         """
+        # Re-show overlay before restoring interaction state.
+        # Must happen before set_click_through(False) so the window is
+        # visible when we re-enable hit-testing on it.
+        logger.info("DRY-RUN: calling show_after_capture()")
+        self._controller.show_after_capture()
+        # Flush Qt event loop to ensure overlay is fully visible before restoring interaction
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        logger.info("DRY-RUN: show_after_capture() returned, restoring RECORDING state")
         self._controller.set_click_through(False)
+        # Switch back to red shimmer for user interaction
+        if self._controller._view is not None:
+            from recorder.overlay.state import OverlayState
+            self._controller._view.apply_state(OverlayState.RECORDING)
         self._set_phase(RecordPhase.VALIDATING)
         self._controller.set_toolbar_mode(ToolbarMode.VALIDATING)
 
@@ -1246,6 +1362,7 @@ class RecordSession:
 
     def _loop_back_to_awaiting(self) -> None:
         """Return to AWAITING_CLICK after success flash."""
+        self._clear_scan()  # Updated: remove scan highlight on loop-back — prevents stale red rect — 2026-04-03
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
@@ -1267,6 +1384,7 @@ class RecordSession:
         """Handle 'Recapture' -- discard current step, return to awaiting."""
         self._current_step = None
         self._current_bbox = None
+        self._clear_scan()  # Updated: remove scan highlight on recapture — prevents stale red rect — 2026-04-03
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
         logger.info("Recapture: returning to AWAITING_CLICK")
@@ -1279,6 +1397,11 @@ class RecordSession:
 
         widget = self._controller.show_countdown(3)
         if widget is not None:
+            # Updated: disconnect before connect to prevent signal accumulation
+            try:
+                widget.countdown_finished.disconnect(self._on_countdown_finished)
+            except TypeError:
+                pass  # No existing connection -- that's fine
             widget.countdown_finished.connect(self._on_countdown_finished)
 
     def _handle_undo_last(self) -> None:

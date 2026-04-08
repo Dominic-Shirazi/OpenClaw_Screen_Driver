@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 from enum import Enum, auto
+from typing import Any
 
-from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import (
     QGraphicsObject,
@@ -73,6 +74,7 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
         ("Retry", "retry"),
     ],
     ToolbarMode.BBOX_EDITING: [
+        ("Accept AI Box", "accept_ai_bbox"),
         ("Keep My Drag", "keep_drag"),
     ],
     ToolbarMode.UPDATE: [
@@ -148,6 +150,7 @@ class ToolbarPanel(QGraphicsObject):
     ) -> None:
         super().__init__(parent)
 
+        self._button_proxies: dict[ToolbarMode, list[QGraphicsProxyWidget]] = {}
         self._width: float = self._compute_width_for_mode(ToolbarMode.RECORDING)
         self._height: float = 40.0
         self._corner_radius: float = TOOLBAR_CORNER_RADIUS
@@ -165,12 +168,13 @@ class ToolbarPanel(QGraphicsObject):
 
         # Z-value and flags
         self.setZValue(Z_TOOLBAR)
-        self.setFlag(
-            QGraphicsObject.GraphicsItemFlag.ItemIsMovable, True,
-        )
+        # NOTE: ItemIsMovable intentionally NOT set — it steals mouse events
+        # from child proxy widgets (buttons). Drag is handled manually below.
         self.setFlag(
             QGraphicsObject.GraphicsItemFlag.ItemSendsGeometryChanges, True,
         )
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self._drag_offset: QPointF | None = None
 
         # Default position: top-right corner
         default_x = screen_w - self._width - SPACING.lg
@@ -178,7 +182,6 @@ class ToolbarPanel(QGraphicsObject):
         self.setPos(default_x, default_y)
 
         # Create button sets for all modes
-        self._button_proxies: dict[ToolbarMode, list[QGraphicsProxyWidget]] = {}
         self._create_buttons()
 
         # Show only current mode's buttons
@@ -206,9 +209,11 @@ class ToolbarPanel(QGraphicsObject):
                     btn.setStyleSheet(_BUTTON_STYLE_GREEN)
                 else:
                     btn.setStyleSheet(_BUTTON_STYLE)
-                btn.clicked.connect(
-                    lambda _checked, name=action_name: self.button_clicked.emit(name),
-                )
+                def _on_btn_click(_checked: bool, name: str = action_name) -> None:
+                    logger.info("Button clicked: %s", name)
+                    self.button_clicked.emit(name)
+
+                btn.clicked.connect(_on_btn_click)
                 proxy = QGraphicsProxyWidget(self)
                 proxy.setWidget(btn)
                 proxy.setFlag(
@@ -218,10 +223,12 @@ class ToolbarPanel(QGraphicsObject):
                 proxies.append(proxy)
             self._button_proxies[mode] = proxies
 
+        self._width = self._compute_width_for_mode(self._mode)
         self._relayout_buttons()
 
     def _relayout_buttons(self) -> None:
         """Center the current mode's buttons horizontally within the pill."""
+        self._width = self._compute_width_for_mode(self._mode)
         for mode, proxies in self._button_proxies.items():
             if not proxies:
                 continue
@@ -256,9 +263,11 @@ class ToolbarPanel(QGraphicsObject):
     # Mode switching
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _compute_width_for_mode(mode: ToolbarMode) -> float:
-        """Compute pill width based on number of buttons in a mode.
+    def _compute_width_for_mode(self, mode: ToolbarMode) -> float:
+        """Compute pill width based on actual button sizes.
+
+        Measures real sizeHint widths when proxies exist, otherwise
+        falls back to a per-character estimate.
 
         Args:
             mode: The toolbar mode to measure.
@@ -266,8 +275,23 @@ class ToolbarPanel(QGraphicsObject):
         Returns:
             Dynamic width in pixels, minimum 250.0.
         """
-        btn_count = len(_MODE_BUTTONS.get(mode, []))
-        return max(250.0, 70.0 * btn_count + 40.0)
+        proxies = self._button_proxies.get(mode)
+        if proxies:
+            total = 0.0
+            for proxy in proxies:
+                widget = proxy.widget()
+                if widget is not None:
+                    widget.adjustSize()
+                    total += float(widget.sizeHint().width())
+                else:
+                    total += 70.0
+            total += SPACING.sm * max(0, len(proxies) - 1)
+            return max(250.0, total + SPACING.lg * 2)
+
+        # Fallback before buttons are created: estimate from label text
+        btn_defs = _MODE_BUTTONS.get(mode, [])
+        total_chars = sum(len(label) for label, _ in btn_defs)
+        return max(250.0, total_chars * 9.0 + 28.0 * len(btn_defs) + SPACING.lg * 2)
 
     def set_mode(self, mode: ToolbarMode) -> None:
         """Switch toolbar to a new context mode with button swap.
@@ -309,6 +333,47 @@ class ToolbarPanel(QGraphicsObject):
         """
         pos = self.pos()
         return QRectF(pos.x(), pos.y(), self._width, self._height)
+
+    # ------------------------------------------------------------------
+    # Manual drag (only on pill background, not on buttons)
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, event: Any) -> None:
+        """Start drag only if clicking on pill background, not a button."""
+        # Check if click is on a child proxy widget
+        child = self.scene().itemAt(
+            self.mapToScene(event.pos()),
+            self.scene().views()[0].viewportTransform(),
+        ) if self.scene() and self.scene().views() else None
+
+        if child is not None and child is not self:
+            # Click is on a button — let the proxy handle it
+            event.ignore()
+            return
+
+        # Click is on pill background — start drag
+        self._drag_offset = event.pos()
+        event.accept()
+
+    def mouseMoveEvent(self, event: Any) -> None:
+        """Drag the toolbar if active."""
+        if self._drag_offset is not None:
+            new_pos = self.mapToScene(event.pos()) - self._drag_offset
+            # Clamp to screen
+            x = max(0.0, min(new_pos.x(), self._screen_w - self._width))
+            y = max(0.0, min(new_pos.y(), self._screen_h - self._height))
+            self.setPos(x, y)
+            event.accept()
+        else:
+            event.ignore()
+
+    def mouseReleaseEvent(self, event: Any) -> None:
+        """End drag."""
+        if self._drag_offset is not None:
+            self._drag_offset = None
+            event.accept()
+        else:
+            event.ignore()
 
     # ------------------------------------------------------------------
     # Geometry
