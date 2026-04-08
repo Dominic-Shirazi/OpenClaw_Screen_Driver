@@ -1,18 +1,26 @@
-"""Frosted-glass tag dialog panel for the overlay HUD.
+"""Tag dialog panel for the overlay HUD.
 
-QGraphicsObject with embedded form fields via QGraphicsProxyWidget,
+QWidget-based floating panel with direct form fields (no proxy widgets),
 typewriter VLM fill, conditional action-type fields, and card border
 glow animation.  This is the primary data capture UI during recording.
+
+Uses a custom _DropdownButton widget instead of QComboBox to avoid the
+Windows transparency bug where QComboBox popups are always transparent
+when the parent widget tree has had any transparency attributes.  The card
+glow paints outside the rounded-rect clip region; fade-in/out uses
+setWindowOpacity() which works independently of translucency attributes.
 """
 from __future__ import annotations
 
 import logging
-from typing import Callable
+import math
+from typing import Any
 
-from PyQt6.QtCore import QObject, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QKeyEvent,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -20,14 +28,14 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
-    QGraphicsItem,
-    QGraphicsObject,
-    QGraphicsProxyWidget,
+    QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
-    QStyleOptionGraphicsItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -58,62 +66,6 @@ from recorder.overlay.hud_common import (
 from recorder.overlay.typewriter_engine import TypewriterEngine
 
 logger = logging.getLogger(__name__)
-
-
-class _ProxyComboBox(QComboBox):
-    """QComboBox that raises its proxy z-value when popup is shown."""
-
-    def __init__(self, proxy_key: str, parent: QGraphicsObject | None = None) -> None:
-        super().__init__()
-        self._proxy_key = proxy_key
-        self._dialog_ref = parent
-
-    # ------------------------------------------------------------------
-    # Popup lifecycle
-    # ------------------------------------------------------------------
-
-    def showPopup(self) -> None:
-        """Open the dropdown popup above the overlay.
-
-        1. Raise proxy z-value so the popup renders above siblings.
-        2. Raise the native popup window with WindowStaysOnTopHint.
-        """
-        if self._dialog_ref is not None:
-            proxy = self._dialog_ref._proxies.get(self._proxy_key)
-            if proxy is not None:
-                proxy.setZValue(50)
-
-        super().showPopup()
-
-        # Raise the native popup window above the always-on-top overlay.
-        popup = self.view()
-        if popup:
-            popup_window = popup.window()
-            if popup_window:
-                popup_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-                popup_window.raise_()
-                popup_window.show()  # re-show required after flag change
-
-    def hidePopup(self) -> None:
-        """Close the dropdown popup and restore proxy z-value.
-
-        1. Remove WindowStaysOnTopHint from the popup.
-        2. Close the popup via super().
-        3. Reset proxy z-value.
-        """
-        # Remove WindowStaysOnTopHint before closing to avoid side effects.
-        popup = self.view()
-        if popup:
-            popup_window = popup.window()
-            if popup_window:
-                popup_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
-
-        super().hidePopup()
-
-        if self._dialog_ref is not None:
-            proxy = self._dialog_ref._proxies.get(self._proxy_key)
-            if proxy is not None:
-                proxy.setZValue(10)
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +130,377 @@ _HELPER_TIPS: dict[str, str] = {
     "question_text": "This question will be shown to the user or agent during replay",
 }
 
+# All conditional field keys
+_ALL_CONDITIONAL: set[str] = {
+    "text_to_type", "press_enter", "direction_amount",
+    "condition_timeout", "drag_target_hint", "vlm_prompt",
+    "question_text",
+}
 
-class TagDialogPanel(QGraphicsObject):
-    """Frosted-glass tag dialog with form fields, typewriter fill, and card glow.
+# ---------------------------------------------------------------------------
+# QSS styling
+# ---------------------------------------------------------------------------
+
+_DIALOG_QSS: str = """
+QWidget#TagDialog {
+    background: rgb(20, 22, 28);
+    border-radius: 12px;
+}
+QLineEdit {
+    background-color: rgba(20, 20, 35, 220);
+    color: #ffffff;
+    border: 1px solid rgba(50, 200, 50, 60);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-weight: 400;
+    font-size: 14px;
+}
+QLabel {
+    color: #c0c8d0;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+}
+QCheckBox {
+    color: #ffffff;
+    background: transparent;
+    font-size: 14px;
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(50, 200, 50, 60);
+    border-radius: 3px;
+    background-color: rgba(20, 20, 35, 220);
+}
+QCheckBox::indicator:checked {
+    background-color: rgba(50, 200, 50, 180);
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Custom dropdown widget — replaces QComboBox to avoid Windows transparency bug
+# ---------------------------------------------------------------------------
+
+class _DropdownPopup(QWidget):
+    """Frameless popup containing a QListWidget for item selection.
+
+    Uses its own top-level window flags with a solid background so it
+    is never affected by parent widget transparency attributes.
+    """
+
+    item_selected = pyqtSignal(int)  # index of selected item
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the popup widget.
+
+        Args:
+            parent: Optional parent widget (used for positioning only).
+        """
+        super().__init__(parent=None)  # No Qt parent — independent window
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Popup
+        )
+        # Explicitly do NOT set WA_TranslucentBackground
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAutoFillBackground(True)
+
+        # Force solid background via palette
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), QColor(30, 34, 42))
+        self.setPalette(pal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            "QListWidget {"
+            "  background-color: rgb(30, 34, 42);"
+            "  color: #ffffff;"
+            "  border: 1px solid rgba(100, 200, 255, 120);"
+            "  font-size: 14px;"
+            "  padding: 4px;"
+            "  outline: none;"
+            "}"
+            "QListWidget::item {"
+            "  padding: 4px 8px;"
+            "}"
+            "QListWidget::item:selected {"
+            "  background-color: rgb(60, 140, 200);"
+            "  color: #ffffff;"
+            "}"
+            "QListWidget::item:hover {"
+            "  background-color: rgba(60, 140, 200, 120);"
+            "}"
+        )
+        # Force solid background on list too
+        list_pal = self._list.palette()
+        list_pal.setColor(self._list.backgroundRole(), QColor(30, 34, 42))
+        self._list.setPalette(list_pal)
+        self._list.setAutoFillBackground(True)
+
+        self._list.itemClicked.connect(self._on_item_clicked)
+        layout.addWidget(self._list)
+
+    @property
+    def list_widget(self) -> QListWidget:
+        """Return the internal QListWidget."""
+        return self._list
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        """Handle click on a list item.
+
+        Args:
+            item: The clicked QListWidgetItem.
+        """
+        # Skip disabled (header) items
+        if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
+            return
+        row = self._list.row(item)
+        self.item_selected.emit(row)
+        self.hide()
+
+
+class _DropdownButton(QWidget):
+    """Custom dropdown replacing QComboBox to avoid Windows transparency bugs.
+
+    Presents a QPushButton showing the current selection with a down-arrow
+    indicator.  When clicked, shows a _DropdownPopup with a QListWidget
+    for item selection.
+
+    Provides a QComboBox-compatible API subset.
+    """
+
+    currentIndexChanged = pyqtSignal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the dropdown button.
+
+        Args:
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self._items: list[tuple[str, Any]] = []  # (text, data)
+        self._current_index: int = -1
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._button = QPushButton()
+        self._button.setStyleSheet(
+            "QPushButton {"
+            "  background-color: rgb(40, 44, 52);"
+            "  color: #ffffff;"
+            "  border: 1px solid rgba(100, 200, 255, 60);"
+            "  border-radius: 6px;"
+            "  padding: 4px 8px;"
+            "  font-size: 14px;"
+            "  text-align: left;"
+            "}"
+            "QPushButton:hover {"
+            "  border: 1px solid rgba(100, 200, 255, 120);"
+            "}"
+        )
+        self._button.clicked.connect(self._show_popup)
+        layout.addWidget(self._button)
+
+        self._popup = _DropdownPopup(self)
+        self._popup.item_selected.connect(self._on_popup_selected)
+
+        self._update_button_text()
+
+    def addItem(self, text: str, data: Any = None) -> None:
+        """Add an item to the dropdown.
+
+        Args:
+            text: Display text.
+            data: Associated data (defaults to None).
+        """
+        self._items.append((text, data))
+        list_item = QListWidgetItem(text)
+        self._popup.list_widget.addItem(list_item)
+        if self._current_index < 0 and data is not None:
+            # Auto-select first enabled item
+            self.setCurrentIndex(len(self._items) - 1)
+
+    def addItems(self, texts: list[str]) -> None:
+        """Add multiple items to the dropdown.
+
+        Args:
+            texts: List of display text strings (data = text).
+        """
+        for t in texts:
+            self.addItem(t, t)
+
+    def addGroupHeader(self, text: str) -> None:
+        """Add a disabled header item for visual grouping.
+
+        Args:
+            text: Header text.
+        """
+        self._items.append((text, None))
+        list_item = QListWidgetItem(text)
+        list_item.setFlags(Qt.ItemFlag.NoItemFlags)  # Disabled
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(8)
+        list_item.setFont(font)
+        list_item.setForeground(QColor(140, 150, 160))
+        self._popup.list_widget.addItem(list_item)
+
+    def setMaxVisibleItems(self, count: int) -> None:
+        """Set max visible items hint (controls popup height).
+
+        Args:
+            count: Number of visible items.
+        """
+        # Store for popup sizing
+        self._max_visible = count
+
+    def currentText(self) -> str:
+        """Return the display text of the current selection.
+
+        Returns:
+            Current item text, or empty string if nothing selected.
+        """
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index][0]
+        return ""
+
+    def currentData(self) -> Any:
+        """Return the data of the current selection.
+
+        Returns:
+            Current item data, or None if nothing selected.
+        """
+        if 0 <= self._current_index < len(self._items):
+            return self._items[self._current_index][1]
+        return None
+
+    def currentIndex(self) -> int:
+        """Return the current selection index.
+
+        Returns:
+            Zero-based index, or -1 if nothing selected.
+        """
+        return self._current_index
+
+    def setCurrentIndex(self, index: int) -> None:
+        """Set the current selection by index.
+
+        Args:
+            index: Zero-based index to select.
+        """
+        if 0 <= index < len(self._items):
+            old = self._current_index
+            self._current_index = index
+            self._update_button_text()
+            if old != index:
+                self.currentIndexChanged.emit(index)
+
+    def setCurrentText(self, text: str) -> None:
+        """Set the current selection by matching display text.
+
+        Args:
+            text: Text to search for.
+        """
+        for i, (t, _d) in enumerate(self._items):
+            if t == text:
+                self.setCurrentIndex(i)
+                return
+
+    def findData(self, data: Any) -> int:
+        """Find the index of an item by its data value.
+
+        Args:
+            data: Data value to search for.
+
+        Returns:
+            Index of matching item, or -1 if not found.
+        """
+        for i, (_t, d) in enumerate(self._items):
+            if d == data:
+                return i
+        return -1
+
+    def count(self) -> int:
+        """Return the total number of items.
+
+        Returns:
+            Item count.
+        """
+        return len(self._items)
+
+    def itemData(self, index: int) -> Any:
+        """Return the data for an item at a given index.
+
+        Args:
+            index: Zero-based index.
+
+        Returns:
+            Item data, or None if index is out of range.
+        """
+        if 0 <= index < len(self._items):
+            return self._items[index][1]
+        return None
+
+    def model(self) -> None:
+        """Compatibility stub — returns None (no Qt model).
+
+        Returns:
+            None.
+        """
+        return None
+
+    def _update_button_text(self) -> None:
+        """Update the button label to show current selection + arrow."""
+        text = self.currentText() or "(select)"
+        self._button.setText(f"  {text}  \u25BC")
+
+    def _show_popup(self) -> None:
+        """Show the dropdown popup below the button."""
+        # Compute popup size
+        popup_w = max(self.width(), 200)
+        max_vis = getattr(self, "_max_visible", 12)
+        item_h = 28  # approximate per-item height
+        popup_h = min(len(self._items), max_vis) * item_h + 8
+        popup_h = max(popup_h, 60)
+
+        self._popup.setFixedSize(popup_w, popup_h)
+        self._popup.list_widget.setFixedSize(popup_w - 2, popup_h - 2)
+
+        # Position below the button in global coords
+        global_pos = self._button.mapToGlobal(self._button.rect().bottomLeft())
+        self._popup.move(global_pos)
+
+        # Highlight current selection
+        if 0 <= self._current_index < self._popup.list_widget.count():
+            self._popup.list_widget.setCurrentRow(self._current_index)
+
+        self._popup.show()
+
+    def _on_popup_selected(self, index: int) -> None:
+        """Handle selection from the popup list.
+
+        Args:
+            index: Index of the selected item.
+        """
+        self.setCurrentIndex(index)
+
+
+class TagDialogPanel(QWidget):
+    """Tag dialog with form fields, typewriter fill, and card glow.
+
+    This is a top-level QWidget (frameless, opaque dark background,
+    always-on-top) that floats over the QGraphicsView overlay.  Form
+    fields are direct QWidget children -- no QGraphicsProxyWidget wrappers.
 
     Signals:
         confirmed: Emitted with form data dict when user confirms.
@@ -193,26 +513,24 @@ class TagDialogPanel(QGraphicsObject):
     def __init__(
         self,
         clock: AnimationClock,
-        parent: QGraphicsObject | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         """Initialize the tag dialog panel.
 
         Args:
             clock: AnimationClock for tick-driven animations.
-            parent: Optional parent QGraphicsObject.
+            parent: Optional parent QWidget.
         """
         super().__init__(parent)
-        self.setZValue(Z_TAG_DIALOG)
-        self.setFlag(
-            QGraphicsObject.GraphicsItemFlag.ItemIsFocusable, True,
+        self.setObjectName("TagDialog")
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
-        self.setAcceptedMouseButtons(
-            Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton,
-        )
+        self.setStyleSheet(_DIALOG_QSS)
 
-        self._width: float = 400.0
-        self._height: float = 280.0
-        self._target_height: float = 280.0
+        self._panel_width: int = 400
         self._corner_radius: float = CORNER_RADIUS
 
         self._opacity: float = 0.0
@@ -233,20 +551,23 @@ class TagDialogPanel(QGraphicsObject):
         # Field index mapping for typewriter interruption
         self._typewriter_field_map: dict[QLineEdit, int] = {}
 
-        # Create all form widgets
-        self._proxies: dict[str, QGraphicsProxyWidget] = {}
-        self._labels: dict[str, QGraphicsProxyWidget] = {}
-        self._tips: dict[str, QGraphicsProxyWidget] = {}
+        # Build form layout
         self._widgets: dict[str, QWidget] = {}
-        self._create_fields()
+        self._field_labels: dict[str, QLabel] = {}
+        self._field_tips: dict[str, QLabel] = {}
+        self._field_rows: dict[str, QWidget] = {}
+        self._build_ui()
 
         # Register tick callback
         self._clock.register(self._tick)
 
-        logger.debug("TagDialogPanel created (z=%d)", Z_TAG_DIALOG)
+        # Size the widget
+        self.setFixedWidth(self._panel_width)
+
+        logger.debug("TagDialogPanel created (QWidget-based)")
 
     # ------------------------------------------------------------------
-    # Field creation helpers
+    # UI construction
     # ------------------------------------------------------------------
 
     def _make_font(self, size: int, weight: int = FONT_WEIGHT_LIGHT) -> QFont:
@@ -266,330 +587,232 @@ class TagDialogPanel(QGraphicsObject):
         font.setWeight(QFont.Weight(weight))
         return font
 
-    def _create_field(
-        self, widget: QWidget, x: float, y: float, width: float,
-    ) -> QGraphicsProxyWidget:
-        """Embed a widget as a QGraphicsProxyWidget child of this item.
+    def _make_field_row(
+        self,
+        key: str,
+        label_text: str,
+        widget: QWidget,
+        tip_text: str | None = None,
+    ) -> QWidget:
+        """Create a vertical container: label + field + optional tip.
 
         Args:
-            widget: The QWidget to embed.
-            x: X position within the panel.
-            y: Y position within the panel.
-            width: Fixed width for the widget.
+            key: Unique key for lookup.
+            label_text: Label text above the field.
+            widget: The form widget (QLineEdit, _DropdownButton, etc.).
+            tip_text: Optional helper tip below the field.
 
         Returns:
-            The created proxy widget.
+            Container QWidget holding the row.
         """
-        widget.setStyleSheet(FIELD_STYLESHEET)
-        widget.setFixedWidth(int(width))
-        widget.setFont(self._make_font(FONT_SIZE_INPUT))
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(widget)
-        proxy.setPos(x, y)
-        proxy.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
-        )
-        # Combo popups need higher z to render above sibling proxies
-        if isinstance(widget, QComboBox):
-            proxy.setZValue(10)
-        return proxy
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
-    def _create_label(
-        self, text: str, x: float, y: float,
-    ) -> QGraphicsProxyWidget:
-        """Create a label proxy widget above a field.
-
-        Args:
-            text: Label text.
-            x: X position.
-            y: Y position.
-
-        Returns:
-            The created proxy widget.
-        """
-        label = QLabel(text)
+        label = QLabel(label_text)
         label.setFont(self._make_font(FONT_SIZE_LABEL, FONT_WEIGHT_REGULAR))
-        label.setStyleSheet(
-            f"color: rgba({TEXT_SECONDARY.red()}, {TEXT_SECONDARY.green()}, "
-            f"{TEXT_SECONDARY.blue()}, {TEXT_SECONDARY.alpha()}); "
-            "background: transparent;"
-        )
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(label)
-        proxy.setPos(x, y)
-        return proxy
+        layout.addWidget(label)
+        self._field_labels[key] = label
 
-    def _create_tip(
-        self, text: str, x: float, y: float, width: float,
-    ) -> QGraphicsProxyWidget:
-        """Create a helper tip label.
+        widget.setFont(self._make_font(FONT_SIZE_INPUT))
+        layout.addWidget(widget)
+        self._widgets[key] = widget
 
-        Args:
-            text: Tip text.
-            x: X position.
-            y: Y position.
-            width: Fixed width.
+        if tip_text:
+            tip = QLabel(tip_text)
+            tip.setFont(self._make_font(FONT_SIZE_HELPER))
+            tip.setWordWrap(True)
+            layout.addWidget(tip)
+            self._field_tips[key] = tip
 
-        Returns:
-            The created proxy widget.
-        """
-        label = QLabel(text)
-        label.setFont(self._make_font(FONT_SIZE_HELPER))
-        label.setWordWrap(True)
-        label.setFixedWidth(int(width))
-        label.setStyleSheet(
-            f"color: rgba({TEXT_SECONDARY.red()}, {TEXT_SECONDARY.green()}, "
-            f"{TEXT_SECONDARY.blue()}, {TEXT_SECONDARY.alpha()}); "
-            "background: transparent;"
-        )
-        proxy = QGraphicsProxyWidget(self)
-        proxy.setWidget(label)
-        proxy.setPos(x, y)
-        return proxy
+        self._field_rows[key] = container
+        return container
 
-    def _create_fields(self) -> None:
-        """Create all form widgets and embed as proxy children."""
-        pad = float(SPACING.md)  # 16px internal padding
-        field_w = self._width - 2 * pad
-        y = pad
+    def _build_ui(self) -> None:
+        """Build the full form layout with all fields."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(SPACING.md, SPACING.md, SPACING.md, SPACING.md)
+        main_layout.setSpacing(SPACING.sm)
 
         # -- Label field --
-        self._labels["label"] = self._create_label("Label", pad, y)
-        y += 18
         label_edit = QLineEdit()
         label_edit.setPlaceholderText("Element label...")
-        self._widgets["label"] = label_edit
-        self._proxies["label"] = self._create_field(label_edit, pad, y, field_w)
         label_edit.textEdited.connect(lambda _: self._on_user_edit(label_edit))
-        y += 34
+        main_layout.addWidget(
+            self._make_field_row("label", "Label", label_edit),
+        )
 
         # -- Caption field --
-        self._labels["caption"] = self._create_label("Caption", pad, y)
-        y += 18
         caption_edit = QLineEdit()
         caption_edit.setPlaceholderText("What this element does...")
-        self._widgets["caption"] = caption_edit
-        self._proxies["caption"] = self._create_field(
-            caption_edit, pad, y, field_w,
+        caption_edit.textEdited.connect(lambda _: self._on_user_edit(caption_edit))
+        main_layout.addWidget(
+            self._make_field_row("caption", "Caption", caption_edit),
         )
-        caption_edit.textEdited.connect(
-            lambda _: self._on_user_edit(caption_edit),
-        )
-        y += 34
 
-        # -- Action Type combo --
-        self._labels["action_type"] = self._create_label(
-            "Action Type", pad, y,
-        )
-        y += 18
-        action_combo = _ProxyComboBox("action_type", self)
+        # -- Action Type dropdown --
+        action_dropdown = _DropdownButton()
         for at in _ACTION_TYPES:
-            action_combo.addItem(at, at)
-        self._widgets["action_type"] = action_combo
-        self._proxies["action_type"] = self._create_field(
-            action_combo, pad, y, field_w,
+            action_dropdown.addItem(at, at)
+        action_dropdown.currentIndexChanged.connect(self._on_action_type_changed)
+        main_layout.addWidget(
+            self._make_field_row("action_type", "Action Type", action_dropdown),
         )
-        action_combo.currentIndexChanged.connect(self._on_action_type_changed)
-        action_combo.currentIndexChanged.connect(
-            lambda idx: logger.info(
-                "ACTION COMBO: index changed to %d = '%s'",
-                idx, action_combo.itemData(idx),
-            )
-        )
-        y += 34
 
-        # -- Element Type combo (grouped with separator headers) --
-        self._labels["element_type"] = self._create_label(
-            "Element Type", pad, y,
-        )
-        y += 18
-        elem_combo = _ProxyComboBox("element_type", self)
-        elem_combo.setMaxVisibleItems(20)
-        self._populate_element_type_combo(elem_combo)
-        self._widgets["element_type"] = elem_combo
-        self._proxies["element_type"] = self._create_field(
-            elem_combo, pad, y, field_w,
+        # -- Element Type dropdown (grouped with separator headers) --
+        elem_dropdown = _DropdownButton()
+        elem_dropdown.setMaxVisibleItems(20)
+        self._populate_element_type_dropdown(elem_dropdown)
+        main_layout.addWidget(
+            self._make_field_row("element_type", "Element Type", elem_dropdown),
         )
         # Select "unknown" as default
-        self._select_element_type(elem_combo, "unknown")
-        y += 34
+        self._select_element_type(elem_dropdown, "unknown")
 
         # -- Conditional fields --
+
         # Text to type (action_type == "type")
-        self._labels["text_to_type"] = self._create_label(
-            "Text to type", pad, y,
-        )
         text_edit = QLineEdit()
         text_edit.setPlaceholderText("Text to enter...")
-        self._widgets["text_to_type"] = text_edit
-        self._proxies["text_to_type"] = self._create_field(
-            text_edit, pad, y + 18, field_w,
-        )
-        self._tips["text_to_type"] = self._create_tip(
-            _HELPER_TIPS["text_to_type"], pad, y + 52, field_w,
+        main_layout.addWidget(
+            self._make_field_row(
+                "text_to_type", "Text to type", text_edit,
+                tip_text=_HELPER_TIPS["text_to_type"],
+            ),
         )
 
         # Press Enter checkbox (action_type == "type")
         press_enter = QCheckBox("Press Enter to send?")
-        press_enter.setStyleSheet(
-            f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
-            f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
-            "background: transparent;"
-        )
         press_enter.setFont(self._make_font(FONT_SIZE_INPUT))
+        # No label row for checkbox — it's self-labeling
         self._widgets["press_enter"] = press_enter
-        proxy_enter = QGraphicsProxyWidget(self)
-        proxy_enter.setWidget(press_enter)
-        proxy_enter.setFlag(
-            QGraphicsProxyWidget.GraphicsItemFlag.ItemIsFocusable, True,
-        )
-        self._proxies["press_enter"] = proxy_enter
-        self._tips["press_enter"] = self._create_tip(
-            _HELPER_TIPS["press_enter"], pad, y + 80, field_w,
-        )
+        press_enter_container = QWidget()
+        press_enter_container.setStyleSheet("background: transparent;")
+        pe_layout = QVBoxLayout(press_enter_container)
+        pe_layout.setContentsMargins(0, 0, 0, 0)
+        pe_layout.setSpacing(2)
+        pe_layout.addWidget(press_enter)
+        tip_pe = QLabel(_HELPER_TIPS["press_enter"])
+        tip_pe.setFont(self._make_font(FONT_SIZE_HELPER))
+        tip_pe.setWordWrap(True)
+        pe_layout.addWidget(tip_pe)
+        self._field_tips["press_enter"] = tip_pe
+        self._field_rows["press_enter"] = press_enter_container
+        main_layout.addWidget(press_enter_container)
 
         # Direction/Amount (action_type == "scroll")
-        self._labels["direction_amount"] = self._create_label(
-            "Direction/Amount", pad, y,
-        )
         dir_edit = QLineEdit()
         dir_edit.setPlaceholderText("Direction and pixel amount to scroll")
-        self._widgets["direction_amount"] = dir_edit
-        self._proxies["direction_amount"] = self._create_field(
-            dir_edit, pad, y + 18, field_w,
-        )
-        self._tips["direction_amount"] = self._create_tip(
-            _HELPER_TIPS["direction_amount"], pad, y + 52, field_w,
+        main_layout.addWidget(
+            self._make_field_row(
+                "direction_amount", "Direction/Amount", dir_edit,
+                tip_text=_HELPER_TIPS["direction_amount"],
+            ),
         )
 
         # Condition/Timeout (action_type == "wait")
-        self._labels["condition_timeout"] = self._create_label(
-            "Condition/Timeout", pad, y,
-        )
         cond_edit = QLineEdit()
-        cond_edit.setPlaceholderText(
-            "Condition to wait for, or timeout in seconds",
-        )
-        self._widgets["condition_timeout"] = cond_edit
-        self._proxies["condition_timeout"] = self._create_field(
-            cond_edit, pad, y + 18, field_w,
-        )
-        self._tips["condition_timeout"] = self._create_tip(
-            _HELPER_TIPS["condition_timeout"], pad, y + 52, field_w,
+        cond_edit.setPlaceholderText("Condition to wait for, or timeout in seconds")
+        main_layout.addWidget(
+            self._make_field_row(
+                "condition_timeout", "Condition/Timeout", cond_edit,
+                tip_text=_HELPER_TIPS["condition_timeout"],
+            ),
         )
 
         # Drag target hint (action_type == "click_drag")
-        self._labels["drag_target_hint"] = self._create_label(
-            "Drag target", pad, y,
-        )
         drag_edit = QLineEdit()
         drag_edit.setPlaceholderText(
             "I'll capture the drag destination after you confirm this step",
         )
-        self._widgets["drag_target_hint"] = drag_edit
-        self._proxies["drag_target_hint"] = self._create_field(
-            drag_edit, pad, y + 18, field_w,
-        )
-        self._tips["drag_target_hint"] = self._create_tip(
-            _HELPER_TIPS["drag_target_hint"], pad, y + 52, field_w,
+        main_layout.addWidget(
+            self._make_field_row(
+                "drag_target_hint", "Drag target", drag_edit,
+                tip_text=_HELPER_TIPS["drag_target_hint"],
+            ),
         )
 
         # VLM prompt (action_type in ("read", "snip_and_search"))
-        self._labels["vlm_prompt"] = self._create_label(
-            "VLM prompt", pad, y,
-        )
         vlm_edit = QLineEdit()
         vlm_edit.setPlaceholderText("What to look for...")
-        self._widgets["vlm_prompt"] = vlm_edit
-        self._proxies["vlm_prompt"] = self._create_field(
-            vlm_edit, pad, y + 18, field_w,
-        )
-        self._tips["vlm_prompt"] = self._create_tip(
-            _HELPER_TIPS["vlm_prompt"], pad, y + 52, field_w,
+        main_layout.addWidget(
+            self._make_field_row(
+                "vlm_prompt", "VLM prompt", vlm_edit,
+                tip_text=_HELPER_TIPS["vlm_prompt"],
+            ),
         )
 
         # Question text (action_type == "prompt_user")
-        self._labels["question_text"] = self._create_label(
-            "Question", pad, y,
-        )
         q_edit = QLineEdit()
         q_edit.setPlaceholderText("Question for the user...")
-        self._widgets["question_text"] = q_edit
-        self._proxies["question_text"] = self._create_field(
-            q_edit, pad, y + 18, field_w,
-        )
-        self._tips["question_text"] = self._create_tip(
-            _HELPER_TIPS["question_text"], pad, y + 52, field_w,
+        main_layout.addWidget(
+            self._make_field_row(
+                "question_text", "Question", q_edit,
+                tip_text=_HELPER_TIPS["question_text"],
+            ),
         )
 
-        # -- Buttons --
+        # -- Buttons row --
+        btn_row = QWidget()
+        btn_row.setStyleSheet("background: transparent;")
+        btn_layout = QHBoxLayout(btn_row)
+        btn_layout.setContentsMargins(0, 4, 0, 0)
+        btn_layout.setSpacing(SPACING.sm)
+
         confirm_btn = QPushButton("Confirm")
-        confirm_btn.setFixedWidth(int(field_w / 2 - SPACING.sm))
         confirm_btn.setStyleSheet(
             f"background: rgba({CONFIRM_BG.red()}, {CONFIRM_BG.green()}, "
             f"{CONFIRM_BG.blue()}, {CONFIRM_BG.alpha()}); "
-            f"color: rgba({TEXT_PRIMARY.red()}, {TEXT_PRIMARY.green()}, "
-            f"{TEXT_PRIMARY.blue()}, {TEXT_PRIMARY.alpha()}); "
+            "color: #ffffff; "
             "border-radius: 4px; padding: 6px 12px; "
-            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 400;"
+            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 500;"
         )
         confirm_btn.clicked.connect(self.confirm)
         self._widgets["confirm_btn"] = confirm_btn
-        proxy_confirm = QGraphicsProxyWidget(self)
-        proxy_confirm.setWidget(confirm_btn)
-        self._proxies["confirm_btn"] = proxy_confirm
+        btn_layout.addWidget(confirm_btn)
 
         dismiss_btn = QPushButton("Dismiss")
-        dismiss_btn.setFixedWidth(int(field_w / 2 - SPACING.sm))
         dismiss_btn.setStyleSheet(
             f"background: rgba({DISMISS_BG.red()}, {DISMISS_BG.green()}, "
             f"{DISMISS_BG.blue()}, {DISMISS_BG.alpha()}); "
-            f"color: rgba({DISMISS_TEXT.red()}, {DISMISS_TEXT.green()}, "
-            f"{DISMISS_TEXT.blue()}, {DISMISS_TEXT.alpha()}); "
+            "color: #e8e8e8; "
             "border-radius: 4px; padding: 6px 12px; "
-            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 400;"
+            f"font-size: {FONT_SIZE_INPUT}px; font-weight: 500;"
         )
         dismiss_btn.clicked.connect(self.dismiss)
         self._widgets["dismiss_btn"] = dismiss_btn
-        proxy_dismiss = QGraphicsProxyWidget(self)
-        proxy_dismiss.setWidget(dismiss_btn)
-        self._proxies["dismiss_btn"] = proxy_dismiss
+        btn_layout.addWidget(dismiss_btn)
 
-        # Initial layout: hide all conditional fields, position buttons
+        main_layout.addWidget(btn_row)
+
+        # Initial layout: hide all conditional fields
         self._on_action_type_changed(0)
 
-    def _populate_element_type_combo(self, combo: QComboBox) -> None:
-        """Fill element type combo with grouped items and separator headers.
+    def _populate_element_type_dropdown(self, dropdown: _DropdownButton) -> None:
+        """Fill element type dropdown with grouped items and separator headers.
 
         Args:
-            combo: The QComboBox to populate.
+            dropdown: The _DropdownButton to populate.
         """
         for group_label, values in _TYPE_GROUPS:
-            combo.addItem(group_label, None)
-            idx = combo.count() - 1
-            model = combo.model()
-            if model is not None:
-                item = model.item(idx)
-                if item is not None:
-                    item.setEnabled(False)
-                    font = QFont()
-                    font.setBold(True)
-                    font.setPointSize(8)
-                    item.setFont(font)
+            dropdown.addGroupHeader(group_label)
             for val in values:
-                combo.addItem(val, val)
+                dropdown.addItem(val, val)
 
-    def _select_element_type(self, combo: QComboBox, value: str) -> None:
-        """Select an element type in the combo by value string.
+    def _select_element_type(
+        self, dropdown: _DropdownButton, value: str,
+    ) -> None:
+        """Select an element type in the dropdown by value string.
 
         Args:
-            combo: The QComboBox to search.
+            dropdown: The _DropdownButton to search.
             value: The element type string to select.
         """
-        for i in range(combo.count()):
-            if combo.itemData(i) == value:
-                combo.setCurrentIndex(i)
-                return
+        idx = dropdown.findData(value)
+        if idx >= 0:
+            dropdown.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
     # Action type change handler
@@ -603,93 +826,23 @@ class TagDialogPanel(QGraphicsObject):
         Args:
             index: New combo index (unused, reads current data).
         """
-        action_combo = self._widgets["action_type"]
-        if not isinstance(action_combo, QComboBox):
+        action_w = self._widgets.get("action_type")
+        if not isinstance(action_w, _DropdownButton):
             return
-        current_action = action_combo.currentData()
+        current_action = action_w.currentData()
 
         # Determine which conditional field keys to show
         visible_keys: set[str] = set()
         if current_action in _CONDITIONAL_FIELDS:
             visible_keys = set(_CONDITIONAL_FIELDS[current_action])
 
-        # All conditional field keys
-        all_conditional = {
-            "text_to_type", "press_enter", "direction_amount",
-            "condition_timeout", "drag_target_hint", "vlm_prompt",
-            "question_text",
-        }
+        for key in _ALL_CONDITIONAL:
+            row = self._field_rows.get(key)
+            if row is not None:
+                row.setVisible(key in visible_keys)
 
-        for key in all_conditional:
-            visible = key in visible_keys
-            if key in self._proxies:
-                self._proxies[key].setVisible(visible)
-            if key in self._labels:
-                self._labels[key].setVisible(visible)
-            if key in self._tips:
-                self._tips[key].setVisible(visible)
-
-        self._relayout_fields()
-
-    def _relayout_fields(self) -> None:
-        """Reposition all visible proxy widgets and resize panel height."""
-        pad = float(SPACING.md)
-        field_w = self._width - 2 * pad
-        y = pad
-
-        # Always-visible fields: label, caption, action_type, element_type
-        always_visible = ["label", "caption", "action_type", "element_type"]
-        for key in always_visible:
-            if key in self._labels:
-                self._labels[key].setPos(pad, y)
-            y += 18  # label height
-            if key in self._proxies:
-                self._proxies[key].setPos(pad, y)
-            y += 34  # field + gap
-
-        # Conditional fields
-        conditional_order = [
-            "text_to_type", "press_enter", "direction_amount",
-            "condition_timeout", "drag_target_hint", "vlm_prompt",
-            "question_text",
-        ]
-
-        for key in conditional_order:
-            proxy = self._proxies.get(key)
-            if proxy is None or not proxy.isVisible():
-                continue
-
-            # Label
-            label_proxy = self._labels.get(key)
-            if label_proxy is not None and label_proxy.isVisible():
-                label_proxy.setPos(pad, y)
-                y += 18
-
-            # Field
-            if key == "press_enter":
-                # Checkbox — no separate label above
-                proxy.setPos(pad, y)
-                y += 28
-            else:
-                proxy.setPos(pad, y)
-                y += 30
-
-            # Tip
-            tip_proxy = self._tips.get(key)
-            if tip_proxy is not None and tip_proxy.isVisible():
-                tip_proxy.setPos(pad, y)
-                y += 20
-
-            y += float(SPACING.sm)
-
-        # Buttons row
-        y += float(SPACING.sm)
-        btn_w = field_w / 2 - SPACING.sm
-        self._proxies["confirm_btn"].setPos(pad, y)
-        self._proxies["dismiss_btn"].setPos(pad + btn_w + 2 * SPACING.sm, y)
-        y += 40
-
-        self._target_height = y + pad
+        # Let layout recalculate
+        self.adjustSize()
 
     # ------------------------------------------------------------------
     # Show / dismiss
@@ -706,30 +859,17 @@ class TagDialogPanel(QGraphicsObject):
         """Show the tag dialog near the captured element.
 
         Args:
-            element_rect: Bounding rect of the captured element in scene coords.
+            element_rect: Bounding rect of the captured element in screen coords.
             vlm_data: Optional VLM-predicted field values dict.
             edit_mode: If True, pre-fill fields instantly without typewriter.
             screen_w: Screen width for positioning clamping.
             screen_h: Screen height for positioning clamping.
         """
-        self.setVisible(True)
-        x, y = self._compute_position(element_rect, screen_w, screen_h)
-        self.setPos(x, y)
-
         self._fading_out = False
 
         # Re-register tick callback (unregistered on dismiss fade-out completion).
-        # Unregister first to avoid duplicates if show_dialog is called while visible.
         self._clock.unregister(self._tick)
         self._clock.register(self._tick)
-
-        # Re-enable mouse acceptance and focus (dismiss() disables them)
-        self.setAcceptedMouseButtons(
-            Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton,
-        )
-        self.setFlag(
-            QGraphicsObject.GraphicsItemFlag.ItemIsFocusable, True,
-        )
 
         # Clear fields for fresh dialog
         for key in ("label", "caption"):
@@ -737,43 +877,59 @@ class TagDialogPanel(QGraphicsObject):
             if isinstance(w, QLineEdit):
                 w.clear()
 
+        # Clear conditional text fields too
+        for key in ("text_to_type", "direction_amount", "condition_timeout",
+                     "drag_target_hint", "vlm_prompt", "question_text"):
+            w = self._widgets.get(key)
+            if isinstance(w, QLineEdit):
+                w.clear()
+
         if vlm_data is None:
-            # Loading state — show spinner, hide all form fields
+            # Loading state — show spinner, hide all form rows
             self._loading = True
-            for proxy in self._proxies.values():
-                if proxy is not None:
-                    proxy.setVisible(False)
-            for proxy in self._labels.values():
-                if proxy is not None:
-                    proxy.setVisible(False)
-            for proxy in self._tips.values():
-                if proxy is not None:
-                    proxy.setVisible(False)
+            self._set_form_visible(False)
         else:
             # Data available — populate immediately
             self._loading = False
+            self._set_form_visible(True)
             self._populate_fields(vlm_data, edit_mode)
-
-            # Restore proxy visibility (hidden on dismiss)
-            for proxy in self._proxies.values():
-                if proxy is not None:
-                    proxy.setVisible(True)
-            for proxy in self._labels.values():
-                if proxy is not None:
-                    proxy.setVisible(True)
             # Re-apply conditional field visibility
-            action_combo = self._widgets.get("action_type")
-            if isinstance(action_combo, QComboBox):
-                self._on_action_type_changed(action_combo.currentIndex())
+            action_w = self._widgets.get("action_type")
+            if isinstance(action_w, _DropdownButton):
+                self._on_action_type_changed(action_w.currentIndex())
+
+        # Compute position and show
+        self.adjustSize()
+        x, y = self._compute_position(element_rect, screen_w, screen_h)
+        self.move(int(x), int(y))
 
         # Fade in
         self._opacity = 0.0
         self._target_opacity = 1.0
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
         logger.debug(
-            "TagDialogPanel shown at (%.0f, %.0f), edit_mode=%s, loading=%s",
-            x, y, edit_mode, self._loading,
+            "TagDialogPanel shown at (%d, %d), edit_mode=%s, loading=%s",
+            int(x), int(y), edit_mode, self._loading,
         )
+
+    def _set_form_visible(self, visible: bool) -> None:
+        """Show or hide all form field rows.
+
+        Args:
+            visible: Whether form fields should be visible.
+        """
+        for key in list(self._field_rows.keys()):
+            self._field_rows[key].setVisible(visible)
+        # Also toggle buttons
+        for key in ("confirm_btn", "dismiss_btn"):
+            w = self._widgets.get(key)
+            if w is not None:
+                p = w.parentWidget()
+                if p is not None:
+                    p.setVisible(visible)
 
     def _populate_fields(
         self,
@@ -782,75 +938,70 @@ class TagDialogPanel(QGraphicsObject):
     ) -> None:
         """Fill form fields from VLM data dict.
 
-        Extracted from show_dialog so it can be reused by populate_data.
-
         Args:
             vlm_data: VLM-predicted field values dict.
             edit_mode: If True, pre-fill instantly without typewriter.
         """
-        if vlm_data:
-            # Set combo fields instantly (dropdowns don't typewrite)
-            if "action_type" in vlm_data:
-                combo = self._widgets["action_type"]
-                if isinstance(combo, QComboBox):
-                    idx = combo.findData(vlm_data["action_type"])
-                    if idx >= 0:
-                        combo.setCurrentIndex(idx)
+        if not vlm_data:
+            return
 
-            if "element_type" in vlm_data:
-                combo = self._widgets["element_type"]
-                if isinstance(combo, QComboBox):
-                    self._select_element_type(combo, vlm_data["element_type"])
+        # Set dropdown fields instantly (dropdowns don't typewrite)
+        if "action_type" in vlm_data:
+            dropdown = self._widgets.get("action_type")
+            if isinstance(dropdown, _DropdownButton):
+                idx = dropdown.findData(vlm_data["action_type"])
+                if idx >= 0:
+                    dropdown.setCurrentIndex(idx)
 
-            # Set conditional field values if present
-            for key in (
-                "text_to_type", "direction_amount", "condition_timeout",
-                "drag_target_hint", "vlm_prompt", "question_text",
-            ):
-                if key in vlm_data and key in self._widgets:
-                    w = self._widgets[key]
-                    if isinstance(w, QLineEdit):
-                        w.setText(vlm_data[key])
+        if "element_type" in vlm_data:
+            dropdown = self._widgets.get("element_type")
+            if isinstance(dropdown, _DropdownButton):
+                self._select_element_type(dropdown, vlm_data["element_type"])
 
-            if "press_enter" in vlm_data and "press_enter" in self._widgets:
-                w = self._widgets["press_enter"]
-                if isinstance(w, QCheckBox):
-                    w.setChecked(bool(vlm_data["press_enter"]))
+        # Set conditional field values if present
+        for key in (
+            "text_to_type", "direction_amount", "condition_timeout",
+            "drag_target_hint", "vlm_prompt", "question_text",
+        ):
+            if key in vlm_data and key in self._widgets:
+                w = self._widgets[key]
+                if isinstance(w, QLineEdit):
+                    w.setText(vlm_data[key])
 
-            if edit_mode:
-                # Pre-fill label/caption instantly, no typewriter
-                label_w = self._widgets["label"]
-                caption_w = self._widgets["caption"]
-                if isinstance(label_w, QLineEdit):
-                    label_w.setText(vlm_data.get("label", ""))
-                if isinstance(caption_w, QLineEdit):
-                    caption_w.setText(vlm_data.get("caption", ""))
-            else:
-                # Start typewriter for label and caption
-                tw_fields: list[tuple[QLineEdit, str]] = []
-                label_w = self._widgets["label"]
-                caption_w = self._widgets["caption"]
-                if isinstance(label_w, QLineEdit):
-                    label_w.clear()
-                    tw_fields.append(
-                        (label_w, vlm_data.get("label", "")),
-                    )
-                    self._typewriter_field_map[label_w] = 0
-                if isinstance(caption_w, QLineEdit):
-                    caption_w.clear()
-                    tw_fields.append(
-                        (caption_w, vlm_data.get("caption", "")),
-                    )
-                    self._typewriter_field_map[caption_w] = 1
-                if tw_fields:
-                    self._typewriter.start(tw_fields)
+        if "press_enter" in vlm_data and "press_enter" in self._widgets:
+            w = self._widgets["press_enter"]
+            if isinstance(w, QCheckBox):
+                w.setChecked(bool(vlm_data["press_enter"]))
+
+        if edit_mode:
+            # Pre-fill label/caption instantly, no typewriter
+            label_w = self._widgets.get("label")
+            caption_w = self._widgets.get("caption")
+            if isinstance(label_w, QLineEdit):
+                label_w.setText(vlm_data.get("label", ""))
+            if isinstance(caption_w, QLineEdit):
+                caption_w.setText(vlm_data.get("caption", ""))
+        else:
+            # Start typewriter for label and caption
+            tw_fields: list[tuple[QLineEdit, str]] = []
+            label_w = self._widgets.get("label")
+            caption_w = self._widgets.get("caption")
+            if isinstance(label_w, QLineEdit):
+                label_w.clear()
+                tw_fields.append((label_w, vlm_data.get("label", "")))
+                self._typewriter_field_map[label_w] = 0
+            if isinstance(caption_w, QLineEdit):
+                caption_w.clear()
+                tw_fields.append((caption_w, vlm_data.get("caption", "")))
+                self._typewriter_field_map[caption_w] = 1
+            if tw_fields:
+                self._typewriter.start(tw_fields)
 
     def populate_data(self, vlm_data: dict) -> None:
         """Transition from loading state to populated fields.
 
         Called when VLM results arrive after the dialog was shown in
-        loading mode.  Hides the spinner, reveals form fields, and
-        fills them with vlm_data.
+        loading mode.
 
         Args:
             vlm_data: VLM analysis result dict (may be empty for manual entry).
@@ -860,18 +1011,16 @@ class TagDialogPanel(QGraphicsObject):
         # Populate field values
         self._populate_fields(vlm_data, edit_mode=False)
 
-        # Show all proxies and labels
-        for proxy in self._proxies.values():
-            if proxy is not None:
-                proxy.setVisible(True)
-        for proxy in self._labels.values():
-            if proxy is not None:
-                proxy.setVisible(True)
+        # Show all form rows
+        self._set_form_visible(True)
 
         # Re-apply conditional field visibility
-        action_combo = self._widgets.get("action_type")
-        if isinstance(action_combo, QComboBox):
-            self._on_action_type_changed(action_combo.currentIndex())
+        action_w = self._widgets.get("action_type")
+        if isinstance(action_w, _DropdownButton):
+            self._on_action_type_changed(action_w.currentIndex())
+
+        self.adjustSize()
+        self.update()
 
         logger.debug("TagDialogPanel populated with VLM data, loading=False")
 
@@ -892,26 +1041,28 @@ class TagDialogPanel(QGraphicsObject):
             screen_h: Screen height.
 
         Returns:
-            Tuple of (x, y) for panel position.
+            Tuple of (x, y) for widget position in screen coords.
         """
         breathing = float(SPACING.lg)  # 24px
         gap = float(SPACING.md)  # 16px
+        w = self.width()
+        h = self.height()
 
         # Prefer below-right
         x = element_rect.right() + gap
         y = element_rect.top()
 
         # Flip horizontal if overflows right
-        if x + self._width + breathing > screen_w:
-            x = element_rect.left() - gap - self._width
+        if x + w + breathing > screen_w:
+            x = element_rect.left() - gap - w
 
         # Flip vertical if overflows bottom
-        if y + self._height + breathing > screen_h:
-            y = screen_h - self._height - breathing
+        if y + h + breathing > screen_h:
+            y = screen_h - h - breathing
 
         # Clamp
-        x = max(breathing, min(x, screen_w - self._width - breathing))
-        y = max(breathing, min(y, screen_h - self._height - breathing))
+        x = max(breathing, min(x, screen_w - w - breathing))
+        y = max(breathing, min(y, screen_h - h - breathing))
 
         return x, y
 
@@ -920,21 +1071,7 @@ class TagDialogPanel(QGraphicsObject):
         self._target_opacity = 0.0
         self._fading_out = True
         self._loading = False
-        # Updated: immediately stop accepting mouse/keyboard during fade-out
-        # so the invisible panel doesn't swallow clicks (fixes dry-run double-click)
-        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsFocusable, False)
         self._typewriter.stop()
-        # Hide all proxy widgets immediately so they don't linger
-        for proxy in self._proxies.values():
-            if proxy is not None:
-                proxy.setVisible(False)
-        for proxy in self._labels.values():
-            if proxy is not None:
-                proxy.setVisible(False)
-        for proxy in self._tips.values():
-            if proxy is not None:
-                proxy.setVisible(False)
         logger.debug("TagDialogPanel dismissing")
 
     def confirm(self) -> None:
@@ -961,100 +1098,79 @@ class TagDialogPanel(QGraphicsObject):
         )
 
         action_w = self._widgets.get("action_type")
-        if isinstance(action_w, QComboBox):
-            logger.info(
-                "GET_FORM_DATA: action_type currentIndex=%d, currentText='%s', currentData='%s'",
-                action_w.currentIndex(), action_w.currentText(), action_w.currentData(),
-            )
         data["action_type"] = (
             action_w.currentData()
-            if isinstance(action_w, QComboBox)
+            if isinstance(action_w, _DropdownButton)
             else "click"
         )
 
         elem_w = self._widgets.get("element_type")
         data["element_type"] = (
             elem_w.currentData()
-            if isinstance(elem_w, QComboBox)
+            if isinstance(elem_w, _DropdownButton)
             else "unknown"
         )
 
-        # Conditional fields — include if proxy exists (not gated on
-        # visibility because dismiss() may have already hidden the proxy
-        # by the time the toolbar confirm action reads form data).
+        # Conditional fields — always include values (not gated on visibility
+        # because dismiss() may have already hidden things by the time toolbar
+        # confirm reads form data).
         for key in (
             "text_to_type", "direction_amount", "condition_timeout",
             "drag_target_hint", "vlm_prompt", "question_text",
         ):
-            proxy = self._proxies.get(key)
             w = self._widgets.get(key)
-            if proxy is not None and isinstance(w, QLineEdit):
+            if isinstance(w, QLineEdit):
                 data[key] = w.text()
 
-        press_proxy = self._proxies.get("press_enter")
         press_w = self._widgets.get("press_enter")
-        if press_proxy is not None and isinstance(press_w, QCheckBox):
+        if isinstance(press_w, QCheckBox):
             data["press_enter"] = press_w.isChecked()
 
         return data
 
     def get_avoidance_rect(self) -> QRectF:
-        """Return the scene bounding rect for shimmer avoidance.
+        """Return the screen bounding rect for shimmer avoidance.
 
         Returns:
-            QRectF in scene coordinates covering this panel.
+            QRectF in screen coordinates covering this panel.
         """
-        pos = self.pos()
-        return QRectF(pos.x(), pos.y(), self._width, self._height)
+        geo = self.geometry()
+        return QRectF(geo.x(), geo.y(), geo.width(), geo.height())
 
     # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
 
-    def boundingRect(self) -> QRectF:
-        """Return bounding rect with extra padding for card glow overflow.
-
-        Returns:
-            QRectF with 30px padding on all sides.
-        """
-        return QRectF(-80, -80, self._width + 160, self._height + 160)
-
-    def paint(
-        self,
-        painter: QPainter,
-        option: QStyleOptionGraphicsItem,
-        widget: QWidget | None = None,
-    ) -> None:
-        """Paint frosted glass background, highlight gradient, and card glow.
+    def paintEvent(self, event: Any) -> None:
+        """Paint card glow, highlight gradient, and loading spinner.
 
         Args:
-            painter: Active QPainter.
-            option: Style option (unused).
-            widget: Target widget (unused).
+            event: The paint event.
         """
         if self._opacity < 0.01:
             return
 
-        painter.save()
+        painter = QPainter(self)
         painter.setOpacity(self._opacity)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        rect = QRectF(0, 0, self._width, self._height)
+        rect = self.rect()
+        frect = QRectF(rect)
 
         # Card border glow — clip to OUTSIDE the card so nothing bleeds through
         card_path = QPainterPath()
-        card_path.addRoundedRect(rect, self._corner_radius, self._corner_radius)
+        card_path.addRoundedRect(frect, self._corner_radius, self._corner_radius)
 
         outer = QPainterPath()
         margin = 80.0  # glow reach
-        outer.addRect(rect.adjusted(-margin, -margin, margin, margin))
+        outer.addRect(frect.adjusted(-margin, -margin, margin, margin))
         glow_clip = outer - card_path
 
         painter.save()
         painter.setClipPath(glow_clip)
         paint_card_glow(
             painter,
-            rect,
+            frect,
             brightness=self._glow_brightness,
             phase=self._glow_phase,
         )
@@ -1067,7 +1183,7 @@ class TagDialogPanel(QGraphicsObject):
         painter.drawPath(card_path)
 
         # Inner highlight gradient at top
-        gradient = QLinearGradient(0, 0, 0, self._height * 0.3)
+        gradient = QLinearGradient(0, 0, 0, frect.height() * 0.3)
         gradient.setColorAt(0.0, HIGHLIGHT_TOP)
         gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setBrush(gradient)
@@ -1075,9 +1191,9 @@ class TagDialogPanel(QGraphicsObject):
 
         # Loading spinner
         if self._loading:
-            self._paint_spinner(painter, rect)
+            self._paint_spinner(painter, frect)
 
-        painter.restore()
+        painter.end()
 
     def _paint_spinner(self, painter: QPainter, rect: QRectF) -> None:
         """Paint a spinning arc loader in the center of the dialog.
@@ -1086,33 +1202,28 @@ class TagDialogPanel(QGraphicsObject):
             painter: Active QPainter (already has opacity set).
             rect: The panel content rect.
         """
-        # Spinner geometry
         radius = 40.0
         stroke = 3.0
         cx = rect.width() / 2.0
-        cy = rect.height() / 2.0 - 12.0  # offset up to leave room for text
+        cy = rect.height() / 2.0 - 12.0
 
         spinner_rect = QRectF(
             cx - radius, cy - radius,
             radius * 2.0, radius * 2.0,
         )
 
-        # Rotation angle: 1.5 revolutions per second driven by _glow_phase
-        # _glow_phase increments at dt * 0.8, so multiply to get desired speed
-        rotation_deg = self._glow_phase * 360.0 * 1.875  # ~1.5 rev/s at 0.8x rate
+        rotation_deg = self._glow_phase * 360.0 * 1.875
 
-        # Accent color: cyan/teal for visibility on dark frosted glass
         accent = QColor(0, 200, 220)
 
-        # Subtle glow behind spinner (larger, lower opacity)
+        # Subtle glow behind spinner
         glow_pen = QPen(QColor(0, 200, 220, 50))
         glow_pen.setWidthF(stroke + 4.0)
         glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(glow_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        # Qt drawArc uses 1/16th degree units
         start_angle_16 = int(rotation_deg * 16.0) % (360 * 16)
-        span_16 = 270 * 16  # 270-degree arc
+        span_16 = 270 * 16
         painter.drawArc(spinner_rect, start_angle_16, span_16)
 
         # Main spinner arc
@@ -1140,9 +1251,6 @@ class TagDialogPanel(QGraphicsObject):
     def set_glow_pulsing(self, enabled: bool) -> None:
         """Enable or disable glow pulsing as a loading indicator.
 
-        When enabled, the glow brightness oscillates between 0.5 and 2.0
-        to indicate background processing (detection, VLM analysis).
-
         Args:
             enabled: Whether to pulse the glow.
         """
@@ -1157,15 +1265,12 @@ class TagDialogPanel(QGraphicsObject):
         Args:
             dt: Elapsed seconds since last tick.
         """
-        # Continuous time for organic flicker (sine waves handle periodicity)
         self._glow_phase += dt * 0.8
 
         # Glow brightness: pulse mode or decay mode
-        if getattr(self, "_glow_pulsing", False):
-            import math
+        if self._glow_pulsing:
             self._glow_brightness = 1.25 + 0.75 * math.sin(self._glow_phase * 3.0)
         else:
-            # Glow brightness decay
             self._glow_brightness += (
                 (1.0 - self._glow_brightness) * min(1.0, dt * 8.0)
             )
@@ -1176,18 +1281,15 @@ class TagDialogPanel(QGraphicsObject):
             (self._target_opacity - self._opacity) * min(1.0, dt * speed)
         )
 
-        # Height interpolation
-        self._height += (
-            (self._target_height - self._height) * min(1.0, dt * 8.0)
-        )
-
         # Check if fade-out complete
         if self._fading_out and self._opacity < 0.01:
             self._opacity = 0.0
             self._fading_out = False
             self._clock.unregister(self._tick)
+            self.hide()
             self.dismissed.emit({})
 
+        self.setWindowOpacity(self._opacity)
         self.update()
 
     # ------------------------------------------------------------------
@@ -1220,17 +1322,14 @@ class TagDialogPanel(QGraphicsObject):
     # Keyboard handling
     # ------------------------------------------------------------------
 
-    def keyPressEvent(self, event: object) -> None:
+    def keyPressEvent(self, event: Any) -> None:
         """Handle Enter (confirm) and Escape (dismiss) shortcuts.
 
         Args:
             event: The key event.
         """
-        from PyQt6.QtCore import QEvent
-        from PyQt6.QtGui import QKeyEvent
-
         if isinstance(event, QKeyEvent):
-            if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.confirm()
                 event.accept()
                 return
