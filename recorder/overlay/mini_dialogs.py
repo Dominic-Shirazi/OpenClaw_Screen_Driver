@@ -45,6 +45,39 @@ from recorder.overlay.hud_common import (
 
 logger = logging.getLogger(__name__)
 
+
+class _TopComboBox(QComboBox):
+    """QComboBox whose popup renders above a fullscreen transparent overlay.
+
+    Standard QComboBox popups appear behind always-on-top overlay windows.
+    This subclass applies WindowStaysOnTopHint to the native popup so it
+    stays visible.
+    """
+
+    def showPopup(self) -> None:
+        """Open the dropdown popup above the overlay."""
+        super().showPopup()
+        popup = self.view()
+        if popup:
+            popup_window = popup.window()
+            if popup_window:
+                popup_window.setWindowFlag(
+                    Qt.WindowType.WindowStaysOnTopHint, True,
+                )
+                popup_window.raise_()
+                popup_window.show()  # re-show required after flag change
+
+    def hidePopup(self) -> None:
+        """Close the dropdown popup and remove the top-hint flag."""
+        popup = self.view()
+        if popup:
+            popup_window = popup.window()
+            if popup_window:
+                popup_window.setWindowFlag(
+                    Qt.WindowType.WindowStaysOnTopHint, False,
+                )
+        super().hidePopup()
+
 # Condition type display labels -> internal condition_type strings
 _CONDITION_MAP: dict[str, str] = {
     "Fixed Timer": "fixed_timer",
@@ -184,7 +217,7 @@ class WaitDialog(QGraphicsObject):
         # Condition type combo
         _make_proxy(_make_label("Condition type"), self, pad, y_cursor, field_w)
         y_cursor += 18
-        self._combo = QComboBox()
+        self._combo = _TopComboBox()
         self._combo.setStyleSheet(FIELD_STYLESHEET)
         for display_text in _CONDITION_MAP:
             self._combo.addItem(display_text)
@@ -579,13 +612,13 @@ class LoopDialog(QGraphicsObject):
 
         half_w = field_w / 2 - 4
 
-        self._from_combo = QComboBox()
+        self._from_combo = _TopComboBox()
         self._from_combo.setStyleSheet(FIELD_STYLESHEET)
         for lbl in step_labels:
             self._from_combo.addItem(lbl)
         _make_proxy(self._from_combo, self, pad, y_cursor, half_w)
 
-        self._to_combo = QComboBox()
+        self._to_combo = _TopComboBox()
         self._to_combo.setStyleSheet(FIELD_STYLESHEET)
         for lbl in step_labels:
             self._to_combo.addItem(lbl)
@@ -598,7 +631,7 @@ class LoopDialog(QGraphicsObject):
         _make_proxy(_make_label("Exit condition"), self, pad, y_cursor, field_w)
         y_cursor += 18
 
-        self._condition_combo = QComboBox()
+        self._condition_combo = _TopComboBox()
         self._condition_combo.setStyleSheet(FIELD_STYLESHEET)
         for display_text in _LOOP_CONDITION_MAP:
             self._condition_combo.addItem(display_text)

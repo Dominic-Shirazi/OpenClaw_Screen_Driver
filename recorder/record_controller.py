@@ -156,14 +156,22 @@ def _try_refine_bbox(
         if user_crop.size == 0 or refined_crop.size == 0:
             return (refined.x, refined.y, refined.w, refined.h)
 
-        dialog = RefineDialog(user_crop, refined_crop, refined)
+        # Convert screen coords to crop-relative coords for the dialog.
+        # refined_crop is sliced exactly at refined's screen rect, so the
+        # bounding box within the crop starts at (0, 0).
+        from core.types import Rect as _Rect
+        crop_relative_rect = _Rect(0, 0, refined.w, refined.h)
+        dialog = RefineDialog(user_crop, refined_crop, crop_relative_rect)
         dialog.exec()
         action, result_rect = dialog.get_result()
 
         if action == "accepted" and result_rect is not None:
+            # Convert crop-relative coords back to screen coords
+            screen_x = refined.x + result_rect.x
+            screen_y = refined.y + result_rect.y
             logger.info("User accepted refined bbox: (%d,%d) %dx%d",
-                        result_rect.x, result_rect.y, result_rect.w, result_rect.h)
-            return (result_rect.x, result_rect.y, result_rect.w, result_rect.h)
+                        screen_x, screen_y, result_rect.w, result_rect.h)
+            return (screen_x, screen_y, result_rect.w, result_rect.h)
         else:
             logger.info("User rejected refinement, keeping original")
             return None

@@ -436,7 +436,44 @@ def run_tui() -> None:
                 from routine.update_session import UpdateSession  # noqa: PLC0415
                 routine = Routine.load(routine_path)
                 session = UpdateSession(routine, routine_path)
-                console.print("[green]Update session complete.[/green]")
+
+                console.print(
+                    f"[bold]Updating '{routine.name}' "
+                    f"({len(routine.steps)} steps, v{routine.version})[/bold]"
+                )
+
+                while not session.is_complete:
+                    step = session.get_current_step()
+                    if step is None:
+                        break
+                    step_idx = session.current_step
+                    total = session.step_count
+                    action = step.get("action", "unknown")
+                    label = step.get("label", "")
+                    console.print(
+                        f"  Step {step_idx + 1}/{total}: "
+                        f"[cyan]{action}[/cyan] {label}"
+                    )
+                    choice = Prompt.ask(
+                        "  (k)eep / (d)elete / (s)kip-rest",
+                        default="k",
+                    )
+                    if choice.lower().startswith("d"):
+                        session.delete_current_step()
+                        console.print("  [yellow]Marked for deletion.[/yellow]")
+                    elif choice.lower().startswith("s"):
+                        while not session.is_complete:
+                            session.keep_and_advance()
+                    else:
+                        session.keep_and_advance()
+
+                saved_path = session.save_updated()
+                updated_routine = Routine.load(saved_path)
+                console.print(
+                    f"[green]Update complete: "
+                    f"{len(updated_routine.steps)} steps, "
+                    f"v{updated_routine.version}[/green]"
+                )
             except ImportError:
                 logger.warning("Update session not available")
             except Exception as exc:  # noqa: BLE001

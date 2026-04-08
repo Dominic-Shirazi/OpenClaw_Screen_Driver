@@ -13,6 +13,7 @@ speed and cost (cheapest first):
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +28,39 @@ if TYPE_CHECKING:
     from mapper.graph import OCSDGraph
 
 logger = logging.getLogger(__name__)
+
+
+def _label_matches(target: str, candidate: str) -> bool:
+    """Checks if target label matches candidate using word-boundary matching.
+
+    Prevents false positives like "OK" matching "Book" or "Cookie".
+    Uses case-insensitive word-boundary regex so "OK" only matches
+    the standalone word "OK" in the candidate string, and vice versa.
+
+    Args:
+        target: The label we are looking for (e.g. "OK").
+        candidate: The label returned by VLM (e.g. "OK button").
+
+    Returns:
+        True if either label appears as a whole word in the other.
+    """
+    if not target or not candidate:
+        return False
+    t = target.strip()
+    c = candidate.strip()
+    if not t or not c:
+        return False
+    # Exact match (case-insensitive) — fast path
+    if t == c:
+        return True
+    # Word-boundary match: target as whole word in candidate, or vice versa
+    t_pattern = re.compile(r"\b" + re.escape(t) + r"\b", re.IGNORECASE)
+    if t_pattern.search(c):
+        return True
+    c_pattern = re.compile(r"\b" + re.escape(c) + r"\b", re.IGNORECASE)
+    if c_pattern.search(t):
+        return True
+    return False
 
 
 def _resolve_position_hint(
@@ -131,24 +165,47 @@ def locate_element(
 
             crop = screenshot_region(rx, ry, rw, rh)
             if crop.size > 0:
-                rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                current_emb = generate_embedding(rgb_crop)
+                # Sliding window: scan sub-regions within the crop to
+                # find the actual element position, not just confirm the
+                # hint.  Window sizes approximate typical UI element
+                # dimensions.
+                best_score = -1.0
+                best_cx, best_cy = hint_x, hint_y
+                crop_h, crop_w = crop.shape[:2]
+                window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
+                step = 40
 
-                score = float(np.dot(saved_emb, current_emb.T).item())
+                for win_w, win_h in window_sizes:
+                    if win_w > crop_w or win_h > crop_h:
+                        continue
+                    for wy in range(0, crop_h - win_h + 1, step):
+                        for wx in range(0, crop_w - win_w + 1, step):
+                            tile = crop[wy:wy + win_h, wx:wx + win_w]
+                            rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+                            tile_emb = generate_embedding(rgb_tile)
+                            score = float(
+                                np.dot(saved_emb, tile_emb.T).item(),
+                            )
+                            if score > best_score:
+                                best_score = score
+                                # Convert tile center back to screen coords
+                                best_cx = rx + wx + win_w // 2
+                                best_cy = ry + wy + win_h // 2
 
-                if score > 0.75:
+                if best_score > 0.75:
                     logger.info(
                         "Located [%s] via CLIP at (%d, %d) score=%.3f",
-                        node_id[:8], hint_x, hint_y, score,
+                        node_id[:8], best_cx, best_cy, best_score,
                     )
                     return LocateResult(
-                        point=Point(hint_x, hint_y),
-                        confidence=min(score, 0.85),
+                        point=Point(best_cx, best_cy),
+                        confidence=min(best_score, 0.85),
                         method="clip",
                     )
                 else:
                     logger.debug(
-                        "CLIP score %.3f too low for [%s]", score, node_id[:8],
+                        "CLIP best score %.3f too low for [%s]",
+                        best_score, node_id[:8],
                     )
     except ImportError:
         logger.debug("CLIP/FAISS not available, skipping Stage 2")
@@ -191,7 +248,7 @@ def locate_element(
         if target_label and candidates:
             for c in candidates:
                 c_label = c.get("label_guess", "").lower()
-                if target_label in c_label or c_label in target_label:
+                if _label_matches(target_label, c_label):
                     rect = c.get("rect", {})
                     cx = rect.get("x", 0) + rect.get("w", 0) // 2
                     cy = rect.get("y", 0) + rect.get("h", 0) // 2
@@ -340,24 +397,44 @@ def locate_element_from_step(
 
                 crop = screenshot_region(rx, ry, rw, rh)
                 if crop.size > 0:
-                    rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                    current_emb = generate_embedding(rgb_crop)
+                    # Sliding window: scan sub-regions to find actual
+                    # element position rather than echoing the hint.
+                    best_score = -1.0
+                    best_cx, best_cy = hint_x, hint_y
+                    crop_h, crop_w = crop.shape[:2]
+                    window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
+                    step = 40
 
-                    score = float(np.dot(saved_emb, current_emb.T).item())
+                    for win_w, win_h in window_sizes:
+                        if win_w > crop_w or win_h > crop_h:
+                            continue
+                        for wy in range(0, crop_h - win_h + 1, step):
+                            for wx in range(0, crop_w - win_w + 1, step):
+                                tile = crop[wy:wy + win_h, wx:wx + win_w]
+                                rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+                                tile_emb = generate_embedding(rgb_tile)
+                                score = float(
+                                    np.dot(saved_emb, tile_emb.T).item(),
+                                )
+                                if score > best_score:
+                                    best_score = score
+                                    best_cx = rx + wx + win_w // 2
+                                    best_cy = ry + wy + win_h // 2
 
-                    if score > 0.75:
+                    if best_score > 0.75:
                         logger.info(
                             "Located [%s] via CLIP at (%d, %d) score=%.3f",
-                            node_id[:8], hint_x, hint_y, score,
+                            node_id[:8], best_cx, best_cy, best_score,
                         )
                         return LocateResult(
-                            point=Point(hint_x, hint_y),
-                            confidence=min(score, 0.85),
+                            point=Point(best_cx, best_cy),
+                            confidence=min(best_score, 0.85),
                             method="clip",
                         )
                     else:
                         logger.debug(
-                            "CLIP score %.3f too low for [%s]", score, node_id[:8],
+                            "CLIP best score %.3f too low for [%s]",
+                            best_score, node_id[:8],
                         )
         except ImportError:
             logger.debug("CLIP/FAISS not available, skipping Stage 2")
@@ -401,7 +478,7 @@ def locate_element_from_step(
             if target_label and candidates:
                 for c in candidates:
                     c_label = c.get("label_guess", "").lower()
-                    if target_label in c_label or c_label in target_label:
+                    if _label_matches(target_label, c_label):
                         rect = c.get("rect", {})
                         cx = rect.get("x", 0) + rect.get("w", 0) // 2
                         cy = rect.get("y", 0) + rect.get("h", 0) // 2

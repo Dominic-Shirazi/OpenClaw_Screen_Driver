@@ -15,16 +15,27 @@ from core.types import Point, Rect
 logger = logging.getLogger(__name__)
 
 
-def screenshot_full() -> np.ndarray:
-    """Takes a full screen screenshot of the primary monitor."""
+def screenshot_full(monitor_index: int = 0) -> np.ndarray:
+    """Takes a full screen screenshot.
+
+    Args:
+        monitor_index: mss monitor index. 0 = full virtual screen (all monitors),
+            1 = primary monitor, 2+ = secondary monitors. Defaults to 0.
+    """
     with mss.mss() as sct:
-        # monitor 1 is usually the primary monitor in mss
-        monitor = sct.monitors[1]
+        if monitor_index < 0 or monitor_index >= len(sct.monitors):
+            logger.warning(
+                "Invalid monitor_index %d (available: 0-%d), falling back to 0",
+                monitor_index,
+                len(sct.monitors) - 1,
+            )
+            monitor_index = 0
+        monitor = sct.monitors[monitor_index]
         sct_img = sct.grab(monitor)
-        
+
         # Convert to numpy array
         img = np.array(sct_img)
-        
+
         # Convert from BGRA (mss default) to BGR (OpenCV convention)
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 

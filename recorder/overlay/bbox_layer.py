@@ -244,9 +244,14 @@ class BboxLayer(QGraphicsItemGroup):
 
         half = _HANDLE_SIZE / 2
 
-        # Read corner positions from TL and BR handles
-        tl_rect = self._handles[0].rect()
-        br_rect = self._handles[4].rect()
+        # Read corner positions from TL and BR handles.
+        # handle.rect() is the LOCAL bounding rect (never changes on drag).
+        # handle.pos() is the offset applied by Qt when the item is dragged.
+        # The actual scene-level rect is rect translated by pos.
+        tl = self._handles[0]
+        br = self._handles[4]
+        tl_rect = tl.rect().translated(tl.pos())
+        br_rect = br.rect().translated(br.pos())
 
         x1 = tl_rect.x() + half
         y1 = tl_rect.y() + half
@@ -298,6 +303,8 @@ class BboxLayer(QGraphicsItemGroup):
         """Reposition all handles to match current _x, _y, _w, _h."""
         positions = self._handle_positions(self._x, self._y, self._w, self._h)
         for handle, (hx, hy) in zip(self._handles, positions):
+            # Reset any drag offset so rect coordinates are authoritative
+            handle.setPos(0, 0)
             handle.setRect(QRectF(hx, hy, _HANDLE_SIZE, _HANDLE_SIZE))
         if self._label is not None:
             self._label.setPos(self._x, max(0, self._y - 16))

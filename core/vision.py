@@ -287,8 +287,9 @@ def _sanitize_element_type(raw: str) -> str:
         "text_input": "textbox",
         "btn": "button",
         "submit": "button",
-        "link": "button_nav",
-        "anchor": "button_nav",
+        "anchor": "link",
+        "hyperlink": "link",
+        "href": "link",
         "navigation": "button_nav",
         "nav_button": "button_nav",
         "checkbox": "toggle",
@@ -307,8 +308,9 @@ def _sanitize_element_type(raw: str) -> str:
         "draggable": "drag_source",
         "drop_zone": "drag_target",
         "droppable": "drag_target",
+        "glyph": "icon",
+        "pictogram": "icon",
         "img": "image",
-        "icon": "image",
         "picture": "image",
         "dialog": "modal",
         "popup": "modal",
@@ -351,10 +353,12 @@ Element types and when to use each:
 - tab: a tab in a tab bar that switches visible content
 - dropdown: a select menu, combobox, or expandable menu
 - scrollbar: a scrollable area or scroll handle
+- link: a hyperlink (text or image) that navigates when clicked
+- icon: a clickable icon or glyph (toolbar icon, action icon, small pictogram)
 - read_here: static display text or label the user reads but doesn't interact with
 - drag_source: an element the user drags from (file icon, card, list item to reorder)
 - drag_target: a drop zone where dragged items land
-- image: a picture, icon, or graphic
+- image: a non-interactive picture or graphic (photos, illustrations, decorative images)
 - modal: a dialog box, popup, or overlay window
 - notification: a toast, alert, banner, or snackbar message
 - unknown: cannot determine the element type
@@ -494,7 +498,7 @@ Respond with ONLY a JSON array (no other text). Each element should be:
 ]
 
 Element types to use: textbox, button, button_nav, toggle, tab, dropdown,
-scrollbar, read_here, drag_source, drag_target, image, modal, notification, unknown
+scrollbar, link, icon, read_here, drag_source, drag_target, image, modal, notification, unknown
 
 Rules:
 - Include ALL interactive elements: buttons, links, inputs, toggles, tabs, dropdowns

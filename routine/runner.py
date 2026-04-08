@@ -285,7 +285,17 @@ def _failure_cascade(
         except ElementNotFoundError:
             time.sleep(1.0)
 
-    # Stage 2: 25% region scan
+    # Stage 2: 35% region scan
+    # Captures a cropped region around the recorded position and runs
+    # locate against that sub-image so matching is spatially focused.
+    # If locate_element_from_step gains a `region` parameter in the future,
+    # pass (rx, ry, rw, rh) directly.  For now we pass through to a
+    # full-screen locate with position fallback disabled -- the region
+    # screenshot is logged for post-mortem but the locate itself still
+    # operates on the full screen.  This is intentionally a passthrough:
+    # Stage 1 retries at-position and Stage 3 does the unrestricted
+    # full-screen scan, so Stage 2 adds value only by skipping the
+    # position fallback (preventing blind clicks at stale coordinates).
     _emit(callback, RunEvent.STEP_RETRY, {
         "stage": 2, "description": "region_scan", "step_index": step_index,
     })
@@ -294,12 +304,21 @@ def _failure_cascade(
         pos_pct = anchors.get("position_pct", {})
         sw, sh = pyautogui.size()
         rx, ry, rw, rh = _compute_search_region(pos_pct, sw, sh)
+        # Capture region for debug logging / post-mortem
         region_img = screenshot_region(rx, ry, rw, rh)
         if callback:
             callback(RunEvent.SCREENSHOT_TAKEN, {
                 "purpose": "region_scan", "step_index": step_index,
             })
-        # Try locate on region -- skip position fallback to avoid blind clicks
+        # Save region screenshot for post-mortem debugging
+        try:
+            annotated = annotate_screenshot(region_img, [], f"Stage 2 region: {label}")
+            save_annotated_screenshot(
+                run_dir, annotated, f"step{step_index}_region_scan",
+            )
+        except Exception:
+            logger.debug("Could not save region scan screenshot", exc_info=True)
+        # Try locate without position fallback to avoid blind clicks
         result = locate_element_from_step(
             step, routine_dir, skip_position_fallback=True,
         )
@@ -602,11 +621,20 @@ def _handle_loop_step(
                         body_step, routine, routine_dir, run_dir, callback, step_index,
                     )
                     if lr is None:
+                        body_label = body_step.get("label", "?")
                         logger.warning(
-                            "Loop body step '%s' failed to locate, skipping",
-                            body_step.get("label", "?"),
+                            "Loop body step '%s' failed to locate on iteration %d",
+                            body_label, iteration,
                         )
-                        continue
+                        _emit(callback, RunEvent.STEP_FAILED, {
+                            "step_index": step_index,
+                            "iteration": iteration,
+                            "body_label": body_label,
+                            "reason": f"Loop body step '{body_label}' not found after cascade",
+                        })
+                        # Don't count this iteration as successful
+                        iteration -= 1
+                        break
 
             _dispatch_action(body_step, lr, dry_run=dry_run, prompt_timeout_s=prompt_timeout_s)
 

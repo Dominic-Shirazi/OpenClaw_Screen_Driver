@@ -724,6 +724,14 @@ class TagDialogPanel(QGraphicsObject):
 
         self._fading_out = False
 
+        # Re-enable mouse acceptance and focus (dismiss() disables them)
+        self.setAcceptedMouseButtons(
+            Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton,
+        )
+        self.setFlag(
+            QGraphicsObject.GraphicsItemFlag.ItemIsFocusable, True,
+        )
+
         if vlm_data:
             # Set combo fields instantly (dropdowns don't typewrite)
             if "action_type" in vlm_data:

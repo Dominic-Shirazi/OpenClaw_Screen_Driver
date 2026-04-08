@@ -294,6 +294,55 @@ def update(
     try:
         routine = Routine.load(path)
         session = UpdateSession(routine, path)
+
+        console = Console()
+        console.print(Panel(
+            f"Routine: {routine.name}\n"
+            f"Steps: {len(routine.steps)}\n"
+            f"Version: {routine.version}",
+            title="Update Session",
+        ))
+
+        while not session.is_complete:
+            step = session.get_current_step()
+            if step is None:
+                break
+            step_idx = session.current_step
+            total = session.step_count
+            action = step.get("action", "unknown")
+            label = step.get("label", "")
+            node_id = step.get("node_id", "")
+            console.print(Panel(
+                f"Action: {action}\n"
+                f"Label: {label}\n"
+                f"Node ID: {node_id}",
+                title=f"Step {step_idx + 1}/{total}",
+            ))
+            choice = typer.prompt(
+                "Action: (k)eep / (d)elete / (s)kip-rest",
+                default="k",
+            )
+            if choice.lower().startswith("d"):
+                session.delete_current_step()
+                console.print("[yellow]Step marked for deletion.[/yellow]")
+            elif choice.lower().startswith("s"):
+                # Keep all remaining steps
+                while not session.is_complete:
+                    session.keep_and_advance()
+            else:
+                session.keep_and_advance()
+
+        saved_path = session.save_updated()
+        updated_routine = Routine.load(saved_path)
+        console.print(Panel(
+            f"Routine: {updated_routine.name}\n"
+            f"Steps: {len(updated_routine.steps)}\n"
+            f"Version: {updated_routine.version}",
+            title="Update Complete",
+        ))
+    except Exception as exc:
+        show_error("Update Failed", str(exc))
+        raise typer.Exit(code=1) from exc
     finally:
         try:
             from cli._minimize import restore_terminal
@@ -301,14 +350,6 @@ def update(
             restore_terminal()
         except ImportError:
             pass
-
-    console = Console()
-    console.print(Panel(
-        f"Routine: {routine.name}\n"
-        f"Steps: {len(routine.steps)}\n"
-        f"Version: {routine.version}",
-        title="Update Session Started",
-    ))
 
 
 @app.command()
