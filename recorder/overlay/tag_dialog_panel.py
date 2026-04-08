@@ -719,6 +719,7 @@ class TagDialogPanel(QGraphicsObject):
             screen_w: Screen width for positioning clamping.
             screen_h: Screen height for positioning clamping.
         """
+        self.setVisible(True)
         x, y = self._compute_position(element_rect, screen_w, screen_h)
         self.setPos(x, y)
 
