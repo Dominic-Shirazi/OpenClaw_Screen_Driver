@@ -120,6 +120,7 @@ class RecordSession:
         self._current_step: dict | None = None
         self._current_bbox: tuple[int, int, int, int] | None = None
         self._original_drag_rect: tuple[int, int, int, int] | None = None
+        self._florence_caption: str = ""
         self._screenshot: np.ndarray | None = None
         self._is_drag_capture: bool = False
         self._is_look_here: bool = False
@@ -229,6 +230,7 @@ class RecordSession:
         self._click_x = x
         self._click_y = y
         self._is_drag_capture = w > 0 and h > 0
+        self._florence_caption = ""  # Reset for new capture
 
         if self._is_drag_capture:
             self._original_drag_rect = (x, y, w, h)
@@ -365,6 +367,7 @@ class RecordSession:
         """
         self._current_step = None
         self._current_bbox = None
+        self._florence_caption = ""
         self._controller.dismiss_tag_dialog()
         self._clear_scan()  # Updated: remove scan highlight — dismissed tag means step discarded — 2026-04-03
         self._set_phase(RecordPhase.AWAITING_CLICK)
@@ -1062,6 +1065,14 @@ class RecordSession:
 
         bbox = result.get("bbox")
 
+        # Persist Florence-2 caption from detection so it survives the
+        # detection→VLM handoff (VLM result dict won't contain it).
+        self._florence_caption = result.get("florence_caption", "")
+        logger.debug(
+            "Detection→session handoff: florence_caption=%r",
+            self._florence_caption,
+        )
+
         if bbox is not None:
             bx, by, bw, bh = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
             self._current_bbox = (bx, by, bw, bh)
@@ -1232,10 +1243,18 @@ class RecordSession:
 
         self._set_phase(RecordPhase.TAG_DIALOG)
 
+        # Use the Florence-2 caption persisted from the detection phase,
+        # since the VLM result (from Ollama) does not contain it.
+        florence_cap = self._florence_caption or ""
+        logger.debug(
+            "VLM→tag handoff: florence_caption=%r (from detection phase)",
+            florence_cap,
+        )
+
         vlm_data = {
             "element_type": result.get("element_type", "unknown"),
             "label": result.get("label_guess", ""),
-            "caption": result.get("florence_caption", ""),
+            "caption": florence_cap,
             "confidence": result.get("confidence", 0.0),
             "ocr_text": result.get("ocr_text"),
         }

@@ -568,12 +568,18 @@ class OverlayView(QGraphicsView):
             )
 
     def remove_scan(self) -> None:
-        """Remove the scan layer from the scene and unregister its tick."""
+        """Remove the scan layer and rubber band from the scene.
+
+        Clears both the ScanLayer graphics item and any lingering
+        rubber-band selection rectangle, since both belong to the
+        same capture lifecycle.
+        """
         if self._scan_layer is not None:
             self._clock.unregister(self._scan_layer.tick)
             self.scene().removeItem(self._scan_layer)
             self._scan_layer = None
         self._active_bbox = None
+        self.clear_rubber_band()
 
     # ------------------------------------------------------------------
     # Donut cloud lifecycle
