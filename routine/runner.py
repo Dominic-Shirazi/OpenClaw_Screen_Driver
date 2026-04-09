@@ -277,7 +277,9 @@ def _failure_cascade(
     })
     for attempt in range(2):
         try:
+            retry_t0 = time.monotonic()
             result = locate_element_from_step(step, routine_dir)
+            logger.info("Cascade Stage 1 retry %d locate took %.1fs", attempt + 1, time.monotonic() - retry_t0)
             if result is not None:
                 logger.info(
                     "Cascade Stage 1: found '%s' on retry %d", label, attempt + 1
@@ -320,9 +322,11 @@ def _failure_cascade(
         except Exception:
             logger.debug("Could not save region scan screenshot", exc_info=True)
         # Try locate without position fallback to avoid blind clicks
+        region_t0 = time.monotonic()
         result = locate_element_from_step(
             step, routine_dir, skip_position_fallback=True,
         )
+        logger.info("Cascade Stage 2 locate took %.1fs", time.monotonic() - region_t0)
         if result is not None:
             logger.info("Cascade Stage 2: found '%s' via region scan", label)
             return result
@@ -334,7 +338,9 @@ def _failure_cascade(
         "stage": 3, "description": "full_screen", "step_index": step_index,
     })
     try:
+        fullscreen_t0 = time.monotonic()
         result = locate_element_from_step(step, routine_dir)
+        logger.info("Cascade Stage 3 locate took %.1fs", time.monotonic() - fullscreen_t0)
         if result is not None:
             logger.info("Cascade Stage 3: found '%s' via full-screen", label)
             return result
@@ -634,7 +640,12 @@ def _handle_loop_step(
                 lr = LocateResult(point=Point(0, 0), confidence=1.0, method="none")
             else:
                 try:
+                    loop_locate_t0 = time.monotonic()
                     lr = locate_element_from_step(body_step, routine_dir)
+                    logger.info(
+                        "Loop body locate took %.1fs — found via %s",
+                        time.monotonic() - loop_locate_t0, lr.method,
+                    )
                 except ElementNotFoundError:
                     lr = _failure_cascade(
                         body_step, routine, routine_dir, run_dir, callback, step_index,
@@ -824,6 +835,7 @@ def run_routine(
 
     try:
         for i, step in enumerate(routine.steps):
+            step_t0 = time.monotonic()
             # Check abort flag between steps
             if abort_event is not None and abort_event.is_set():
                 logger.info("Abort requested, pausing run at step %d", i)
@@ -865,7 +877,12 @@ def run_routine(
                 )
             else:
                 try:
+                    locate_t0 = time.monotonic()
                     locate_result = locate_element_from_step(step, routine_dir)
+                    logger.info(
+                        "Step %d locate took %.1fs — found via %s",
+                        i, time.monotonic() - locate_t0, locate_result.method,
+                    )
                     _emit(callback, RunEvent.ELEMENT_LOCATED, {
                         "step_index": i,
                         "point": {"x": locate_result.point.x, "y": locate_result.point.y},
@@ -942,6 +959,12 @@ def run_routine(
                 except Exception as exc:
                     logger.debug("Validation error (non-fatal): %s", exc)
 
+            step_elapsed = time.monotonic() - step_t0
+            logger.info(
+                "Step %d (%s) completed in %.1fs — located via %s",
+                i, action, step_elapsed,
+                locate_result.method if locate_result else "n/a",
+            )
             _emit(callback, RunEvent.STEP_COMPLETE, {
                 "step_index": i,
                 "label": label,

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,11 @@ logger = logging.getLogger(__name__)
 # Default max ratio between the "squashedness" of two bounding boxes.
 # 3.0 means a 10:1 element won't match a 3:1, but 3:1 will match 2:1.
 _DEFAULT_MAX_RATIO_DIFF = 3.0
+
+# Maximum wall-clock seconds for the entire locate cascade.  If the
+# deadline is exceeded the function returns a position fallback immediately
+# rather than burning time on expensive stages (CLIP sliding window, VLM).
+_CASCADE_TIMEOUT_S = 15.0
 
 
 def _aspect_ratio_compatible(
@@ -237,7 +243,7 @@ def locate_element(
                 best_cx, best_cy = hint_x, hint_y
                 crop_h, crop_w = crop.shape[:2]
                 window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
-                stride = 40
+                stride = 80  # coarse pass; halves tile count vs stride=40
 
                 for win_w, win_h in window_sizes:
                     if win_w > crop_w or win_h > crop_h:
@@ -571,7 +577,7 @@ def _try_context_scoped_locate(
                     best_score: float = -1.0
                     best_cx, best_cy = crop_w // 2, crop_h // 2
                     window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
-                    stride = 40
+                    stride = 80  # coarse pass; halves tile count vs stride=40
 
                     for win_w, win_h in window_sizes:
                         if win_w > crop_w or win_h > crop_h:
@@ -638,7 +644,7 @@ def locate_element_from_step(
     step: dict[str, Any],
     routine_dir: Path,
     *,
-    skip_vlm: bool = False,
+    skip_vlm: bool = True,
     skip_position_fallback: bool = False,
 ) -> LocateResult:
     """Locates an element on screen using a v1 step dict instead of a graph node.
@@ -652,8 +658,9 @@ def locate_element_from_step(
             ``embedding_path``, ``label``, ``element_type``, ``node_id``.
         routine_dir: Base directory for resolving relative snippet and
             embedding file paths.
-        skip_vlm: If True, skip Stage 4 (VLM). Useful for fast
-            condition polling where VLM latency is unacceptable.
+        skip_vlm: If True (default), skip Stage 4 (VLM). VLM calls
+            take 10+ seconds; position fallback is faster during replay.
+            Pass False to enable VLM for high-reliability scenarios.
         skip_position_fallback: If True, skip Stage 5 (position).
             Used for condition checking where blind-clicking is
             never acceptable.
@@ -664,9 +671,12 @@ def locate_element_from_step(
     Raises:
         ElementNotFoundError: If all enabled cascade stages fail.
     """
+    cascade_t0 = time.monotonic()
+    deadline = cascade_t0 + _CASCADE_TIMEOUT_S
     anchors = step.get("anchors", {})
     position_pct = anchors.get("position_pct", {})
     node_id = step.get("node_id", "unknown")
+    logger.info("Locate cascade START for [%s]", node_id[:8])
 
     # Resolve position hint from percentage-based anchors
     sw, sh = pyautogui.size()
@@ -685,20 +695,54 @@ def locate_element_from_step(
         ref_w = int(step_w_pct * sw)
         ref_h = int(step_h_pct * sh)
 
+    # --- Deadline gate (checked before every stage) ---
+    def _timed_out() -> bool:
+        return time.monotonic() > deadline
+
+    def _timeout_fallback(stage_name: str) -> LocateResult | None:
+        """Return position fallback if deadline exceeded, else None."""
+        if not _timed_out():
+            return None
+        elapsed = time.monotonic() - cascade_t0
+        if hint_x is not None and hint_y is not None:
+            logger.warning(
+                "Locate cascade timed out before %s (%.1fs), using position fallback at (%d, %d)",
+                stage_name, elapsed, hint_x, hint_y,
+            )
+            return LocateResult(point=Point(hint_x, hint_y), confidence=0.2, method="timeout_fallback")
+        logger.warning(
+            "Locate cascade timed out before %s (%.1fs) with no position hint",
+            stage_name, elapsed,
+        )
+        return None
+
     # ------------------------------------------------------------------
     # Stage 0: Context-aware scoping — narrow search to context zone
     # ------------------------------------------------------------------
+    t0 = time.monotonic()
     context_result = _try_context_scoped_locate(
         step, routine_dir, sw, sh,
         ref_w=ref_w, ref_h=ref_h,
         skip_vlm=skip_vlm,
     )
+    elapsed = time.monotonic() - t0
     if context_result is not None:
+        logger.info(
+            "Stage 0 (context-scoped): %.1fs — hit via %s",
+            elapsed, context_result.method,
+        )
+        logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
         return context_result
+    logger.info("Stage 0 (context-scoped): %.1fs — miss", elapsed)
 
     # ------------------------------------------------------------------
     # Stage 1: OmniParser detect + CLIP match
     # ------------------------------------------------------------------
+    fb = _timeout_fallback("Stage 1")
+    if fb is not None:
+        return fb
+    t1 = time.monotonic()
+    stage1_hit = False
     snippet_rel = step.get("snippet_path")
     if snippet_rel:
         try:
@@ -738,6 +782,9 @@ def locate_element_from_step(
                             node_id[:8], result.point.x, result.point.y,
                             result.confidence,
                         )
+                        stage1_hit = True
+                        logger.info("Stage 1 (OmniParser): %.1fs — hit", time.monotonic() - t1)
+                        logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
                         return result
                 logger.debug("OmniParser found no match for [%s]", node_id[:8])
             else:
@@ -746,10 +793,17 @@ def locate_element_from_step(
             logger.debug("Detection module not available, skipping Stage 1")
         except Exception as e:
             logger.debug("OmniParser locate error: %s", e)
+    if not stage1_hit:
+        logger.info("Stage 1 (OmniParser): %.1fs — miss", time.monotonic() - t1)
 
     # ------------------------------------------------------------------
     # Stage 2: CLIP embedding
     # ------------------------------------------------------------------
+    fb = _timeout_fallback("Stage 2")
+    if fb is not None:
+        return fb
+    t2 = time.monotonic()
+    stage2_hit = False
     embedding_rel = step.get("embedding_path")
     if embedding_rel and hint_x is not None and hint_y is not None:
         try:
@@ -777,7 +831,7 @@ def locate_element_from_step(
                     best_cx, best_cy = hint_x, hint_y
                     crop_h, crop_w = crop.shape[:2]
                     window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
-                    stride = 40
+                    stride = 80  # coarse pass; halves tile count vs stride=40
 
                     for win_w, win_h in window_sizes:
                         if win_w > crop_w or win_h > crop_h:
@@ -810,6 +864,9 @@ def locate_element_from_step(
                             "Located [%s] via CLIP at (%d, %d) score=%.3f",
                             node_id[:8], best_cx, best_cy, best_score,
                         )
+                        stage2_hit = True
+                        logger.info("Stage 2 (CLIP): %.1fs — hit", time.monotonic() - t2)
+                        logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
                         return LocateResult(
                             point=Point(best_cx, best_cy),
                             confidence=min(best_score, 0.85),
@@ -824,10 +881,17 @@ def locate_element_from_step(
             logger.debug("CLIP/FAISS not available, skipping Stage 2")
         except Exception as e:
             logger.debug("CLIP search error: %s", e)
+    if not stage2_hit:
+        logger.info("Stage 2 (CLIP): %.1fs — miss", time.monotonic() - t2)
 
     # ------------------------------------------------------------------
     # Stage 3: OCR text match — scoped to region around expected position
     # ------------------------------------------------------------------
+    fb = _timeout_fallback("Stage 3")
+    if fb is not None:
+        return fb
+    t3 = time.monotonic()
+    stage3_hit = False
     ocr_text = anchors.get("ocr_text")
     if ocr_text:
         logger.debug("Locate [%s] via OCR: %r", node_id[:8], ocr_text)
@@ -845,11 +909,21 @@ def locate_element_from_step(
                 result.point.y,
                 result.confidence,
             )
+            stage3_hit = True
+            logger.info("Stage 3 (OCR): %.1fs — hit", time.monotonic() - t3)
+            logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
             return result
+    if not stage3_hit:
+        logger.info("Stage 3 (OCR): %.1fs — miss", time.monotonic() - t3)
 
     # ------------------------------------------------------------------
     # Stage 4: VLM full-screen analysis (expensive, high reliability)
     # ------------------------------------------------------------------
+    fb = _timeout_fallback("Stage 4")
+    if fb is not None:
+        return fb
+    t4 = time.monotonic()
+    stage4_hit = False
     if not skip_vlm:
         try:
             from core.vision import first_pass_map_array
@@ -871,6 +945,9 @@ def locate_element_from_step(
                             "Located [%s] via VLM at (%d, %d) conf=%.2f",
                             node_id[:8], cx, cy, conf,
                         )
+                        stage4_hit = True
+                        logger.info("Stage 4 (VLM): %.1fs — hit", time.monotonic() - t4)
+                        logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
                         return LocateResult(
                             point=Point(cx, cy),
                             confidence=conf,
@@ -880,22 +957,29 @@ def locate_element_from_step(
             logger.debug("VLM module not available, skipping Stage 4")
         except Exception as e:
             logger.debug("VLM scan error: %s", e)
+    if not stage4_hit:
+        logger.info("Stage 4 (VLM): %.1fs — %s", time.monotonic() - t4, "skipped" if skip_vlm else "miss")
 
     # ------------------------------------------------------------------
     # Stage 5: Position fallback — blind click at recorded coordinates
     # ------------------------------------------------------------------
+    t5 = time.monotonic()
     if not skip_position_fallback and hint_x is not None and hint_y is not None:
         logger.warning(
             "Located [%s] via position fallback at (%d, %d) — "
             "no visual confirmation",
             node_id[:8], hint_x, hint_y,
         )
+        logger.info("Stage 5 (position fallback): %.1fs — hit", time.monotonic() - t5)
+        logger.info("Locate cascade END for [%s]: %.1fs total", node_id[:8], time.monotonic() - cascade_t0)
         return LocateResult(
             point=Point(hint_x, hint_y),
             confidence=0.3,
             method="direct",
         )
+    logger.info("Stage 5 (position fallback): %.1fs — %s", time.monotonic() - t5, "skipped" if skip_position_fallback else "miss")
 
+    logger.info("Locate cascade END for [%s]: %.1fs total — FAILED", node_id[:8], time.monotonic() - cascade_t0)
     raise ElementNotFoundError(
         node_id, f"All locate stages failed for step {node_id[:8]}",
     )

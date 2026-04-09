@@ -500,7 +500,10 @@ def generate_ai_text(prompt: str) -> str:
             "Do not include quotes, explanations, or markdown formatting."
         )
         try:
+            t0 = time.monotonic()
             result = _call_vlm(vlm_prompt, [tmp_path])
+            elapsed = time.monotonic() - t0
+            logger.info("AI text VLM call took %.1fs", elapsed)
         finally:
             from pathlib import Path
             Path(tmp_path).unlink(missing_ok=True)
@@ -514,8 +517,8 @@ def generate_ai_text(prompt: str) -> str:
         logger.warning("VLM returned empty text, falling back to literal prompt")
         return prompt
 
-    except Exception as e:
-        logger.warning("AI text generation failed (%s), falling back to literal prompt", e)
+    except Exception:
+        logger.error("AI text generation failed, falling back to literal prompt", exc_info=True)
         return prompt
 
 
