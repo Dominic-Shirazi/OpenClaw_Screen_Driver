@@ -225,17 +225,31 @@ class OmniParserProvider:
         snippet_rgb = cv2.cvtColor(saved_snippet, cv2.COLOR_BGR2RGB)
         snippet_emb = generate_embedding(snippet_rgb)
 
+        # Aspect ratio of the saved snippet (width / height)
+        snippet_ar = saved_snippet.shape[1] / max(saved_snippet.shape[0], 1)
+
         # Compare against each candidate crop
-        best_score = -1.0
+        best_combined = -1.0
+        best_clip_score = -1.0
         best_candidate = None
+        best_dist = 0.0
 
         sh, sw = screenshot.shape[:2]
         for c in nearby:
             r = c["rect"]
+            crop_w = r["w"]
+            crop_h = r["h"]
+
+            # Aspect ratio filter: skip candidates whose shape differs by >2x
+            candidate_ar = crop_w / max(crop_h, 1)
+            ar_ratio = max(snippet_ar, candidate_ar) / max(min(snippet_ar, candidate_ar), 0.01)
+            if ar_ratio > 2.0:
+                continue
+
             x1 = max(0, r["x"])
             y1 = max(0, r["y"])
-            x2 = min(sw, r["x"] + r["w"])
-            y2 = min(sh, r["y"] + r["h"])
+            x2 = min(sw, r["x"] + crop_w)
+            y2 = min(sh, r["y"] + crop_h)
 
             crop = screenshot[y1:y2, x1:x2]
             if crop.size == 0:
@@ -245,16 +259,25 @@ class OmniParserProvider:
             crop_emb = generate_embedding(crop_rgb)
 
             # Cosine similarity (both L2-normalized → dot product)
-            score = float(np.dot(snippet_emb, crop_emb.T).item())
+            clip_score = float(np.dot(snippet_emb, crop_emb.T).item())
 
-            if score > best_score:
-                best_score = score
+            # Position-weighted scoring: prefer candidates near the hint
+            cx = r["x"] + crop_w // 2
+            cy = r["y"] + crop_h // 2
+            dist = ((cx - hint_x) ** 2 + (cy - hint_y) ** 2) ** 0.5
+            position_weight = 1.0 / (1.0 + dist / 250.0)
+            combined_score = clip_score * position_weight
+
+            if combined_score > best_combined:
+                best_combined = combined_score
+                best_clip_score = clip_score
                 best_candidate = c
+                best_dist = dist
 
-        if best_candidate is None or best_score < match_threshold:
+        if best_candidate is None or best_clip_score < match_threshold:
             logger.debug(
                 "Best CLIP score %.3f below threshold %.3f",
-                best_score, match_threshold,
+                best_clip_score, match_threshold,
             )
             return None
 
@@ -263,13 +286,13 @@ class OmniParserProvider:
         rect = Rect(r["x"], r["y"], r["w"], r["h"])
 
         logger.info(
-            "OmniParser matched at (%d, %d) CLIP=%.3f",
-            center.x, center.y, best_score,
+            "OmniParser matched at (%d, %d) CLIP=%.3f combined=%.3f (dist=%dpx)",
+            center.x, center.y, best_clip_score, best_combined, int(best_dist),
         )
 
         return LocateResult(
             point=center,
             method="omniparser",
-            confidence=best_score,
+            confidence=best_clip_score,
             rect=rect,
         )
