@@ -1015,13 +1015,21 @@ class RecordSession:
                 element_crop = screenshot[cy1:cy2, cx1:cx2]
                 if element_crop.size > 0:
                     florence_caption = caption_crop(element_crop)
+                    logger.info(
+                        "Florence-2 caption_crop returned: %r", florence_caption,
+                    )
                     if florence_caption:
                         result["florence_caption"] = florence_caption
-                        logger.debug("Florence-2 caption: %r", florence_caption)
-            except (ImportError, RuntimeError, Exception) as e:
-                logger.debug("Florence-2 captioning unavailable: %s", e)
+                else:
+                    logger.warning(
+                        "Florence-2 crop is empty: shape=%s", element_crop.shape,
+                    )
+            except ImportError:
+                logger.warning("Florence-2 not installed (transformers missing)")
+            except Exception as e:
+                logger.warning("Florence-2 captioning failed: %s", e, exc_info=True)
 
-        logger.debug(
+        logger.info(
             "Detection result: bbox=%s, florence_caption=%r, type_guess=%r",
             result.get("bbox"),
             result.get("florence_caption"),

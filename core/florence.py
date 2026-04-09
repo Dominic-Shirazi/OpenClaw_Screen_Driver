@@ -163,6 +163,11 @@ def caption_crop(image: np.ndarray, task: str = "<CAPTION>") -> str:
     if isinstance(caption, dict):
         caption = str(caption)
 
+    logger.info(
+        "Florence-2 model returned: parsed_keys=%s, caption=%r",
+        list(parsed.keys()), caption,
+    )
+
     # Free intermediate tensors
     del generated_ids, inputs
     if _device != "cpu":

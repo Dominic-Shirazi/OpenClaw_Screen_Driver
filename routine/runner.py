@@ -33,6 +33,7 @@ from core.executor import (
     double_click,
     drag,
     hotkey,
+    move_to_rest,
     press_enter,
     prompt_user_blocking,
     right_click,
@@ -454,14 +455,23 @@ def _dispatch_action(
 
     if action == "click":
         click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
+        if not dry_run:
+            time.sleep(0.1)
+            move_to_rest()
         return "clicked"
 
     elif action == "double_click":
         double_click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
+        if not dry_run:
+            time.sleep(0.1)
+            move_to_rest()
         return "double_clicked"
 
     elif action == "right_click":
         right_click(point.x, point.y, bbox_w=bw, bbox_h=bh, dry_run=dry_run)
+        if not dry_run:
+            time.sleep(0.1)
+            move_to_rest()
         return "right_clicked"
 
     elif action == "click_drag":
@@ -472,6 +482,9 @@ def _dispatch_action(
         tx = int(dt_pct.get("x_pct", 0.5) * sw + dt_pct.get("w_pct", 0) * sw / 2)
         ty = int(dt_pct.get("y_pct", 0.5) * sh + dt_pct.get("h_pct", 0) * sh / 2)
         drag(point.x, point.y, tx, ty, dry_run=dry_run)
+        if not dry_run:
+            time.sleep(0.1)
+            move_to_rest()
         return "dragged"
 
     elif action == "type":
@@ -480,6 +493,9 @@ def _dispatch_action(
         type_text(text, dry_run=dry_run)
         if step.get("press_enter"):
             press_enter(dry_run=dry_run)
+        if not dry_run:
+            time.sleep(0.1)
+            move_to_rest()
         return "typed"
 
     elif action == "scroll":

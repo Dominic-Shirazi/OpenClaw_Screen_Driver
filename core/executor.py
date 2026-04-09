@@ -374,6 +374,33 @@ def hotkey(*keys: str, dry_run: bool = False) -> None:
     _hsleep(random.uniform(0.05, 0.1))
 
 
+def move_to_rest() -> None:
+    """Move mouse to rest position at far-right edge of screen.
+
+    After click-based actions the cursor may hover over an element, causing
+    tooltips or highlight animations that confuse the next screenshot or
+    detection pass.  This parks the cursor 2 px from the right edge at a
+    slightly randomised vertical position so it is out of the way.
+    """
+    import mss
+
+    with mss.mss() as sct:
+        # Monitor 0 is the full virtual desktop (all monitors combined)
+        mon = sct.monitors[0]
+        rest_x = mon["left"] + mon["width"] - 2
+        rest_y = mon["top"] + mon["height"] // 2 + random.randint(-50, 50)
+
+    hd = _exec_cfg()["human_delay"]
+    if hd <= 0:
+        _instant_move(rest_x, rest_y)
+    else:
+        hmm = _get_hmm()
+        with _lock:
+            hmm.move_to(float(rest_x), float(rest_y))
+
+    logger.debug("Mouse moved to rest position (%d, %d)", rest_x, rest_y)
+
+
 # ---------------------------------------------------------------------------
 # Prompt-user blocking mechanism
 # ---------------------------------------------------------------------------
