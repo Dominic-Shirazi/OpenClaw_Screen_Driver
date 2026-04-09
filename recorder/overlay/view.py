@@ -31,6 +31,7 @@ from recorder.overlay.donut_cloud_layer import DonutCloudLayer
 from recorder.overlay.mode_indicator_layer import ModeIndicatorLayer
 from recorder.overlay.scan_layer import ScanLayer
 from recorder.overlay.shimmer_layer import ShimmerLayer
+from recorder.overlay.record_phase import RecordPhase
 from recorder.overlay.state import STATE_COLORS, OverlayState
 from recorder.overlay.tag_dialog_panel import TagDialogPanel
 from recorder.overlay.camera_flash import CameraFlash
@@ -52,6 +53,11 @@ class OverlayView(QGraphicsView):
         on_selection: Optional callback invoked with ``(x, y, w, h)``
             when the user completes a drag-to-draw bounding box in
             RECORDING mode.
+
+    The context selection callback is set separately via
+    :meth:`set_context_selection_callback` and fires during
+    ``CONTEXT_CAPTURE`` phase with ``(x, y, w, h)`` of the
+    context box.
     """
 
     def __init__(
@@ -132,9 +138,13 @@ class OverlayView(QGraphicsView):
 
         # ---- Drag-to-draw state ----
         self._on_selection = on_selection
+        self._on_context_selection: Callable[[int, int, int, int], None] | None = None
         self._drag_start: QPointF | None = None
         self._rubber_band: QGraphicsRectItem | None = None
         self._min_drag_px: int = 8
+        self._phase: RecordPhase = RecordPhase.AWAITING_CLICK
+        self._context_flash_timer: QTimer | None = None
+        self._context_flash_rect: QGraphicsRectItem | None = None
 
         # ---- Win32 layered flags (deferred until window handle exists) ----
         if sys.platform == "win32":
@@ -426,10 +436,18 @@ class OverlayView(QGraphicsView):
                 return
             logger.debug("Non-HUD click at (%.0f,%.0f) item=%s", scene_pos.x(), scene_pos.y(), type(item).__name__ if item else "None")
             self._drag_start = scene_pos
-            pen = QPen(QColor(255, 255, 0, 220))
-            pen.setWidth(2)
-            pen.setStyle(Qt.PenStyle.DashLine)
-            brush = QBrush(QColor(255, 255, 0, 30))
+            if self._phase == RecordPhase.CONTEXT_CAPTURE:
+                # Blue rubber band for context box selection
+                pen = QPen(QColor(0x44, 0x88, 0xFF, 220))
+                pen.setWidth(2)
+                pen.setStyle(Qt.PenStyle.DashLine)
+                brush = QBrush(QColor(0x44, 0x88, 0xFF, 30))
+            else:
+                # Yellow rubber band for element selection
+                pen = QPen(QColor(255, 255, 0, 220))
+                pen.setWidth(2)
+                pen.setStyle(Qt.PenStyle.DashLine)
+                brush = QBrush(QColor(255, 255, 0, 30))
             self._rubber_band = self.scene().addRect(
                 QRectF(self._drag_start, self._drag_start), pen, brush,
             )
@@ -483,19 +501,33 @@ class OverlayView(QGraphicsView):
             w = x2 - x1
             h = y2 - y1
 
+            is_context = self._phase == RecordPhase.CONTEXT_CAPTURE
+            callback = (
+                self._on_context_selection if is_context
+                else self._on_selection
+            )
+
             if (
                 w >= self._min_drag_px
                 and h >= self._min_drag_px
-                and self._on_selection is not None
+                and callback is not None
             ):
-                # Turn yellow box red to show it's been captured
-                if self._rubber_band is not None:
-                    pen = QPen(QColor(255, 50, 50, 220))
-                    pen.setWidth(2)
-                    pen.setStyle(Qt.PenStyle.SolidLine)
-                    self._rubber_band.setPen(pen)
-                    self._rubber_band.setBrush(QBrush(QColor(255, 50, 50, 20)))
-                self._on_selection(int(x1), int(y1), int(w), int(h))
+                if is_context:
+                    # Flash blue confirm then auto-clear
+                    self._show_context_flash(x1, y1, w, h)
+                    # Remove rubber band immediately
+                    if self._rubber_band is not None:
+                        self.scene().removeItem(self._rubber_band)
+                        self._rubber_band = None
+                else:
+                    # Turn yellow box red to show it's been captured
+                    if self._rubber_band is not None:
+                        pen = QPen(QColor(255, 50, 50, 220))
+                        pen.setWidth(2)
+                        pen.setStyle(Qt.PenStyle.SolidLine)
+                        self._rubber_band.setPen(pen)
+                        self._rubber_band.setBrush(QBrush(QColor(255, 50, 50, 20)))
+                callback(int(x1), int(y1), int(w), int(h))
             else:
                 # Too small — remove the rubber band
                 if self._rubber_band is not None:
@@ -510,6 +542,77 @@ class OverlayView(QGraphicsView):
         if self._rubber_band is not None:
             self.scene().removeItem(self._rubber_band)
             self._rubber_band = None
+
+    # ------------------------------------------------------------------
+    # Context box capture
+    # ------------------------------------------------------------------
+
+    def set_phase(self, phase: RecordPhase) -> None:
+        """Update the current recording phase.
+
+        The view uses this to switch rubber band color and callback
+        routing during mouse drag events.
+
+        Args:
+            phase: The new recording phase.
+        """
+        self._phase = phase
+
+    def set_context_selection_callback(
+        self,
+        callback: Callable[[int, int, int, int], None] | None,
+    ) -> None:
+        """Set the callback for context box selection.
+
+        Args:
+            callback: Function called with ``(x, y, w, h)`` when the
+                user completes a context box drag during CONTEXT_CAPTURE.
+        """
+        self._on_context_selection = callback
+
+    def skip_context_capture(self) -> None:
+        """Skip context capture, clearing any in-progress rubber band.
+
+        Called when the user presses Escape or a Skip button to bypass
+        the optional context box selection.
+        """
+        self.clear_rubber_band()
+        self._drag_start = None
+        self._clear_context_flash()
+
+    def _show_context_flash(
+        self, x: float, y: float, w: float, h: float,
+    ) -> None:
+        """Show a brief blue dashed rectangle confirming the context box.
+
+        The flash auto-clears after 600ms.
+
+        Args:
+            x: Left edge of context box.
+            y: Top edge of context box.
+            w: Width of context box.
+            h: Height of context box.
+        """
+        self._clear_context_flash()
+        pen = QPen(QColor(0x44, 0x88, 0xFF, 200))
+        pen.setWidth(3)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        brush = QBrush(QColor(0x44, 0x88, 0xFF, 25))
+        self._context_flash_rect = self.scene().addRect(
+            QRectF(x, y, w, h), pen, brush,
+        )
+        self._context_flash_rect.setZValue(200)
+        self._context_flash_timer = QTimer()
+        self._context_flash_timer.setSingleShot(True)
+        self._context_flash_timer.setInterval(600)
+        self._context_flash_timer.timeout.connect(self._clear_context_flash)
+        self._context_flash_timer.start()
+
+    def _clear_context_flash(self) -> None:
+        """Remove the context box flash rectangle."""
+        if self._context_flash_rect is not None:
+            self.scene().removeItem(self._context_flash_rect)
+            self._context_flash_rect = None
 
     # ------------------------------------------------------------------
     # Scan layer lifecycle

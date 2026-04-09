@@ -34,6 +34,9 @@ class RecordPhase(Enum):
     TAG_DIALOG = auto()
     """Tag dialog open, user reviewing/editing."""
 
+    CONTEXT_CAPTURE = auto()
+    """User drawing a context box around a larger area for element disambiguation."""
+
     COUNTDOWN = auto()
     """3-2-1 countdown before dry-run."""
 

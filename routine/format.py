@@ -110,6 +110,9 @@ def build_v1_step(
     node_id: str,
     screen_w: int,
     screen_h: int,
+    context_bbox: dict[str, int] | None = None,
+    context_snippet_path: str | None = None,
+    context_embedding_path: str | None = None,
 ) -> dict[str, Any]:
     """Build a v1 step dict from raw recorder step data.
 
@@ -164,6 +167,9 @@ def build_v1_step(
         "snippet_path": f"snippets/{node_id}.png",
         "embedding_path": f"embeddings/{node_id}.npy",
         "dry_run_passed": True,
+        "context_bbox": context_bbox,                         # Optional {x, y, w, h} dict — larger area around element for disambiguation
+        "context_snippet_path": context_snippet_path,         # Optional path to context region screenshot
+        "context_embedding_path": context_embedding_path,     # Optional path to CLIP embedding of context region
     }
 
     # Action-specific fields

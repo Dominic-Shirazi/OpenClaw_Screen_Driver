@@ -80,7 +80,21 @@ def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
     node_id = step.get("node_id", str(uuid4()))
     # Strip non-serializable fields before passing to build_v1_step
     clean_step = {k: v for k, v in step.items() if k != "screenshot"}
-    return build_v1_step(clean_step, index, node_id, screen_w, screen_h)
+
+    # Extract optional context capture data
+    ctx_bbox = step.get("context_bbox")
+    ctx_bbox_dict = (
+        {"x": ctx_bbox[0], "y": ctx_bbox[1], "w": ctx_bbox[2], "h": ctx_bbox[3]}
+        if ctx_bbox is not None
+        else None
+    )
+
+    return build_v1_step(
+        clean_step, index, node_id, screen_w, screen_h,
+        context_bbox=ctx_bbox_dict,
+        context_snippet_path=step.get("context_snippet_path"),
+        context_embedding_path=step.get("context_embedding_path"),
+    )
 
 
 class RecordSession:
@@ -129,6 +143,11 @@ class RecordSession:
         self._on_session_complete: Callable[[bool], None] | None = None
         self._save_in_progress: bool = False
 
+        # Context capture fields (optional larger region for disambiguation)
+        self._context_bbox: tuple[int, int, int, int] | None = None
+        self._context_snippet_path: str | None = None
+        self._context_embedding_path: str | None = None
+
         logger.info(
             "RecordSession created: routine=%s, start_from=%s",
             routine_name,
@@ -166,6 +185,16 @@ class RecordSession:
         self._toolbar_shown = False
 
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
+
+        # Wire context box selection callback on the overlay view
+        if (
+            self._controller._view is not None
+            and hasattr(self._controller._view, "set_context_selection_callback")
+        ):
+            self._controller._view.set_context_selection_callback(
+                self._on_context_captured,
+            )
+
         self._set_phase(RecordPhase.AWAITING_CLICK)
 
         logger.info("RecordSession started, awaiting first click")
@@ -231,6 +260,9 @@ class RecordSession:
         self._click_y = y
         self._is_drag_capture = w > 0 and h > 0
         self._florence_caption = ""  # Reset for new capture
+        self._context_bbox = None
+        self._context_snippet_path = None
+        self._context_embedding_path = None
 
         if self._is_drag_capture:
             self._original_drag_rect = (x, y, w, h)
@@ -346,18 +378,16 @@ class RecordSession:
         # Reset look_here flag after tag confirm
         self._is_look_here = False
 
-        # Transition to COUNTDOWN
-        self._set_phase(RecordPhase.COUNTDOWN)
-        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+        # Reset context fields for this new step
+        self._context_bbox = None
+        self._context_snippet_path = None
+        self._context_embedding_path = None
 
-        widget = self._controller.show_countdown(3)
-        if widget is not None:
-            # Updated: disconnect before connect to prevent signal accumulation
-            try:
-                widget.countdown_finished.disconnect(self._on_countdown_finished)
-            except TypeError:
-                pass  # No existing connection -- that's fine
-            widget.countdown_finished.connect(self._on_countdown_finished)
+        # Transition to CONTEXT_CAPTURE (optional -- user can skip with Escape)
+        self._set_phase(RecordPhase.CONTEXT_CAPTURE)
+        if self._controller._view is not None:
+            self._controller._view.set_phase(RecordPhase.CONTEXT_CAPTURE)
+        logger.info("Context capture: draw context box or press Escape to skip")
 
     def on_tag_dismissed(self, data: dict) -> None:
         """Handle tag dialog dismissal -- discard step, return to awaiting.
@@ -368,12 +398,126 @@ class RecordSession:
         self._current_step = None
         self._current_bbox = None
         self._florence_caption = ""
+        self._context_bbox = None
+        self._context_snippet_path = None
+        self._context_embedding_path = None
         self._controller.dismiss_tag_dialog()
         self._clear_scan()  # Updated: remove scan highlight — dismissed tag means step discarded — 2026-04-03
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
 
         logger.info("Tag dismissed, returning to AWAITING_CLICK")
+
+    # ------------------------------------------------------------------
+    # Context capture phase
+    # ------------------------------------------------------------------
+
+    def _on_context_captured(self, x: int, y: int, w: int, h: int) -> None:
+        """Handle context box selection from the overlay view.
+
+        Crops the context region from the current screenshot, generates
+        a CLIP embedding, and stores paths on the current step before
+        proceeding to COUNTDOWN.
+
+        Args:
+            x: Left edge of context box.
+            y: Top edge of context box.
+            w: Width of context box.
+            h: Height of context box.
+        """
+        if self._phase != RecordPhase.CONTEXT_CAPTURE:
+            logger.debug(
+                "Ignoring context selection in phase %s", self._phase.name,
+            )
+            return
+
+        self._context_bbox = (x, y, w, h)
+        logger.info(
+            "Context box captured: (%d, %d) %dx%d", x, y, w, h,
+        )
+
+        # Crop context region from current screenshot
+        if self._screenshot is not None and w > 0 and h > 0:
+            import tempfile
+
+            import cv2
+
+            sh, sw = self._screenshot.shape[:2]
+            cx1 = max(0, x)
+            cy1 = max(0, y)
+            cx2 = min(sw, x + w)
+            cy2 = min(sh, y + h)
+            context_crop = self._screenshot[cy1:cy2, cx1:cx2]
+
+            if context_crop.size > 0:
+                try:
+                    # Save context snippet to temp file
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="ocsd_ctx_"))
+                    snippet_file = tmp_dir / "context_snippet.png"
+                    cv2.imwrite(str(snippet_file), context_crop)
+                    self._context_snippet_path = str(snippet_file)
+
+                    # Generate CLIP embedding (BGR -> RGB for CLIP)
+                    from core.embeddings import generate_embedding
+
+                    rgb_crop = cv2.cvtColor(context_crop, cv2.COLOR_BGR2RGB)
+                    embedding = generate_embedding(rgb_crop)
+                    emb_file = tmp_dir / "context_embedding.npy"
+                    np.save(str(emb_file), embedding)
+                    self._context_embedding_path = str(emb_file)
+
+                    logger.info(
+                        "Context snippet saved: %s, embedding: %s",
+                        self._context_snippet_path,
+                        self._context_embedding_path,
+                    )
+                except Exception as e:
+                    logger.warning("Context embedding generation failed: %s", e)
+            else:
+                logger.warning("Context crop is empty, skipping")
+        else:
+            logger.debug("No screenshot or zero-size context box, skipping crop")
+
+        # Store context data on the current step
+        if self._current_step is not None:
+            self._current_step["context_bbox"] = self._context_bbox
+            self._current_step["context_snippet_path"] = self._context_snippet_path
+            self._current_step["context_embedding_path"] = self._context_embedding_path
+
+        self._start_countdown()
+
+    def _on_context_skipped(self) -> None:
+        """Handle context capture skip (user pressed Escape).
+
+        Clears context fields and proceeds directly to COUNTDOWN.
+        """
+        logger.info("Context capture skipped")
+        self._context_bbox = None
+        self._context_snippet_path = None
+        self._context_embedding_path = None
+
+        # Tell the view to clean up any in-progress rubber band
+        if (
+            self._controller._view is not None
+            and hasattr(self._controller._view, "skip_context_capture")
+        ):
+            self._controller._view.skip_context_capture()
+
+        self._start_countdown()
+
+    def _start_countdown(self) -> None:
+        """Transition to COUNTDOWN and start the 3-2-1 dry-run timer."""
+        self._set_phase(RecordPhase.COUNTDOWN)
+        self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+
+        widget = self._controller.show_countdown(3)
+        if widget is not None:
+            # Disconnect before connect to prevent signal accumulation
+            try:
+                widget.countdown_finished.disconnect(self._on_countdown_finished)
+            except TypeError:
+                pass  # No existing connection -- that's fine
+            widget.countdown_finished.connect(self._on_countdown_finished)
 
     def on_save_requested(self) -> None:
         """Handle Ctrl+Q -- save all accumulated steps.
@@ -404,7 +548,15 @@ class RecordSession:
         thread.start()
 
     def on_abort_requested(self) -> None:
-        """Handle ESC -- show abort confirm or close silently."""
+        """Handle ESC -- show abort confirm or close silently.
+
+        During CONTEXT_CAPTURE, Escape skips context and proceeds to
+        countdown instead of aborting.
+        """
+        if self._phase == RecordPhase.CONTEXT_CAPTURE:
+            self._on_context_skipped()
+            return
+
         if self._steps:
             logger.info(
                 "Abort requested with %d unsaved steps", len(self._steps),
@@ -1847,6 +1999,30 @@ class RecordSession:
                 break
             except Exception as e:
                 logger.debug("Could not generate embedding %d: %s", i, e)
+
+            # Copy context snippet and embedding from temp paths to save dir
+            ctx_snippet_tmp = step.get("context_snippet_path")
+            ctx_emb_tmp = step.get("context_embedding_path")
+            if ctx_snippet_tmp is not None:
+                try:
+                    import shutil
+
+                    dest = save_dir / "snippets" / f"{node_id}_context.png"
+                    shutil.copy2(ctx_snippet_tmp, str(dest))
+                    step["context_snippet_path"] = f"snippets/{node_id}_context.png"
+                    logger.debug("Context snippet saved: %s", dest)
+                except Exception as e:
+                    logger.debug("Could not save context snippet %d: %s", i, e)
+            if ctx_emb_tmp is not None:
+                try:
+                    import shutil
+
+                    dest = save_dir / "embeddings" / f"{node_id}_context.npy"
+                    shutil.copy2(ctx_emb_tmp, str(dest))
+                    step["context_embedding_path"] = f"embeddings/{node_id}_context.npy"
+                    logger.debug("Context embedding saved: %s", dest)
+                except Exception as e:
+                    logger.debug("Could not save context embedding %d: %s", i, e)
 
     def _on_save_complete(self, path: str) -> None:
         """Handle successful save on main thread.

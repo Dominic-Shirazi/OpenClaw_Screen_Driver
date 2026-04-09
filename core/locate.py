@@ -3,6 +3,10 @@
 Finds UI elements on screen using a multi-stage strategy ordered by
 speed and cost (cheapest first):
 
+0. Context scoping — if a context embedding is present, locate the
+   context zone on screen first, then search ONLY within that zone
+   using stages 1-2.  Falls through to the full-screen cascade on
+   failure.
 1. OmniParser detect+match — saved snippet → detect boxes → CLIP match (~50ms)
 2. CLIP embedding — compare saved embedding against screen crops
 3. OCR text match — scoped to region around expected position (~200ms)
@@ -367,6 +371,269 @@ def locate_element(
     )
 
 
+def _find_context_zone(
+    context_emb: Any,
+    screen: Any,
+    sw: int,
+    sh: int,
+) -> tuple[int, int, int, int] | None:
+    """Locate the context region on the current screen via CLIP sliding window.
+
+    Scans the full screen with large windows to find where the saved
+    context embedding best matches.  Returns the bounding box
+    ``(x, y, w, h)`` in screen coordinates, or *None* if no confident
+    match is found.
+
+    Args:
+        context_emb: Saved CLIP embedding for the context region (1-D ndarray).
+        screen: Full-screen BGR image (numpy array).
+        sw: Screen width in pixels.
+        sh: Screen height in pixels.
+
+    Returns:
+        ``(x, y, w, h)`` of the best-matching zone, or *None*.
+    """
+    import cv2
+    import numpy as np
+
+    from core.embeddings import generate_embedding
+
+    best_score: float = -1.0
+    best_box: tuple[int, int, int, int] | None = None
+
+    # Use larger windows than element search — context zones are
+    # bigger UI regions (panels, dialogs, toolbars).
+    window_sizes = [(300, 300), (400, 250), (250, 400), (500, 300), (300, 500)]
+    stride = 100
+
+    for win_w, win_h in window_sizes:
+        if win_w > sw or win_h > sh:
+            continue
+        for wy in range(0, sh - win_h + 1, stride):
+            for wx in range(0, sw - win_w + 1, stride):
+                tile = screen[wy : wy + win_h, wx : wx + win_w]
+                rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+                tile_emb = generate_embedding(rgb_tile)
+                score = float(np.dot(context_emb, tile_emb.T).item())
+                if score > best_score:
+                    best_score = score
+                    best_box = (wx, wy, win_w, win_h)
+
+    threshold = 0.70
+    if best_score >= threshold and best_box is not None:
+        logger.info(
+            "Context zone found at (%d, %d, %d, %d) score=%.3f",
+            *best_box,
+            best_score,
+        )
+        return best_box
+
+    logger.debug("Context zone not found (best score=%.3f)", best_score)
+    return None
+
+
+def _try_context_scoped_locate(
+    step: dict[str, Any],
+    routine_dir: Path,
+    sw: int,
+    sh: int,
+    *,
+    ref_w: int | None = None,
+    ref_h: int | None = None,
+    skip_vlm: bool = False,
+) -> LocateResult | None:
+    """Attempt to locate the target element within a context zone.
+
+    If the step carries a ``context_embedding_path``, this function
+    loads that embedding, finds where the context region appears on
+    screen, crops to that zone, then runs OmniParser + CLIP within the
+    crop.  Returned coordinates are translated back to full-screen
+    space.
+
+    Args:
+        step: V1 step dictionary.
+        routine_dir: Base directory for resolving relative paths.
+        sw: Screen width.
+        sh: Screen height.
+        ref_w: Reference element width (pixels) for aspect-ratio gating.
+        ref_h: Reference element height (pixels) for aspect-ratio gating.
+        skip_vlm: Forwarded to inner stages (currently unused, reserved).
+
+    Returns:
+        A :class:`LocateResult` if the element is found inside the
+        context zone, otherwise *None* (caller should fall through to
+        the normal cascade).
+    """
+    context_rel = step.get("context_embedding_path")
+    if not context_rel:
+        return None
+
+    ctx_path = routine_dir / context_rel
+    if not ctx_path.exists():
+        logger.debug("Context embedding file not found at %s", ctx_path)
+        return None
+
+    try:
+        import cv2
+        import numpy as np
+
+        from core.capture import screenshot_region
+        from core.embeddings import generate_embedding
+
+        context_emb = np.load(str(ctx_path))
+        logger.debug("Loaded context embedding from %s", ctx_path)
+
+        screen = screenshot_full()
+        zone = _find_context_zone(context_emb, screen, sw, sh)
+        if zone is None:
+            logger.debug("Context zone not located, falling through to normal cascade")
+            return None
+
+        zx, zy, zw, zh = zone
+
+        # Add padding around the zone to avoid cutting off edge elements.
+        pad = 50
+        zx_padded = max(0, zx - pad)
+        zy_padded = max(0, zy - pad)
+        zw_padded = min(zw + 2 * pad, sw - zx_padded)
+        zh_padded = min(zh + 2 * pad, sh - zy_padded)
+
+        crop = screen[zy_padded : zy_padded + zh_padded, zx_padded : zx_padded + zw_padded]
+        if crop.size == 0:
+            logger.debug("Context zone crop is empty, falling through")
+            return None
+
+        # --- Sub-stage A: OmniParser within context crop ---
+        snippet_rel = step.get("snippet_path")
+        if snippet_rel:
+            try:
+                from core.detection import get_detector
+
+                snippet_path = routine_dir / snippet_rel
+                snippet = cv2.imread(str(snippet_path))
+                if snippet is not None:
+                    snippet_h, snippet_w = snippet.shape[:2]
+                    cfg = get_config()
+                    detector = get_detector()
+                    # Search within the crop — hint at crop centre.
+                    crop_cx = zw_padded // 2
+                    crop_cy = zh_padded // 2
+                    result = detector.detect_and_match(
+                        crop,
+                        snippet,
+                        crop_cx,
+                        crop_cy,
+                        match_threshold=cfg.get("detection", {}).get(
+                            "match_threshold", 0.7,
+                        ),
+                        search_radius=max(zw_padded, zh_padded),
+                    )
+                    if result is not None:
+                        if result.rect is not None and not _aspect_ratio_compatible(
+                            snippet_w, snippet_h,
+                            result.rect.w, result.rect.h,
+                        ):
+                            logger.debug(
+                                "Context-scoped OmniParser match rejected: "
+                                "aspect ratio mismatch",
+                            )
+                        else:
+                            # Translate crop-local coords to screen coords.
+                            screen_x = result.point.x + zx_padded
+                            screen_y = result.point.y + zy_padded
+                            logger.info(
+                                "Located [%s] via context+OmniParser at (%d, %d) "
+                                "conf=%.2f",
+                                step.get("node_id", "?")[:8],
+                                screen_x,
+                                screen_y,
+                                result.confidence,
+                            )
+                            return LocateResult(
+                                point=Point(screen_x, screen_y),
+                                confidence=result.confidence,
+                                method="context+omni",
+                                rect=result.rect,
+                            )
+            except ImportError:
+                logger.debug("Detection module not available for context-scoped Stage A")
+            except Exception as e:
+                logger.debug("Context-scoped OmniParser error: %s", e)
+
+        # --- Sub-stage B: CLIP embedding within context crop ---
+        embedding_rel = step.get("embedding_path")
+        if embedding_rel:
+            try:
+                emb_path = routine_dir / embedding_rel
+                if emb_path.exists():
+                    saved_emb = np.load(str(emb_path))
+                    crop_h, crop_w = crop.shape[:2]
+                    best_score: float = -1.0
+                    best_cx, best_cy = crop_w // 2, crop_h // 2
+                    window_sizes = [(80, 30), (120, 40), (60, 60), (160, 50)]
+                    stride = 40
+
+                    for win_w, win_h in window_sizes:
+                        if win_w > crop_w or win_h > crop_h:
+                            continue
+                        ar_ok = (
+                            ref_w is None
+                            or ref_h is None
+                            or _aspect_ratio_compatible(ref_w, ref_h, win_w, win_h)
+                        )
+                        ar_penalty = 1.0 if ar_ok else 0.5
+                        for wy in range(0, crop_h - win_h + 1, stride):
+                            for wx in range(0, crop_w - win_w + 1, stride):
+                                tile = crop[wy : wy + win_h, wx : wx + win_w]
+                                rgb_tile = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+                                tile_emb = generate_embedding(rgb_tile)
+                                score = float(
+                                    np.dot(saved_emb, tile_emb.T).item(),
+                                ) * ar_penalty
+                                if score > best_score:
+                                    best_score = score
+                                    best_cx = wx + win_w // 2
+                                    best_cy = wy + win_h // 2
+
+                    if best_score > 0.75:
+                        screen_x = best_cx + zx_padded
+                        screen_y = best_cy + zy_padded
+                        logger.info(
+                            "Located [%s] via context+CLIP at (%d, %d) score=%.3f",
+                            step.get("node_id", "?")[:8],
+                            screen_x,
+                            screen_y,
+                            best_score,
+                        )
+                        return LocateResult(
+                            point=Point(screen_x, screen_y),
+                            confidence=min(best_score, 0.85),
+                            method="context+clip",
+                        )
+                    else:
+                        logger.debug(
+                            "Context-scoped CLIP best score %.3f too low",
+                            best_score,
+                        )
+            except ImportError:
+                logger.debug("CLIP not available for context-scoped Stage B")
+            except Exception as e:
+                logger.debug("Context-scoped CLIP error: %s", e)
+
+        logger.debug(
+            "Context-scoped search found zone but no element match, "
+            "falling through to normal cascade",
+        )
+        return None
+
+    except ImportError:
+        logger.debug("Dependencies not available for context-scoped locate")
+        return None
+    except Exception as e:
+        logger.debug("Context-scoped locate error: %s", e)
+        return None
+
+
 def locate_element_from_step(
     step: dict[str, Any],
     routine_dir: Path,
@@ -417,6 +684,17 @@ def locate_element_from_step(
     if step_w_pct > 0 and step_h_pct > 0:
         ref_w = int(step_w_pct * sw)
         ref_h = int(step_h_pct * sh)
+
+    # ------------------------------------------------------------------
+    # Stage 0: Context-aware scoping — narrow search to context zone
+    # ------------------------------------------------------------------
+    context_result = _try_context_scoped_locate(
+        step, routine_dir, sw, sh,
+        ref_w=ref_w, ref_h=ref_h,
+        skip_vlm=skip_vlm,
+    )
+    if context_result is not None:
+        return context_result
 
     # ------------------------------------------------------------------
     # Stage 1: OmniParser detect + CLIP match
