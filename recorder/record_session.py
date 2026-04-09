@@ -1585,9 +1585,19 @@ class RecordSession:
                         },
                     }
 
-                    locate_result = locate_element_from_step(
-                        locate_step, tmp_dir, skip_vlm=True,
-                    )
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(
+                            locate_element_from_step, locate_step, tmp_dir, skip_vlm=True,
+                        )
+                        try:
+                            locate_result = future.result(timeout=10)
+                        except concurrent.futures.TimeoutError:
+                            logger.warning(
+                                "DRY-RUN: locate timed out after 10s, using bbox center",
+                            )
+                            locate_result = None
 
                     if locate_result and locate_result.point:
                         logger.info(
@@ -1630,6 +1640,10 @@ class RecordSession:
                     exec_right_click(center_x, center_y)
                 case "type":
                     exec_click(center_x, center_y)
+                    if tag_data.get("ai_generate_text"):
+                        logger.info(
+                            "DRY-RUN: ai_generate_text=True, using literal text for dry-run",
+                        )
                     text = tag_data.get("text_to_type", "")
                     if text:
                         exec_type_text(text)
