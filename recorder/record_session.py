@@ -659,8 +659,18 @@ class RecordSession:
                 return
             self._controller.show_after_capture()
             self._set_phase(RecordPhase.VLM_ANALYZING)
+
+            # Show scan animation over the selected region during VLM
+            self._controller.start_scan(x, y, w, h)
+
             if hasattr(self._controller, "start_card_glow_pulse"):
                 self._controller.start_card_glow_pulse()
+
+            # Show tag dialog immediately in loading state (spinner)
+            # so the user sees feedback while VLM analyzes
+            element_rect = QRectF(x, y, w, h)
+            self._controller.show_tag_dialog(element_rect, vlm_data=None)
+
             if self._screenshot is not None:
                 self._start_vlm(self._screenshot, (x, y, w, h))
 
@@ -1215,6 +1225,11 @@ class RecordSession:
         if hasattr(self._controller, "stop_card_glow_pulse"):
             self._controller.stop_card_glow_pulse()
 
+        # Finish scan animation (settles the scan layer to final bbox)
+        if self._current_bbox is not None:
+            bx, by, bw, bh = self._current_bbox
+            self._controller.finish_scan(bx, by, bw, bh)
+
         self._set_phase(RecordPhase.TAG_DIALOG)
 
         vlm_data = {
@@ -1248,6 +1263,11 @@ class RecordSession:
         # Stop card glow pulsing
         if hasattr(self._controller, "stop_card_glow_pulse"):
             self._controller.stop_card_glow_pulse()
+
+        # Finish scan animation (settles the scan layer to final bbox)
+        if self._current_bbox is not None:
+            bx, by, bw, bh = self._current_bbox
+            self._controller.finish_scan(bx, by, bw, bh)
 
         self._set_phase(RecordPhase.TAG_DIALOG)
 
