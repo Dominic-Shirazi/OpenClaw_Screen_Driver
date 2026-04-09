@@ -999,6 +999,28 @@ class RecordSession:
         except Exception as e:
             logger.warning("Detection worker error: %s", e)
 
+        # Florence-2 caption enrichment — runs on the detected element crop
+        bbox = result.get("bbox")
+        if bbox and not result.get("florence_caption"):
+            try:
+                from core.florence import caption_crop
+
+                bx, by = bbox["x"], bbox["y"]
+                bw, bh = bbox["w"], bbox["h"]
+                sh, sw = screenshot.shape[:2]
+                cx1 = max(0, bx)
+                cy1 = max(0, by)
+                cx2 = min(sw, bx + bw)
+                cy2 = min(sh, by + bh)
+                element_crop = screenshot[cy1:cy2, cx1:cx2]
+                if element_crop.size > 0:
+                    florence_caption = caption_crop(element_crop)
+                    if florence_caption:
+                        result["florence_caption"] = florence_caption
+                        logger.debug("Florence-2 caption: %r", florence_caption)
+            except (ImportError, RuntimeError, Exception) as e:
+                logger.debug("Florence-2 captioning unavailable: %s", e)
+
         logger.debug(
             "Detection result: bbox=%s, florence_caption=%r, type_guess=%r",
             result.get("bbox"),
