@@ -1322,6 +1322,82 @@ class RecordSession:
             action = tag_data.get("action", "click")
             logger.info("DRY-RUN: pre-delay done, executing action '%s'", action)
 
+            # --- CLIP validation: verify element can be re-found ---
+            if action in ("click", "double_click", "right_click", "type", "click_drag"):
+                import tempfile
+                import shutil
+
+                import cv2
+
+                tmp_dir: Path | None = None
+                try:
+                    from core.locate import locate_element_from_step
+                    from core.capture import screenshot_region
+                    from core.embeddings import generate_embedding
+
+                    tmp_dir = Path(tempfile.mkdtemp(prefix="ocsd_dryrun_"))
+                    tmp_id = uuid4().hex[:12]
+
+                    # Create temp snippet + embedding
+                    (tmp_dir / "snippets").mkdir(exist_ok=True)
+                    (tmp_dir / "embeddings").mkdir(exist_ok=True)
+
+                    snippet = screenshot_region(bx, by, bw, bh)
+                    snippet_path = f"snippets/{tmp_id}.png"
+                    cv2.imwrite(str(tmp_dir / snippet_path), snippet)
+
+                    emb = generate_embedding(snippet)
+                    emb_path = f"embeddings/{tmp_id}.npy"
+                    np.save(str(tmp_dir / emb_path), emb)
+
+                    # Build minimal step dict for locate
+                    screen_w = self._screenshot.shape[1] if self._screenshot is not None else 1920
+                    screen_h = self._screenshot.shape[0] if self._screenshot is not None else 1080
+                    cx, cy = bx + bw // 2, by + bh // 2
+
+                    locate_step = {
+                        "node_id": tmp_id,
+                        "snippet_path": snippet_path,
+                        "embedding_path": emb_path,
+                        "label": tag_data.get("label", ""),
+                        "element_type": tag_data.get("element_type", "unknown"),
+                        "anchors": {
+                            "visual_match": snippet_path,
+                            "ocr_text": tag_data.get("ocr_text"),
+                            "position_pct": {
+                                "x_pct": round(cx / screen_w, 4),
+                                "y_pct": round(cy / screen_h, 4),
+                            },
+                        },
+                    }
+
+                    locate_result = locate_element_from_step(
+                        locate_step, tmp_dir, skip_vlm=True,
+                    )
+
+                    if locate_result and locate_result.point:
+                        logger.info(
+                            "DRY-RUN: CLIP validation found element at (%d, %d) "
+                            "via %s (confidence=%.2f)",
+                            locate_result.point.x, locate_result.point.y,
+                            locate_result.method, locate_result.confidence,
+                        )
+                        center_x = locate_result.point.x
+                        center_y = locate_result.point.y
+                    else:
+                        logger.warning(
+                            "DRY-RUN: CLIP validation failed to re-locate element, "
+                            "using bbox center",
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "DRY-RUN: CLIP validation error: %s, using bbox center", e,
+                    )
+                finally:
+                    if tmp_dir is not None and tmp_dir.exists():
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+
             from core.executor import (
                 click as exec_click,
                 double_click as exec_double_click,
