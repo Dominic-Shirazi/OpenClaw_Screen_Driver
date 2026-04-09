@@ -29,6 +29,39 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Default max ratio between the "squashedness" of two bounding boxes.
+# 3.0 means a 10:1 element won't match a 3:1, but 3:1 will match 2:1.
+_DEFAULT_MAX_RATIO_DIFF = 3.0
+
+
+def _aspect_ratio_compatible(
+    saved_w: int,
+    saved_h: int,
+    candidate_w: int,
+    candidate_h: int,
+    max_ratio_diff: float = _DEFAULT_MAX_RATIO_DIFF,
+) -> bool:
+    """Check if two bounding boxes have compatible aspect ratios.
+
+    Uses the ratio-of-ratios approach: each box's aspect ratio is
+    expressed as ``max(w, h) / min(w, h)`` (always >= 1), then the
+    difference between the two is ``max(r1, r2) / min(r1, r2)``.
+
+    Args:
+        saved_w: Width of the saved reference snippet.
+        saved_h: Height of the saved reference snippet.
+        candidate_w: Width of the candidate bounding box.
+        candidate_h: Height of the candidate bounding box.
+        max_ratio_diff: Maximum tolerated ratio-of-ratios.
+
+    Returns:
+        True if the shapes are compatible.
+    """
+    saved_ratio = max(saved_w, saved_h) / max(min(saved_w, saved_h), 1)
+    cand_ratio = max(candidate_w, candidate_h) / max(min(candidate_w, candidate_h), 1)
+    ratio_diff = max(saved_ratio, cand_ratio) / max(min(saved_ratio, cand_ratio), 1)
+    return ratio_diff <= max_ratio_diff
+
 
 def _label_matches(target: str, candidate: str) -> bool:
     """Checks if target label matches candidate using word-boundary matching.
@@ -114,6 +147,17 @@ def locate_element(
     node_data = graph.get_node(node_id)
     hint_x, hint_y, sw, sh = _resolve_position_hint(node_data)
 
+    # Reference element dimensions for aspect-ratio gating.
+    # Populated from node bbox (w_pct/h_pct) or snippet image.
+    pos = node_data.get("relative_position", {})
+    ref_w: int | None = None
+    ref_h: int | None = None
+    w_pct = pos.get("w_pct", 0.0)
+    h_pct = pos.get("h_pct", 0.0)
+    if w_pct > 0 and h_pct > 0:
+        ref_w = int(w_pct * sw)
+        ref_h = int(h_pct * sh)
+
     # ------------------------------------------------------------------
     # Stage 1: OmniParser detect + CLIP match
     # ------------------------------------------------------------------
@@ -126,17 +170,33 @@ def locate_element(
             screen = screenshot_full()
             cfg = get_config()
             detector = get_detector()
+            snippet_h, snippet_w = snippet.shape[:2]
+            ref_w, ref_h = snippet_w, snippet_h
             result = detector.detect_and_match(
                 screen, snippet, hint_x or 0, hint_y or 0,
                 match_threshold=cfg.get("detection", {}).get("match_threshold", 0.7),
                 search_radius=cfg.get("detection", {}).get("search_radius", 400),
             )
             if result is not None:
-                logger.info(
-                    "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
-                    node_id[:8], result.point.x, result.point.y, result.confidence,
-                )
-                return result
+                # Aspect-ratio gate: reject candidates whose shape
+                # is wildly different from the saved snippet.
+                if result.rect is not None and not _aspect_ratio_compatible(
+                    snippet_w, snippet_h,
+                    result.rect.w, result.rect.h,
+                ):
+                    logger.debug(
+                        "OmniParser match for [%s] rejected: aspect ratio "
+                        "mismatch (snippet %dx%d vs candidate %dx%d)",
+                        node_id[:8], snippet_w, snippet_h,
+                        result.rect.w, result.rect.h,
+                    )
+                else:
+                    logger.info(
+                        "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
+                        node_id[:8], result.point.x, result.point.y,
+                        result.confidence,
+                    )
+                    return result
             logger.debug("OmniParser found no match for [%s]", node_id[:8])
         else:
             logger.debug("No snippet on disk for [%s], skipping Stage 1", node_id[:8])
@@ -178,6 +238,16 @@ def locate_element(
                 for win_w, win_h in window_sizes:
                     if win_w > crop_w or win_h > crop_h:
                         continue
+                    # Penalise windows whose aspect ratio
+                    # diverges from the saved snippet.
+                    ar_ok = (
+                        ref_w is None
+                        or ref_h is None
+                        or _aspect_ratio_compatible(
+                            ref_w, ref_h, win_w, win_h,
+                        )
+                    )
+                    ar_penalty = 1.0 if ar_ok else 0.5
                     for wy in range(0, crop_h - win_h + 1, stride):
                         for wx in range(0, crop_w - win_w + 1, stride):
                             tile = crop[wy:wy + win_h, wx:wx + win_w]
@@ -185,7 +255,7 @@ def locate_element(
                             tile_emb = generate_embedding(rgb_tile)
                             score = float(
                                 np.dot(saved_emb, tile_emb.T).item(),
-                            )
+                            ) * ar_penalty
                             if score > best_score:
                                 best_score = score
                                 # Convert tile center back to screen coords
@@ -338,6 +408,16 @@ def locate_element_from_step(
     hint_x: int | None = int(x_pct * sw) if x_pct is not None else None
     hint_y: int | None = int(y_pct * sh) if y_pct is not None else None
 
+    # Reference element dimensions for aspect-ratio gating.
+    # Populated from position_pct bbox or snippet image.
+    ref_w: int | None = None
+    ref_h: int | None = None
+    step_w_pct = position_pct.get("w_pct", 0.0)
+    step_h_pct = position_pct.get("h_pct", 0.0)
+    if step_w_pct > 0 and step_h_pct > 0:
+        ref_w = int(step_w_pct * sw)
+        ref_h = int(step_h_pct * sh)
+
     # ------------------------------------------------------------------
     # Stage 1: OmniParser detect + CLIP match
     # ------------------------------------------------------------------
@@ -351,6 +431,8 @@ def locate_element_from_step(
             snippet_path = routine_dir / snippet_rel
             snippet = cv2.imread(str(snippet_path))
             if snippet is not None:
+                snippet_h, snippet_w = snippet.shape[:2]
+                ref_w, ref_h = snippet_w, snippet_h
                 screen = screenshot_full()
                 cfg = get_config()
                 detector = get_detector()
@@ -360,11 +442,25 @@ def locate_element_from_step(
                     search_radius=cfg.get("detection", {}).get("search_radius", 400),
                 )
                 if result is not None:
-                    logger.info(
-                        "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
-                        node_id[:8], result.point.x, result.point.y, result.confidence,
-                    )
-                    return result
+                    # Aspect-ratio gate: reject candidates whose shape
+                    # is wildly different from the saved snippet.
+                    if result.rect is not None and not _aspect_ratio_compatible(
+                        snippet_w, snippet_h,
+                        result.rect.w, result.rect.h,
+                    ):
+                        logger.debug(
+                            "OmniParser match for [%s] rejected: aspect ratio "
+                            "mismatch (snippet %dx%d vs candidate %dx%d)",
+                            node_id[:8], snippet_w, snippet_h,
+                            result.rect.w, result.rect.h,
+                        )
+                    else:
+                        logger.info(
+                            "Located [%s] via OmniParser at (%d, %d) conf=%.2f",
+                            node_id[:8], result.point.x, result.point.y,
+                            result.confidence,
+                        )
+                        return result
                 logger.debug("OmniParser found no match for [%s]", node_id[:8])
             else:
                 logger.debug("Snippet file not found at %s, skipping Stage 1", snippet_path)
@@ -408,6 +504,16 @@ def locate_element_from_step(
                     for win_w, win_h in window_sizes:
                         if win_w > crop_w or win_h > crop_h:
                             continue
+                        # Penalise windows whose aspect ratio
+                        # diverges from the saved snippet.
+                        ar_ok = (
+                            ref_w is None
+                            or ref_h is None
+                            or _aspect_ratio_compatible(
+                                ref_w, ref_h, win_w, win_h,
+                            )
+                        )
+                        ar_penalty = 1.0 if ar_ok else 0.5
                         for wy in range(0, crop_h - win_h + 1, stride):
                             for wx in range(0, crop_w - win_w + 1, stride):
                                 tile = crop[wy:wy + win_h, wx:wx + win_w]
@@ -415,7 +521,7 @@ def locate_element_from_step(
                                 tile_emb = generate_embedding(rgb_tile)
                                 score = float(
                                     np.dot(saved_emb, tile_emb.T).item(),
-                                )
+                                ) * ar_penalty
                                 if score > best_score:
                                     best_score = score
                                     best_cx = rx + wx + win_w // 2
