@@ -263,6 +263,8 @@ class RecordSession:
         elif action == "dismiss":
             tag_data = self._controller.get_tag_data()
             self.on_tag_dismissed(tag_data or {})
+        elif action == "redraw":
+            self._handle_redraw()
         elif action == "accept_ai_bbox":
             self._accept_bbox()
         elif action == "keep_drag":
@@ -1437,6 +1439,21 @@ class RecordSession:
             )
             self._set_phase(RecordPhase.TAG_DIALOG)
             self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
+
+    def _handle_redraw(self) -> None:
+        """Handle 'Redraw Box' -- dismiss tag dialog, clear bbox, return to drawing.
+
+        Allows the user to re-draw the bounding box when the current
+        selection is wrong.  Similar to dismiss but explicitly signals
+        intent to retry the bbox rather than abandon the step entirely.
+        """
+        self._current_step = None
+        self._current_bbox = None
+        self._controller.dismiss_tag_dialog()
+        self._clear_scan()
+        self._set_phase(RecordPhase.AWAITING_CLICK)
+        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
+        logger.info("Redraw requested: returning to AWAITING_CLICK")
 
     def _handle_recapture(self) -> None:
         """Handle 'Recapture' -- discard current step, return to awaiting."""

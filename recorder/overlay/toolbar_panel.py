@@ -59,6 +59,7 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
     ],
     ToolbarMode.TAG_OPEN: [
         ("Confirm", "confirm"),
+        ("Redraw Box", "redraw"),
         ("Dismiss", "dismiss"),
         ("Skip", "skip"),
     ],

@@ -16,12 +16,14 @@ import logging
 import math
 from typing import Any
 
-from PyQt6.QtCore import QRectF, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QFont,
     QKeyEvent,
     QLinearGradient,
+    QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -563,6 +565,13 @@ class TagDialogPanel(QWidget):
 
         # Size the widget
         self.setFixedWidth(self._panel_width)
+
+        # Drag state for frameless window movement
+        self._drag_pos: QPoint | None = None
+        self._drag_zone_height: int = 40  # pixels from top edge
+
+        # Show move cursor when hovering the drag zone
+        self.setMouseTracking(True)
 
         logger.debug("TagDialogPanel created (QWidget-based)")
 
@@ -1140,6 +1149,53 @@ class TagDialogPanel(QWidget):
     # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Frameless window drag support
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        """Begin drag if the click is in the title/header drag zone.
+
+        Args:
+            event: The mouse press event.
+        """
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.position().y() < self._drag_zone_height
+        ):
+            self._drag_pos = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        """Move the dialog when dragging; update cursor in drag zone.
+
+        Args:
+            event: The mouse move event.
+        """
+        if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            # Update cursor based on whether the pointer is in the drag zone
+            if event.position().y() < self._drag_zone_height:
+                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
+            else:
+                self.unsetCursor()
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        """Clear drag state on mouse release.
+
+        Args:
+            event: The mouse release event.
+        """
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event: Any) -> None:
         """Paint card glow, highlight gradient, and loading spinner.
