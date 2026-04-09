@@ -292,18 +292,12 @@ class RecordSession:
         logger.debug("Toolbar action: %s (phase=%s)", action, self._phase.name)
 
         if action == "confirm":
-            if self._phase == RecordPhase.CONTEXT_CAPTURE:
-                self._on_context_skipped()
-            else:
-                tag_data = self._controller.get_tag_data()
-                if tag_data is not None:
-                    self.on_tag_confirmed(tag_data)
+            tag_data = self._controller.get_tag_data()
+            if tag_data is not None:
+                self.on_tag_confirmed(tag_data)
         elif action == "dismiss":
-            if self._phase == RecordPhase.CONTEXT_CAPTURE:
-                self._on_context_skipped()
-            else:
-                tag_data = self._controller.get_tag_data()
-                self.on_tag_dismissed(tag_data or {})
+            tag_data = self._controller.get_tag_data()
+            self.on_tag_dismissed(tag_data or {})
         elif action == "redraw":
             self._handle_redraw()
         elif action == "accept_ai_bbox":
@@ -385,17 +379,13 @@ class RecordSession:
         # Reset look_here flag after tag confirm
         self._is_look_here = False
 
-        # Reset context fields for this new step
+        # Reset context fields for this step
         self._context_bbox = None
         self._context_snippet_path = None
         self._context_embedding_path = None
 
-        # Transition to CONTEXT_CAPTURE (optional -- user can skip with Escape)
-        self._set_phase(RecordPhase.CONTEXT_CAPTURE)
-        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
-        if self._controller._view is not None:
-            self._controller._view.set_phase(RecordPhase.CONTEXT_CAPTURE)
-        logger.info("Context capture: draw context box or press Escape to skip")
+        # Go straight to countdown/dry-run
+        self._start_countdown()
 
     def on_tag_dismissed(self, data: dict) -> None:
         """Handle tag dialog dismissal -- discard step, return to awaiting.
