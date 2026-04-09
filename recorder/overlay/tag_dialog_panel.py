@@ -563,7 +563,7 @@ class TagDialogPanel(QWidget):
         # Register tick callback
         self._clock.register(self._tick)
 
-        # Size the widget
+        # Size the widget — fixed width, height managed via _settle_size()
         self.setFixedWidth(self._panel_width)
 
         # Drag state for frameless window movement
@@ -824,6 +824,24 @@ class TagDialogPanel(QWidget):
             dropdown.setCurrentIndex(idx)
 
     # ------------------------------------------------------------------
+    # Geometry helpers
+    # ------------------------------------------------------------------
+
+    def _settle_size(self) -> None:
+        """Collapse layout to final size in one step to avoid resize spam.
+
+        Unlocks the height constraint, lets the layout engine compute
+        the ideal size, then locks it with setFixedSize so Qt never
+        requests an intermediate geometry that Windows would adjust by
+        ~19 px (the DPI-rounding delta that triggers
+        QWindowsWindow::setGeometry warnings).
+        """
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        size = self.sizeHint()
+        self.setFixedSize(self._panel_width, size.height())
+
+    # ------------------------------------------------------------------
     # Action type change handler
     # ------------------------------------------------------------------
 
@@ -850,8 +868,8 @@ class TagDialogPanel(QWidget):
             if row is not None:
                 row.setVisible(key in visible_keys)
 
-        # Let layout recalculate
-        self.adjustSize()
+        # Collapse to final size in one step (avoids DPI resize spam)
+        self._settle_size()
 
     # ------------------------------------------------------------------
     # Show / dismiss
@@ -908,7 +926,7 @@ class TagDialogPanel(QWidget):
                 self._on_action_type_changed(action_w.currentIndex())
 
         # Compute position and show
-        self.adjustSize()
+        self._settle_size()
         x, y = self._compute_position(element_rect, screen_w, screen_h)
         self.move(int(x), int(y))
 
@@ -1028,7 +1046,7 @@ class TagDialogPanel(QWidget):
         if isinstance(action_w, _DropdownButton):
             self._on_action_type_changed(action_w.currentIndex())
 
-        self.adjustSize()
+        self._settle_size()
         self.update()
 
         logger.debug("TagDialogPanel populated with VLM data, loading=False")
