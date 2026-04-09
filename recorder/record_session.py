@@ -999,6 +999,12 @@ class RecordSession:
         except Exception as e:
             logger.warning("Detection worker error: %s", e)
 
+        logger.debug(
+            "Detection result: bbox=%s, florence_caption=%r, type_guess=%r",
+            result.get("bbox"),
+            result.get("florence_caption"),
+            result.get("type_guess"),
+        )
         self._bridge.detection_ready.emit(result)
 
     def _on_detection_ready(self, result: dict) -> None:
@@ -1189,6 +1195,12 @@ class RecordSession:
             "ocr_text": result.get("ocr_text"),
         }
 
+        logger.debug(
+            "VLM data for tag dialog: caption=%r, label=%r, type=%r",
+            vlm_data.get("caption"),
+            vlm_data.get("label"),
+            vlm_data.get("element_type"),
+        )
         self._controller.update_tag_dialog_data(vlm_data)
         self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
@@ -1441,19 +1453,22 @@ class RecordSession:
             self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
 
     def _handle_redraw(self) -> None:
-        """Handle 'Redraw Box' -- dismiss tag dialog, clear bbox, return to drawing.
+        """Handle 'Redraw Box' -- clear bbox, return to drawing.
 
-        Allows the user to re-draw the bounding box when the current
-        selection is wrong.  Similar to dismiss but explicitly signals
-        intent to retry the bbox rather than abandon the step entirely.
+        Works from both TAG_DIALOG and BBOX_EDITING phases.  Allows
+        the user to re-draw the bounding box when the current selection
+        is wrong.  Similar to dismiss but explicitly signals intent to
+        retry the bbox rather than abandon the step entirely.
         """
+        prev_phase = self._phase
         self._current_step = None
         self._current_bbox = None
-        self._controller.dismiss_tag_dialog()
+        if prev_phase == RecordPhase.TAG_DIALOG:
+            self._controller.dismiss_tag_dialog()
         self._clear_scan()
         self._set_phase(RecordPhase.AWAITING_CLICK)
         self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
-        logger.info("Redraw requested: returning to AWAITING_CLICK")
+        logger.info("Redraw requested (from %s): returning to AWAITING_CLICK", prev_phase.name)
 
     def _handle_recapture(self) -> None:
         """Handle 'Recapture' -- discard current step, return to awaiting."""

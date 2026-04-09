@@ -59,7 +59,6 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
     ],
     ToolbarMode.TAG_OPEN: [
         ("Confirm", "confirm"),
-        ("Redraw Box", "redraw"),
         ("Dismiss", "dismiss"),
         ("Skip", "skip"),
     ],
@@ -76,7 +75,8 @@ _MODE_BUTTONS: dict[ToolbarMode, list[tuple[str, str]]] = {
     ],
     ToolbarMode.BBOX_EDITING: [
         ("Accept AI Box", "accept_ai_bbox"),
-        ("Keep My Drag", "keep_drag"),
+        ("Keep My Box", "keep_drag"),
+        ("Redraw Box", "redraw"),
     ],
     ToolbarMode.UPDATE: [
         ("OK", "ok"),
