@@ -487,26 +487,20 @@ def generate_ai_text(prompt: str) -> str:
         if the VLM is unreachable or returns empty.
     """
     try:
-        from core.capture import screenshot_full
-        from core.vision import _call_vlm, _ndarray_to_tempfile
-
-        screenshot = screenshot_full()
-        tmp_path = _ndarray_to_tempfile(screenshot)
+        from core.vision import _call_vlm
 
         vlm_prompt = (
-            "Based on this screen context, generate the following text: "
-            f"{prompt}\n\n"
-            "Respond with ONLY the text to type, nothing else. "
-            "Do not include quotes, explanations, or markdown formatting."
+            "You are an automation assistant. The user is about to type "
+            "into a text field on screen. "
+            "Their instruction for what to type is: " + prompt + "\n\n"
+            "Generate ONLY the text that should be typed into the field. "
+            "Do NOT describe the screen. Do NOT include quotes or formatting. "
+            "Just output the raw text to type, nothing else."
         )
-        try:
-            t0 = time.monotonic()
-            result = _call_vlm(vlm_prompt, [tmp_path])
-            elapsed = time.monotonic() - t0
-            logger.info("AI text VLM call took %.1fs", elapsed)
-        finally:
-            from pathlib import Path
-            Path(tmp_path).unlink(missing_ok=True)
+        t0 = time.monotonic()
+        result = _call_vlm(vlm_prompt, [])
+        elapsed = time.monotonic() - t0
+        logger.info("AI text VLM call took %.1fs", elapsed)
 
         result = result.strip()
         if result:

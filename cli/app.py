@@ -131,6 +131,7 @@ def run_command(
     speed: float = typer.Option(1.0, "--speed", help="Replay speed multiplier"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
     param: Optional[list[str]] = typer.Option(None, "--param", help="Parameters as key=value"),
+    validate: bool = typer.Option(False, "--validate", help="Validate each step with VLM (slower)"),
 ) -> None:
     """Run (replay) a recorded routine."""
     if speed <= 0:
@@ -194,6 +195,7 @@ def run_command(
             try:
                 run_result_holder[0] = run_routine(
                     routine_dir=run_path, callback=adapter,
+                    validate_steps=validate,
                 )
             except Exception as exc:
                 run_exc_holder[0] = exc

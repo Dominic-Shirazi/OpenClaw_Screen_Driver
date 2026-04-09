@@ -702,6 +702,7 @@ def run_routine(
     dry_run: bool = False,
     abort_event: threading.Event | None = None,
     prompt_timeout_s: float | None = None,
+    validate_steps: bool = False,
 ) -> RunResult:
     """Execute a routine from its directory.
 
@@ -935,29 +936,34 @@ def run_routine(
                         "purpose": "after_action", "step_index": i,
                     })
 
-                try:
-                    from mapper.validator import validate_action
+                if validate_steps:
+                    try:
+                        from mapper.validator import validate_action
 
-                    validation = validate_action(
-                        before_img, after_img,
-                        f"{action} on '{label}'",
-                    )
-                    if not validation.success:
-                        _emit(callback, RunEvent.VALIDATION_FAILED, {
-                            "step_index": i,
-                            "confidence": validation.confidence,
-                            "notes": validation.notes,
-                        })
-                        logger.warning(
-                            "Step %d validation failed: %s", i, validation.notes,
+                        val_t0 = time.monotonic()
+                        validation = validate_action(
+                            before_img, after_img,
+                            f"{action} on '{label}'",
                         )
-                    else:
-                        _emit(callback, RunEvent.VALIDATION_PASSED, {
-                            "step_index": i,
-                            "confidence": validation.confidence,
-                        })
-                except Exception as exc:
-                    logger.debug("Validation error (non-fatal): %s", exc)
+                        logger.info("Step %d validation took %.1fs", i, time.monotonic() - val_t0)
+                        if not validation.success:
+                            _emit(callback, RunEvent.VALIDATION_FAILED, {
+                                "step_index": i,
+                                "confidence": validation.confidence,
+                                "notes": validation.notes,
+                            })
+                            logger.warning(
+                                "Step %d validation failed: %s", i, validation.notes,
+                            )
+                        else:
+                            _emit(callback, RunEvent.VALIDATION_PASSED, {
+                                "step_index": i,
+                                "confidence": validation.confidence,
+                            })
+                    except Exception as exc:
+                        logger.debug("Validation error (non-fatal): %s", exc)
+                else:
+                    logger.debug("Step %d validation skipped (validate_steps=False)", i)
 
             step_elapsed = time.monotonic() - step_t0
             logger.info(
