@@ -470,50 +470,35 @@ def respond_to_prompt(response_text: str) -> None:
     logger.info("Prompt responded: %s", response_text[:80])
 
 
-def generate_ai_text(prompt: str) -> str:
-    """Use the VLM to generate contextual text based on current screen state.
+def generate_ai_text(prompt: str, dry_run: bool = False) -> str:
+    """Pause execution and request text from the calling agent.
 
-    Takes a screenshot of the current screen, sends it to the VLM along with
-    the user's prompt, and returns the generated text.  Intended for use when
-    a step has ``ai_generate_text: True`` -- the prompt (from ``text_to_type``)
-    describes what kind of text to produce rather than being literal text.
+    When a step has ai_generate_text=True, the text_to_type field is a
+    description of what text is needed. This function blocks until the
+    caller (an AI agent, API client, etc.) provides the actual text
+    via the /respond endpoint.
 
     Args:
-        prompt: Description of the text to generate (e.g. "a friendly
-            greeting email responding to the message on screen").
+        prompt: Description of the text field (shown to caller).
+        dry_run: If True, return placeholder text without blocking.
 
     Returns:
-        The VLM-generated text string.  Falls back to *prompt* verbatim
-        if the VLM is unreachable or returns empty.
+        The text provided by the caller.
     """
-    try:
-        from core.vision import _call_vlm
+    if dry_run:
+        logger.info("ai_generate_text dry-run: would block for caller input")
+        return prompt  # Use placeholder during dry-run
 
-        vlm_prompt = (
-            "You are an automation assistant. The user is about to type "
-            "into a text field on screen. "
-            "Their instruction for what to type is: " + prompt + "\n\n"
-            "Generate ONLY the text that should be typed into the field. "
-            "Do NOT describe the screen. Do NOT include quotes or formatting. "
-            "Just output the raw text to type, nothing else."
-        )
-        t0 = time.monotonic()
-        result = _call_vlm(vlm_prompt, [])
-        elapsed = time.monotonic() - t0
-        logger.info("AI text VLM call took %.1fs", elapsed)
+    # Use the existing prompt_user mechanism to ask the caller
+    question = f"Enter text for: {prompt}"
+    logger.info("ai_generate_text: blocking for caller input — %s", prompt[:80])
+    response = prompt_user_blocking(question)
+    if response:
+        logger.info("ai_generate_text: received %d chars from caller", len(response))
+        return response
 
-        result = result.strip()
-        if result:
-            logger.info("AI generated text (%d chars) for prompt: %s",
-                        len(result), prompt[:60])
-            return result
-
-        logger.warning("VLM returned empty text, falling back to literal prompt")
-        return prompt
-
-    except Exception:
-        logger.error("AI text generation failed, falling back to literal prompt", exc_info=True)
-        return prompt
+    logger.warning("ai_generate_text: empty response, using placeholder")
+    return prompt
 
 
 def select_all_extract(dry_run: bool = False) -> str:

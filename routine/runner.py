@@ -498,7 +498,7 @@ def _dispatch_action(
         text = step.get("text_to_type", "")
         if step.get("ai_generate_text"):
             from core.executor import generate_ai_text
-            text = generate_ai_text(text)
+            text = generate_ai_text(text, dry_run=dry_run)
         type_text(text, dry_run=dry_run)
         if step.get("press_enter"):
             press_enter(dry_run=dry_run)
