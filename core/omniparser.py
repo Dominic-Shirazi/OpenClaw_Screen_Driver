@@ -180,6 +180,7 @@ class OmniParserProvider:
         hint_y: int,
         match_threshold: float = 0.7,
         search_radius: int = 400,
+        text_hint: str | None = None,
     ) -> LocateResult | None:
         """Detect all elements, CLIP-match saved snippet against crops.
 
@@ -197,6 +198,9 @@ class OmniParserProvider:
             hint_y: Expected Y position from recording.
             match_threshold: Minimum CLIP cosine similarity.
             search_radius: Pixel radius around hint to search.
+            text_hint: Optional descriptive text (e.g. "Maximize Window
+                Icon button") used as a CLIP text-image tiebreaker when
+                multiple candidates score within 0.05 of the best.
 
         Returns:
             LocateResult if match found, None otherwise.
@@ -228,11 +232,17 @@ class OmniParserProvider:
         # Aspect ratio of the saved snippet (width / height)
         snippet_ar = saved_snippet.shape[1] / max(saved_snippet.shape[0], 1)
 
-        # Compare against each candidate crop
+        # Compare against each candidate crop — store features for tiebreaker
         best_combined = -1.0
         best_clip_score = -1.0
         best_candidate = None
         best_dist = 0.0
+        # Parallel lists for tiebreaker: each scored candidate's data
+        scored_candidates: list[dict[str, Any]] = []
+        scored_clip_scores: list[float] = []
+        scored_combined: list[float] = []
+        scored_dists: list[float] = []
+        scored_embeddings: list[np.ndarray] = []
 
         sh, sw = screenshot.shape[:2]
         for c in nearby:
@@ -268,6 +278,13 @@ class OmniParserProvider:
             position_weight = 1.0 / (1.0 + dist / 250.0)
             combined_score = clip_score * position_weight
 
+            # Store for tiebreaker
+            scored_candidates.append(c)
+            scored_clip_scores.append(clip_score)
+            scored_combined.append(combined_score)
+            scored_dists.append(dist)
+            scored_embeddings.append(crop_emb)
+
             if combined_score > best_combined:
                 best_combined = combined_score
                 best_clip_score = clip_score
@@ -280,6 +297,68 @@ class OmniParserProvider:
                 best_clip_score, match_threshold,
             )
             return None
+
+        # --- CLIP text tiebreaker ---
+        # If any runner-up scored within 0.05 of the winner's raw CLIP
+        # score, use text-image similarity to disambiguate.
+        if text_hint and scored_clip_scores:
+            tied_indices = [
+                i for i, s in enumerate(scored_clip_scores)
+                if best_clip_score - s <= 0.05 and s >= match_threshold
+            ]
+            if len(tied_indices) > 1:
+                try:
+                    import torch
+
+                    from core.embeddings import _clip_model, _clip_processor, _load_model
+
+                    _load_model()  # ensure model is ready
+                    text_inputs = _clip_processor(
+                        text=[text_hint], return_tensors="pt", padding=True,
+                    )
+                    # Move to same device as model
+                    device = next(_clip_model.parameters()).device
+                    text_inputs = {
+                        k: v.to(device) for k, v in text_inputs.items()
+                    }
+                    with torch.no_grad():
+                        text_features = _clip_model.get_text_features(**text_inputs)
+                    text_features = text_features / text_features.norm(
+                        p=2, dim=-1, keepdim=True,
+                    )
+                    text_features_np = text_features.cpu().numpy().astype("float32")
+
+                    best_text_sim = -1.0
+                    best_tied_idx = -1
+                    for ti in tied_indices:
+                        cand_emb = scored_embeddings[ti]
+                        text_sim = float(
+                            np.dot(text_features_np, cand_emb.T).item(),
+                        )
+                        if text_sim > best_text_sim:
+                            best_text_sim = text_sim
+                            best_tied_idx = ti
+
+                    if best_tied_idx >= 0:
+                        winner = scored_candidates[best_tied_idx]
+                        wr = winner["rect"]
+                        wcx = wr["x"] + wr["w"] // 2
+                        wcy = wr["y"] + wr["h"] // 2
+                        logger.info(
+                            "CLIP text tiebreaker: '%s' resolved %d candidates "
+                            "— winner at (%d,%d) text_sim=%.3f",
+                            text_hint,
+                            len(tied_indices),
+                            wcx,
+                            wcy,
+                            best_text_sim,
+                        )
+                        best_candidate = winner
+                        best_clip_score = scored_clip_scores[best_tied_idx]
+                        best_combined = scored_combined[best_tied_idx]
+                        best_dist = scored_dists[best_tied_idx]
+                except Exception as e:
+                    logger.debug("CLIP text tiebreaker failed: %s", e)
 
         r = best_candidate["rect"]
         center = Point(r["x"] + r["w"] // 2, r["y"] + r["h"] // 2)

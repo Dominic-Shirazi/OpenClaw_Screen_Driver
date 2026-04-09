@@ -182,10 +182,20 @@ def locate_element(
             detector = get_detector()
             snippet_h, snippet_w = snippet.shape[:2]
             ref_w, ref_h = snippet_w, snippet_h
+            # Build text hint from node metadata for tiebreaker
+            _hint_parts: list[str] = []
+            if node_data.get("label"):
+                _hint_parts.append(node_data["label"])
+            if node_data.get("element_type"):
+                _hint_parts.append(node_data["element_type"])
+            if node_data.get("caption"):
+                _hint_parts.append(node_data["caption"])
+            _text_hint = " \u2014 ".join(_hint_parts) if _hint_parts else None
             result = detector.detect_and_match(
                 screen, snippet, hint_x or 0, hint_y or 0,
                 match_threshold=cfg.get("detection", {}).get("match_threshold", 0.7),
                 search_radius=cfg.get("detection", {}).get("search_radius", 400),
+                text_hint=_text_hint,
             )
             if result is not None:
                 # Aspect-ratio gate: reject candidates whose shape
@@ -524,6 +534,15 @@ def _try_context_scoped_locate(
                     # Search within the crop — hint at crop centre.
                     crop_cx = zw_padded // 2
                     crop_cy = zh_padded // 2
+                    # Build text hint from step metadata
+                    _hint_parts: list[str] = []
+                    if step.get("label"):
+                        _hint_parts.append(step["label"])
+                    if step.get("element_type"):
+                        _hint_parts.append(step["element_type"])
+                    if step.get("caption"):
+                        _hint_parts.append(step["caption"])
+                    _text_hint = " \u2014 ".join(_hint_parts) if _hint_parts else None
                     result = detector.detect_and_match(
                         crop,
                         snippet,
@@ -533,6 +552,7 @@ def _try_context_scoped_locate(
                             "match_threshold", 0.7,
                         ),
                         search_radius=max(zw_padded, zh_padded),
+                        text_hint=_text_hint,
                     )
                     if result is not None:
                         if result.rect is not None and not _aspect_ratio_compatible(
@@ -758,10 +778,20 @@ def locate_element_from_step(
                 screen = screenshot_full()
                 cfg = get_config()
                 detector = get_detector()
+                # Build text hint from step metadata for tiebreaker
+                _hint_parts: list[str] = []
+                if step.get("label"):
+                    _hint_parts.append(step["label"])
+                if step.get("element_type"):
+                    _hint_parts.append(step["element_type"])
+                if step.get("caption"):
+                    _hint_parts.append(step["caption"])
+                _text_hint = " \u2014 ".join(_hint_parts) if _hint_parts else None
                 result = detector.detect_and_match(
                     screen, snippet, hint_x or 0, hint_y or 0,
                     match_threshold=cfg.get("detection", {}).get("match_threshold", 0.7),
                     search_radius=cfg.get("detection", {}).get("search_radius", 400),
+                    text_hint=_text_hint,
                 )
                 if result is not None:
                     # Aspect-ratio gate: reject candidates whose shape
