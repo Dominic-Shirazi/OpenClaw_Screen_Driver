@@ -470,6 +470,55 @@ def respond_to_prompt(response_text: str) -> None:
     logger.info("Prompt responded: %s", response_text[:80])
 
 
+def generate_ai_text(prompt: str) -> str:
+    """Use the VLM to generate contextual text based on current screen state.
+
+    Takes a screenshot of the current screen, sends it to the VLM along with
+    the user's prompt, and returns the generated text.  Intended for use when
+    a step has ``ai_generate_text: True`` -- the prompt (from ``text_to_type``)
+    describes what kind of text to produce rather than being literal text.
+
+    Args:
+        prompt: Description of the text to generate (e.g. "a friendly
+            greeting email responding to the message on screen").
+
+    Returns:
+        The VLM-generated text string.  Falls back to *prompt* verbatim
+        if the VLM is unreachable or returns empty.
+    """
+    try:
+        from core.capture import screenshot_full
+        from core.vision import _call_vlm, _ndarray_to_tempfile
+
+        screenshot = screenshot_full()
+        tmp_path = _ndarray_to_tempfile(screenshot)
+
+        vlm_prompt = (
+            "Based on this screen context, generate the following text: "
+            f"{prompt}\n\n"
+            "Respond with ONLY the text to type, nothing else. "
+            "Do not include quotes, explanations, or markdown formatting."
+        )
+        try:
+            result = _call_vlm(vlm_prompt, [tmp_path])
+        finally:
+            from pathlib import Path
+            Path(tmp_path).unlink(missing_ok=True)
+
+        result = result.strip()
+        if result:
+            logger.info("AI generated text (%d chars) for prompt: %s",
+                        len(result), prompt[:60])
+            return result
+
+        logger.warning("VLM returned empty text, falling back to literal prompt")
+        return prompt
+
+    except Exception as e:
+        logger.warning("AI text generation failed (%s), falling back to literal prompt", e)
+        return prompt
+
+
 def select_all_extract(dry_run: bool = False) -> str:
     """Select all text and extract via clipboard, with VLM fallback.
 

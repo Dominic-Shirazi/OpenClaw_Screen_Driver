@@ -113,6 +113,7 @@ def build_v1_step(
     context_bbox: dict[str, int] | None = None,
     context_snippet_path: str | None = None,
     context_embedding_path: str | None = None,
+    ai_generate_text: bool = False,
 ) -> dict[str, Any]:
     """Build a v1 step dict from raw recorder step data.
 
@@ -175,6 +176,7 @@ def build_v1_step(
     # Action-specific fields
     if action == "type":
         result["text_to_type"] = tag_data.get("text_to_type", "")
+        result["ai_generate_text"] = ai_generate_text
         result["press_enter"] = tag_data.get("press_enter", False)
     elif action == "scroll":
         result["scroll"] = _parse_direction_amount(

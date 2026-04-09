@@ -94,6 +94,7 @@ def _step_to_json(step: dict, index: int, screen_w: int, screen_h: int) -> dict:
         context_bbox=ctx_bbox_dict,
         context_snippet_path=step.get("context_snippet_path"),
         context_embedding_path=step.get("context_embedding_path"),
+        ai_generate_text=step.get("tag_data", {}).get("ai_generate_text", False),
     )
 
 

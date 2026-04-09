@@ -112,7 +112,7 @@ _TYPE_GROUPS: list[tuple[str, list[str]]] = [
 
 # Conditional field visibility rules: action_type -> list of field keys
 _CONDITIONAL_FIELDS: dict[str, list[str]] = {
-    "type": ["text_to_type", "press_enter"],
+    "type": ["text_to_type", "press_enter", "ai_generate_text"],
     "scroll": ["direction_amount"],
     "wait": ["condition_timeout"],
     "click_drag": ["drag_target_hint"],
@@ -134,9 +134,9 @@ _HELPER_TIPS: dict[str, str] = {
 
 # All conditional field keys
 _ALL_CONDITIONAL: set[str] = {
-    "text_to_type", "press_enter", "direction_amount",
-    "condition_timeout", "drag_target_hint", "vlm_prompt",
-    "question_text",
+    "text_to_type", "press_enter", "ai_generate_text",
+    "direction_amount", "condition_timeout", "drag_target_hint",
+    "vlm_prompt", "question_text",
 }
 
 # ---------------------------------------------------------------------------
@@ -711,6 +711,20 @@ class TagDialogPanel(QWidget):
         self._field_rows["press_enter"] = press_enter_container
         main_layout.addWidget(press_enter_container)
 
+        # AI generates text checkbox (action_type == "type")
+        ai_gen_text = QCheckBox("AI generates text at runtime")
+        ai_gen_text.setFont(self._make_font(FONT_SIZE_INPUT))
+        ai_gen_text.stateChanged.connect(self._on_ai_generate_toggled)
+        self._widgets["ai_generate_text"] = ai_gen_text
+        ai_gen_container = QWidget()
+        ai_gen_container.setStyleSheet("background: transparent;")
+        ag_layout = QVBoxLayout(ai_gen_container)
+        ag_layout.setContentsMargins(0, 0, 0, 0)
+        ag_layout.setSpacing(2)
+        ag_layout.addWidget(ai_gen_text)
+        self._field_rows["ai_generate_text"] = ai_gen_container
+        main_layout.addWidget(ai_gen_container)
+
         # Direction/Amount (action_type == "scroll")
         dir_edit = QLineEdit()
         dir_edit.setPlaceholderText("Direction and pixel amount to scroll")
@@ -871,6 +885,23 @@ class TagDialogPanel(QWidget):
         # Collapse to final size in one step (avoids DPI resize spam)
         self._settle_size()
 
+    def _on_ai_generate_toggled(self, state: int) -> None:
+        """Toggle text_to_type placeholder when AI generation is checked.
+
+        When checked, the text field becomes a prompt/instruction field.
+        When unchecked, it reverts to a literal text entry field.
+
+        Args:
+            state: Qt check state (0=unchecked, 2=checked).
+        """
+        text_w = self._widgets.get("text_to_type")
+        if not isinstance(text_w, QLineEdit):
+            return
+        if state:
+            text_w.setPlaceholderText("Describe what text to generate...")
+        else:
+            text_w.setPlaceholderText("Text to enter...")
+
     # ------------------------------------------------------------------
     # Show / dismiss
     # ------------------------------------------------------------------
@@ -910,6 +941,11 @@ class TagDialogPanel(QWidget):
             w = self._widgets.get(key)
             if isinstance(w, QLineEdit):
                 w.clear()
+
+        # Reset checkboxes
+        ai_gen_w = self._widgets.get("ai_generate_text")
+        if isinstance(ai_gen_w, QCheckBox):
+            ai_gen_w.setChecked(False)
 
         if vlm_data is None:
             # Loading state — show spinner, hide all form rows
@@ -999,6 +1035,11 @@ class TagDialogPanel(QWidget):
             w = self._widgets["press_enter"]
             if isinstance(w, QCheckBox):
                 w.setChecked(bool(vlm_data["press_enter"]))
+
+        # Default ai_generate_text to False unless explicitly set
+        ai_gen_w = self._widgets.get("ai_generate_text")
+        if isinstance(ai_gen_w, QCheckBox):
+            ai_gen_w.setChecked(bool(vlm_data.get("ai_generate_text", False)))
 
         if edit_mode:
             # Pre-fill label/caption instantly, no typewriter
@@ -1152,6 +1193,10 @@ class TagDialogPanel(QWidget):
         press_w = self._widgets.get("press_enter")
         if isinstance(press_w, QCheckBox):
             data["press_enter"] = press_w.isChecked()
+
+        ai_gen_w = self._widgets.get("ai_generate_text")
+        if isinstance(ai_gen_w, QCheckBox):
+            data["ai_generate_text"] = ai_gen_w.isChecked()
 
         return data
 
