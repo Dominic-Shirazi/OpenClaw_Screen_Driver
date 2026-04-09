@@ -1216,6 +1216,8 @@ class RecordSession:
             "confidence": result.get("confidence", 0.0),
             "ocr_text": result.get("ocr_text"),
         }
+        if self._is_look_here:
+            vlm_data["action_type"] = "read"
 
         logger.debug(
             "VLM data for tag dialog: caption=%r, label=%r, type=%r",
@@ -1250,6 +1252,8 @@ class RecordSession:
             "confidence": 0.0,
             "ocr_text": None,
         }
+        if self._is_look_here:
+            partial_data["action_type"] = "read"
 
         self._controller.update_tag_dialog_data(partial_data)
         self._controller.set_toolbar_mode(ToolbarMode.TAG_OPEN)
