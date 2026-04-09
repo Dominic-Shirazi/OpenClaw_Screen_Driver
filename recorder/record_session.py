@@ -392,6 +392,7 @@ class RecordSession:
 
         # Transition to CONTEXT_CAPTURE (optional -- user can skip with Escape)
         self._set_phase(RecordPhase.CONTEXT_CAPTURE)
+        self._controller.set_toolbar_mode(ToolbarMode.RECORDING)
         if self._controller._view is not None:
             self._controller._view.set_phase(RecordPhase.CONTEXT_CAPTURE)
         logger.info("Context capture: draw context box or press Escape to skip")
@@ -513,18 +514,31 @@ class RecordSession:
         self._start_countdown()
 
     def _start_countdown(self) -> None:
-        """Transition to COUNTDOWN and start the 3-2-1 dry-run timer."""
+        """Transition to COUNTDOWN and start the 3-2-1 dry-run timer.
+
+        Shows a brief 'Release your mouse...' pause (1.5 s) before the
+        visible 3-2-1 countdown so the user has time to let go.
+        """
         self._set_phase(RecordPhase.COUNTDOWN)
         self._controller.set_toolbar_mode(ToolbarMode.DRY_RUN)
+        logger.info("Release-mouse pause (1.5 s) before countdown")
+        self._controller.set_replay_status("Please release your mouse...")
 
-        widget = self._controller.show_countdown(3)
-        if widget is not None:
-            # Disconnect before connect to prevent signal accumulation
-            try:
-                widget.countdown_finished.disconnect(self._on_countdown_finished)
-            except TypeError:
-                pass  # No existing connection -- that's fine
-            widget.countdown_finished.connect(self._on_countdown_finished)
+        def _begin_countdown() -> None:
+            """Actually show the 3-2-1 countdown after the release pause."""
+            self._controller.set_replay_status("")
+            widget = self._controller.show_countdown(3)
+            if widget is not None:
+                # Disconnect before connect to prevent signal accumulation
+                try:
+                    widget.countdown_finished.disconnect(
+                        self._on_countdown_finished,
+                    )
+                except TypeError:
+                    pass  # No existing connection -- that's fine
+                widget.countdown_finished.connect(self._on_countdown_finished)
+
+        QTimer.singleShot(1500, _begin_countdown)
 
     def on_save_requested(self) -> None:
         """Handle Ctrl+Q -- save all accumulated steps.
@@ -1482,9 +1496,9 @@ class RecordSession:
         # so it CANNOT intercept clicks (e.g. second press of a double-click).
         # The 150ms pre-delay in _execute_dry_run gives time for the hide to
         # propagate through the compositor before any input is sent.
-        logger.info("DRY-RUN: calling hide_for_capture()")
-        self._controller.hide_for_capture()
-        logger.info("DRY-RUN: hide_for_capture() returned")
+        logger.info("DRY-RUN: calling hide_hud_for_execution()")
+        self._controller.hide_hud_for_execution()
+        logger.info("DRY-RUN: hide_hud_for_execution() returned")
 
         # Flush Qt event loop + Win32 compositor to ensure overlay is truly gone
         from PyQt6.QtWidgets import QApplication
@@ -1694,12 +1708,12 @@ class RecordSession:
         # Re-show overlay before restoring interaction state.
         # Must happen before set_click_through(False) so the window is
         # visible when we re-enable hit-testing on it.
-        logger.info("DRY-RUN: calling show_after_capture()")
-        self._controller.show_after_capture()
+        logger.info("DRY-RUN: calling show_hud_after_execution()")
+        self._controller.show_hud_after_execution()
         # Flush Qt event loop to ensure overlay is fully visible before restoring interaction
         from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
-        logger.info("DRY-RUN: show_after_capture() returned, restoring RECORDING state")
+        logger.info("DRY-RUN: show_hud_after_execution() returned, restoring RECORDING state")
         self._controller.set_click_through(False)
         # Switch back to red shimmer for user interaction
         if self._controller._view is not None:

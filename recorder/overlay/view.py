@@ -257,6 +257,57 @@ class OverlayView(QGraphicsView):
         # target_highlight and camera_flash intentionally NOT restored (ephemeral)
         self._clock.start()
 
+    def hide_hud_for_execution(self) -> None:
+        """Hide HUD elements but keep shimmer visible during step execution.
+
+        Unlike ``hide_for_capture()`` which hides the entire window for
+        clean screenshots, this method only hides interactive/HUD panels
+        so the shimmer border continues animating (in REPLAYING/purple
+        state) to give the user visual feedback that the system is
+        executing a step.
+        """
+        if self._tag_dialog is not None:
+            self._tag_dialog.hide()
+        if self._toolbar is not None:
+            self._toolbar.setVisible(False)
+        if self._countdown is not None:
+            self._countdown.setVisible(False)
+        if self._abort_panel is not None:
+            self._abort_panel.setVisible(False)
+        if self._status_badge is not None:
+            self._status_badge.setVisible(False)
+        if self._target_highlight is not None:
+            self._target_highlight.setVisible(False)
+        if self._camera_flash is not None:
+            self._camera_flash.setVisible(False)
+        if self._mode_indicator is not None:
+            self._mode_indicator.setVisible(False)
+        if self._mini_dialog is not None:
+            self._mini_dialog.setVisible(False)
+        self.clear_rubber_band()
+        # Keep shimmer visible and clock running so the border animates
+
+    def show_hud_after_execution(self) -> None:
+        """Restore HUD elements after step execution completes.
+
+        Counterpart to ``hide_hud_for_execution()``.  Re-shows panels
+        that were visible before execution started.
+        """
+        if self._mode_indicator is not None:
+            self._mode_indicator.setVisible(True)
+        if self._tag_dialog is not None and self._tag_dialog._target_opacity > 0:
+            self._tag_dialog.show()
+            self._tag_dialog.raise_()
+            self._tag_dialog.activateWindow()
+        if self._toolbar is not None and self._toolbar._target_opacity > 0:
+            self._toolbar.setVisible(True)
+        if self._countdown is not None and self._countdown._remaining > 0:
+            self._countdown.setVisible(True)
+        if self._status_badge is not None and self._status_badge._text:
+            self._status_badge.setVisible(True)
+        # target_highlight, camera_flash, abort_panel intentionally NOT
+        # restored (ephemeral or user-triggered)
+
     # ------------------------------------------------------------------
     # HUD panel management
     # ------------------------------------------------------------------

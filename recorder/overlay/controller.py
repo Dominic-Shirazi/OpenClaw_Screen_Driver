@@ -141,6 +141,16 @@ class OverlayController:
         if self._view is not None:
             self._view.show_after_capture()
 
+    def hide_hud_for_execution(self) -> None:
+        """Hide HUD elements but keep shimmer visible during dry-run execution."""
+        if self._view is not None:
+            self._view.hide_hud_for_execution()
+
+    def show_hud_after_execution(self) -> None:
+        """Restore HUD elements after dry-run execution completes."""
+        if self._view is not None:
+            self._view.show_hud_after_execution()
+
     def set_bboxes(self, bboxes: list[dict[str, Any]]) -> None:
         """Render bounding boxes on the overlay.
 
