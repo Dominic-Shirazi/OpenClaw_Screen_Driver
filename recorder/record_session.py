@@ -292,12 +292,18 @@ class RecordSession:
         logger.debug("Toolbar action: %s (phase=%s)", action, self._phase.name)
 
         if action == "confirm":
-            tag_data = self._controller.get_tag_data()
-            if tag_data is not None:
-                self.on_tag_confirmed(tag_data)
+            if self._phase == RecordPhase.CONTEXT_CAPTURE:
+                self._on_context_skipped()
+            else:
+                tag_data = self._controller.get_tag_data()
+                if tag_data is not None:
+                    self.on_tag_confirmed(tag_data)
         elif action == "dismiss":
-            tag_data = self._controller.get_tag_data()
-            self.on_tag_dismissed(tag_data or {})
+            if self._phase == RecordPhase.CONTEXT_CAPTURE:
+                self._on_context_skipped()
+            else:
+                tag_data = self._controller.get_tag_data()
+                self.on_tag_dismissed(tag_data or {})
         elif action == "redraw":
             self._handle_redraw()
         elif action == "accept_ai_bbox":
