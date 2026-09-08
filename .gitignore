@@ -58,3 +58,7 @@ docker-compose.override.yml
 
 # AgentFiles (local agent state)
 .agentfiles/
+
+# TorchScript / large model exports (never commit)
+*.ts
+=*
