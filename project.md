@@ -1,5 +1,19 @@
 # Project: OCSD (OpenClaw Screen Driver)
 
+## STATUS 2026-09-08: PROJECT LIKELY DEAD — READ THIS FIRST
+
+Verdict after a repo audit on head_pc (Sep 8) and a market check the same day:
+
+- **The token-cost pitch is gone.** OpenAI Codex Record & Replay (Jun 18 2026, macOS) and Anthropic's record-a-skill feature deliver "show it once, it repeats" to consumers on a $20/mo plan. Under the hood theirs keep the model in the loop every step; OCSD's zero-token deterministic replay is technically different but the buyer cannot tell.
+- **The determinism pitch was never proven.** All 6 replay logs in logs/replays failed; every locate fell through to OCR. The CLIP/FAISS/Florence cascade never re-found an element end to end.
+- **Cost math for a single user is trivial.** One 20-step process, 22 runs/month, costs ~$20 on ChatGPT Plus or ~$15-45 on the raw API. Nobody builds this to save that.
+- **Remaining niche:** local-only models that cannot drive a GUI, screens that cannot leave the building, or fleet-scale volume. The founder knows nobody in those groups. UiPath already owns the enterprise version.
+- **Original motivation was dated:** built when computer use was new and expensive, for a Mac Mini fleet sold to OpenClaw users that may no longer exist.
+
+If someone revives this: the only design worth building is in the Sep 8 audit — window/accessibility anchor, multi-scale OpenCV template match on a context crop with expanding search rings and early exit, scoped OCR, one small local grounding model, then halt and ask. Never blind-click. Drop CLIP/FAISS/Florence from replay; OmniParser proposes boxes at record time only. Prove it on tests/fixtures/login.html (5 steps, resize browser, replay 3x) before touching anything else.
+
+Code state: `main` has the Apr 8 bug-fix marathon and QWidget overlay; `feat/remaining-v1-tasks` adds the Apr 9 context-box, AI-text, and locate-timeout work and was never merged.
+
 ## Current Plan Summary
 Screen automation tool that records user interactions as "routines" and replays them using computer vision. PyQt6 overlay for recording HUD, Ollama VLM for element detection, human-like mouse/keyboard input via human_mouse_moves + human_typing libraries. 6 of 11 UI/UX issues fixed (2026-04-07). Remaining: tag dialog draggable (#6A), VLM prompt rewrite (#6C), loading feedback (#7), API mark_waiting (#8), CLI dedup (#9), shimmer polish (#10), startup animation (#11).
 
